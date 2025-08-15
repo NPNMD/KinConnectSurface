@@ -38,10 +38,19 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
         const apiKey = import.meta.env.VITE_GOOGLE_CALENDAR_API_KEY;
         const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
         
+        console.log('📅 Checking Google Calendar API credentials...');
+        console.log('📅 API Key available:', !!apiKey);
+        console.log('📅 Client ID available:', !!clientId);
+        console.log('📅 Environment variables available:', Object.keys(import.meta.env).filter(key => key.startsWith('VITE_')));
+        
         if (!apiKey || !clientId) {
-          console.warn('Google Calendar API credentials not found');
+          console.warn('📅 Google Calendar API credentials not found');
+          if (!apiKey) console.warn('📅 Missing: VITE_GOOGLE_CALENDAR_API_KEY');
+          if (!clientId) console.warn('📅 Missing: VITE_GOOGLE_CLIENT_ID');
           return;
         }
+        
+        console.log('📅 Google Calendar API credentials found, initializing...');
 
         // Load Google API
         if (typeof window !== 'undefined' && (window as any).gapi) {

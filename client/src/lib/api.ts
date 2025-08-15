@@ -12,9 +12,6 @@ class ApiClient {
 
     if (token) {
       headers.Authorization = `Bearer ${token}`;
-      console.log('🔑 API Client: Token retrieved successfully, length:', token.length);
-    } else {
-      console.warn('⚠️ API Client: No token available for request');
     }
 
     return headers;
@@ -33,21 +30,17 @@ class ApiClient {
     };
 
     try {
-      console.log('🌐 API Request:', config.method || 'GET', url);
       const response = await fetch(url, config);
       
       if (!response.ok) {
-        console.error('❌ API Response Error:', response.status, response.statusText);
         const errorData = await response.json().catch(() => ({}));
-        console.error('❌ Error details:', errorData);
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('✅ API Response Success:', data);
       return data;
     } catch (error) {
-      console.error('💥 API request failed:', error);
+      console.error('API request failed:', error);
       throw error;
     }
   }

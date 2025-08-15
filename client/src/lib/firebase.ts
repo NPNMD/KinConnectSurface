@@ -21,28 +21,23 @@ googleProvider.setCustomParameters({
 // Authentication functions
 export const signInWithGoogle = async () => {
   try {
-    console.log('🔍 Firebase: Starting Google sign-in with popup...');
-    
     // Try popup first, fallback to redirect if needed
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      console.log('✅ Firebase: Popup sign-in successful:', {
-        uid: result.user.uid,
-        email: result.user.email,
-        displayName: result.user.displayName,
-        photoURL: result.user.photoURL
-      });
       return { success: true, user: result.user };
     } catch (popupError: any) {
-      console.warn('⚠️ Firebase: Popup failed, trying redirect...', popupError);
-      
-      // Fallback to redirect if popup fails
-      await signInWithRedirect(auth, googleProvider);
-      console.log('✅ Firebase: Redirect initiated successfully');
-      return { success: true, user: null }; // User will be available after redirect
+      // Check if it's a popup blocked error or CORS error
+      if (popupError.code === 'auth/popup-blocked' ||
+          popupError.code === 'auth/popup-closed-by-user' ||
+          popupError.message?.includes('Cross-Origin-Opener-Policy')) {
+        // Fallback to redirect if popup fails
+        await signInWithRedirect(auth, googleProvider);
+        return { success: true, user: null }; // User will be available after redirect
+      }
+      throw popupError;
     }
   } catch (error: any) {
-    console.error('❌ Firebase: Google sign-in failed:', error);
+    console.error('Google sign-in failed:', error);
     return { success: false, error };
   }
 };
@@ -50,21 +45,13 @@ export const signInWithGoogle = async () => {
 // Handle redirect result (call this on app initialization)
 export const handleRedirectResult = async () => {
   try {
-    console.log('🔍 Firebase: Checking for redirect result...');
     const result = await getRedirectResult(auth);
     if (result) {
-      console.log('✅ Firebase: Redirect result found:', {
-        uid: result.user.uid,
-        email: result.user.email,
-        displayName: result.user.displayName,
-        photoURL: result.user.photoURL
-      });
       return { success: true, user: result.user };
     }
-    console.log('🔍 Firebase: No redirect result found');
     return { success: true, user: null };
   } catch (error) {
-    console.error('❌ Firebase: Error handling redirect result:', error);
+    console.error('Error handling redirect result:', error);
     return { success: false, error };
   }
 };

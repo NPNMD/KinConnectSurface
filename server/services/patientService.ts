@@ -103,7 +103,7 @@ export class PatientService {
         .offset(offset)
         .get();
 
-      const patients = query.docs.map(doc => doc.data() as Patient);
+      const patients = query.docs.map((doc: any) => doc.data() as Patient);
       return { success: true, data: patients };
     } catch (error) {
       console.error('Error getting patients:', error);
@@ -119,7 +119,7 @@ export class PatientService {
         .limit(20)
         .get();
 
-      const patients = query.docs.map(doc => doc.data() as Patient);
+      const patients = query.docs.map((doc: any) => doc.data() as Patient);
       return { success: true, data: patients };
     } catch (error) {
       console.error('Error searching patients by condition:', error);
@@ -135,7 +135,7 @@ export class PatientService {
         .limit(20)
         .get();
 
-      const patients = query.docs.map(doc => doc.data() as Patient);
+      const patients = query.docs.map((doc: any) => doc.data() as Patient);
       return { success: true, data: patients };
     } catch (error) {
       console.error('Error searching patients by allergy:', error);
@@ -156,7 +156,7 @@ export class PatientService {
         .limit(50)
         .get();
 
-      const patients = query.docs.map(doc => doc.data() as Patient);
+      const patients = query.docs.map((doc: any) => doc.data() as Patient);
       return { success: true, data: patients };
     } catch (error) {
       console.error('Error getting patients by age range:', error);

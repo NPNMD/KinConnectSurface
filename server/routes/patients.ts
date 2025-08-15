@@ -58,10 +58,19 @@ router.put('/profile', authenticateToken, async (req, res) => {
     }
 
     if (!patient.data) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'Patient profile not found' 
-      });
+      // If no patient profile exists, create one instead of returning 404
+      const patientData: NewPatient = {
+        userId: req.user!.uid,
+        ...req.body,
+      };
+
+      const newPatient = await patientService.createPatient(patientData);
+      
+      if (!newPatient.success) {
+        return res.status(500).json(newPatient);
+      }
+
+      return res.status(201).json(newPatient);
     }
 
     const updatedPatient = await patientService.updatePatient(patient.data.id, req.body);
@@ -73,9 +82,9 @@ router.put('/profile', authenticateToken, async (req, res) => {
     res.json(updatedPatient);
   } catch (error) {
     console.error('Error updating patient profile:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Internal server error' 
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
     });
   }
 });

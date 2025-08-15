@@ -26,9 +26,9 @@ app.use(helmet({
 
 // CORS configuration
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://your-domain.com'] // Update with your production domain
-    : ['http://localhost:3000', 'http://localhost:3001'],
+  origin: process.env.NODE_ENV === 'production'
+    ? ['https://claritystream-uldp9.web.app', 'https://your-domain.com'] // Update with your production domain
+    : ['http://localhost:3000', 'http://localhost:3001', 'https://claritystream-uldp9.web.app'],
   credentials: true,
 }));
 

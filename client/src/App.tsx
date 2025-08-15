@@ -9,6 +9,7 @@ import MedicationTest from '@/pages/MedicationTest';
 import InvitePatient from '@/pages/InvitePatient';
 import AcceptInvitation from '@/pages/AcceptInvitation';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import DropdownTest from '@/pages/DropdownTest';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -84,6 +85,9 @@ function AppRoutes() {
       
       {/* Test route - public for testing */}
       <Route path="/test-medications" element={<MedicationTest />} />
+      
+      {/* Dropdown test route */}
+      <Route path="/test-dropdowns" element={<DropdownTest />} />
       
       {/* Catch all route */}
       <Route path="*" element={<Navigate to="/" replace />} />

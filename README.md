@@ -105,11 +105,15 @@ kinconnect/
 
 4. **Firebase Setup**
    
+   **⚠️ IMPORTANT: For production Firestore access, you MUST set up service account credentials.**
+   
+   See the detailed guide: **[FIREBASE_SETUP.md](FIREBASE_SETUP.md)**
+   
+   Quick steps:
    - Go to [Firebase Console](https://console.firebase.google.com)
-   - Create a new project or use existing one
-   - Enable Authentication with Google provider
-   - Enable Firestore database
-   - Download service account key and add to `.env`
+   - Project Settings > Service Accounts > Generate new private key
+   - Add the JSON to your `.env` file as `FIREBASE_SERVICE_ACCOUNT_KEY`
+   - Restart your server
 
 5. **Google OAuth Setup**
    

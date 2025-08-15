@@ -525,9 +525,27 @@ app.put('/api/patients/profile', authenticate, async (req, res) => {
 		const snapshot = await patientsRef.get();
 		
 		if (snapshot.empty) {
-			return res.status(404).json({
-				success: false,
-				error: 'Patient profile not found'
+			// If no patient profile exists, create one instead of returning 404
+			const patientData = {
+				...req.body,
+				userId: uid,
+				createdAt: admin.firestore.Timestamp.now(),
+				updatedAt: admin.firestore.Timestamp.now(),
+			};
+
+			const docRef = await firestore.collection('patients').add(patientData);
+			const newDoc = await docRef.get();
+			const newProfile = {
+				id: newDoc.id,
+				...newDoc.data(),
+				createdAt: newDoc.data()?.createdAt?.toDate() || new Date(),
+				updatedAt: newDoc.data()?.updatedAt?.toDate() || new Date(),
+			};
+
+			return res.status(201).json({
+				success: true,
+				data: newProfile,
+				message: 'Patient profile created successfully'
 			});
 		}
 		

@@ -103,7 +103,7 @@ export class UserService {
         .offset(offset)
         .get();
 
-      const users = query.docs.map(doc => doc.data() as User);
+      const users = query.docs.map((doc: any) => doc.data() as User);
       return { success: true, data: users };
     } catch (error) {
       console.error('Error getting users:', error);
@@ -130,12 +130,12 @@ export class UserService {
 
       const users = new Map<string, User>();
       
-      nameQuery.docs.forEach(doc => {
+      nameQuery.docs.forEach((doc: any) => {
         const user = doc.data() as User;
         users.set(user.id, user);
       });
 
-      emailQuery.docs.forEach(doc => {
+      emailQuery.docs.forEach((doc: any) => {
         const user = doc.data() as User;
         users.set(user.id, user);
       });

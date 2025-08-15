@@ -15,6 +15,8 @@ import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import MedicationManager from '@/components/MedicationManager';
 import AddressAutocomplete from '@/components/AddressAutocomplete';
 import CalendarIntegration from '@/components/CalendarIntegration';
+import MedicalConditionSelect from '@/components/MedicalConditionSelect';
+import AllergySelect from '@/components/AllergySelect';
 
 export default function PatientProfile() {
   const { user } = useAuth();
@@ -61,8 +63,6 @@ export default function PatientProfile() {
 
   const handleSave = async () => {
     try {
-      console.log('Saving profile:', formData);
-      
       // Prepare the data for the API
       const profileData = {
         dateOfBirth: formData.dateOfBirth || undefined,
@@ -74,41 +74,33 @@ export default function PatientProfile() {
         allergies: formData.allergies.filter(allergy => allergy.trim() !== ''),
       };
 
-      // Try to update existing profile first
-      try {
-        const response = await apiClient.put<{ success: boolean; data: any }>(
-          API_ENDPOINTS.PATIENT_PROFILE,
-          profileData
-        );
+      // Use PUT request - backend handles both create and update
+      const response = await apiClient.put<{ success: boolean; data: any; error?: string }>(
+        API_ENDPOINTS.PATIENT_PROFILE,
+        profileData
+      );
+      
+      if (response.success) {
+        setIsEditing(false);
         
-        if (response.success) {
-          console.log('✅ Profile updated successfully');
-          setIsEditing(false);
-          return;
+        // Update form data with the saved data to ensure consistency
+        if (response.data) {
+          const savedData = response.data;
+          setFormData({
+            dateOfBirth: savedData.dateOfBirth || '',
+            gender: savedData.gender || '',
+            address: savedData.address || '',
+            phoneNumber: savedData.phoneNumber || '',
+            emergencyContact: savedData.emergencyContact || '',
+            medicalConditions: savedData.medicalConditions && savedData.medicalConditions.length > 0 ? savedData.medicalConditions : [''],
+            allergies: savedData.allergies && savedData.allergies.length > 0 ? savedData.allergies : [''],
+          });
         }
-      } catch (updateError: any) {
-        console.log('Profile update failed, trying to create new profile');
-        
-        // If update fails, try to create a new profile
-        try {
-          const createResponse = await apiClient.post<{ success: boolean; data: any }>(
-            API_ENDPOINTS.PATIENT_PROFILE,
-            profileData
-          );
-          
-          if (createResponse.success) {
-            console.log('✅ Profile created successfully');
-            setIsEditing(false);
-            return;
-          }
-        } catch (createError) {
-          console.error('❌ Failed to create profile:', createError);
-          throw createError;
-        }
+      } else {
+        throw new Error(response.error || 'Failed to save profile');
       }
     } catch (error) {
-      console.error('❌ Error saving profile:', error);
-      // You could add a toast notification here for better UX
+      console.error('Error saving profile:', error);
       alert('Failed to save profile. Please try again.');
     }
   };
@@ -122,12 +114,9 @@ export default function PatientProfile() {
   React.useEffect(() => {
     const loadProfileData = async () => {
       try {
-        console.log('🔍 PatientProfile: Loading profile data for user:', user?.id);
         const response = await apiClient.get<{ success: boolean; data: any }>(
           API_ENDPOINTS.PATIENT_PROFILE
         );
-        
-        console.log('🔍 PatientProfile: Load profile response:', response);
         
         if (response.success && response.data) {
           const profileData = response.data;
@@ -137,27 +126,21 @@ export default function PatientProfile() {
             address: profileData.address || '',
             phoneNumber: profileData.phoneNumber || '',
             emergencyContact: profileData.emergencyContact || '',
-            medicalConditions: profileData.medicalConditions && profileData.medicalConditions.length > 0 ? profileData.medicalConditions : [''],
-            allergies: profileData.allergies && profileData.allergies.length > 0 ? profileData.allergies : [''],
+            medicalConditions: profileData.medicalConditions?.length > 0 ? profileData.medicalConditions : [''],
+            allergies: profileData.allergies?.length > 0 ? profileData.allergies : [''],
           });
-          console.log('✅ PatientProfile: Loaded profile data:', profileData);
-        } else {
-          console.log('⚠️ PatientProfile: No existing profile found');
         }
       } catch (error) {
-        console.error('❌ PatientProfile: Error loading profile data:', error);
+        console.error('Error loading profile data:', error);
       }
     };
 
     const loadMedications = async () => {
       try {
-        console.log('🔍 PatientProfile: Loading medications for user:', user?.id);
         setIsLoadingMedications(true);
         const response = await apiClient.get<{ success: boolean; data: Medication[] }>(
           API_ENDPOINTS.MEDICATIONS
         );
-        
-        console.log('🔍 PatientProfile: Load medications response:', response);
         
         if (response.success && response.data) {
           // Parse date strings back to Date objects
@@ -169,41 +152,29 @@ export default function PatientProfile() {
             createdAt: new Date(med.createdAt),
             updatedAt: new Date(med.updatedAt),
           }));
-          console.log('✅ PatientProfile: Loaded medications:', medicationsWithDates);
           setMedications(medicationsWithDates);
-        } else {
-          console.warn('⚠️ PatientProfile: Failed to load medications:', response);
         }
       } catch (error) {
-        console.error('❌ PatientProfile: Error loading medications:', error);
+        console.error('Error loading medications:', error);
       } finally {
         setIsLoadingMedications(false);
       }
     };
 
     if (user?.id) {
-      console.log('🔍 PatientProfile: User found, loading profile and medications');
       loadProfileData();
       loadMedications();
-    } else {
-      console.log('⚠️ PatientProfile: No user ID found, skipping data load');
     }
   }, [user?.id]);
 
   // Medication management functions
   const handleAddMedication = async (medication: NewMedication) => {
     try {
-      console.log('🔍 PatientProfile: handleAddMedication called');
-      console.log('🔍 PatientProfile: User ID:', user?.id);
-      console.log('🔍 PatientProfile: Medication data:', medication);
-      
       setIsLoadingMedications(true);
       const response = await apiClient.post<{ success: boolean; data: Medication }>(
         API_ENDPOINTS.MEDICATIONS,
         medication
       );
-      
-      console.log('🔍 PatientProfile: API response:', response);
       
       if (response.success && response.data) {
         // Parse date strings back to Date objects for the new medication
@@ -215,13 +186,10 @@ export default function PatientProfile() {
           createdAt: new Date(response.data.createdAt),
           updatedAt: new Date(response.data.updatedAt),
         };
-        console.log('✅ PatientProfile: Adding medication to state:', medicationWithDates);
         setMedications(prev => [...prev, medicationWithDates]);
-      } else {
-        console.error('❌ PatientProfile: API response was not successful:', response);
       }
     } catch (error) {
-      console.error('❌ PatientProfile: Error adding medication:', error);
+      console.error('Error adding medication:', error);
       throw error; // Re-throw to let the component handle the error
     } finally {
       setIsLoadingMedications(false);
@@ -428,14 +396,14 @@ export default function PatientProfile() {
             <div className="space-y-3">
               {formData.medicalConditions.map((condition, index) => (
                 <div key={index} className="flex items-center space-x-3">
-                  <input
-                    type="text"
-                    value={condition}
-                    onChange={(e) => handleArrayChange('medicalConditions', index, e.target.value)}
-                    disabled={!isEditing}
-                    className="input flex-1 disabled:bg-gray-50 disabled:text-gray-500"
-                    placeholder="Enter medical condition"
-                  />
+                  <div className="flex-1">
+                    <MedicalConditionSelect
+                      value={condition}
+                      onChange={(value) => handleArrayChange('medicalConditions', index, value)}
+                      disabled={!isEditing}
+                      placeholder="Select or enter medical condition"
+                    />
+                  </div>
                   {isEditing && formData.medicalConditions.length > 1 && (
                     <button
                       onClick={() => removeArrayItem('medicalConditions', index)}
@@ -464,14 +432,14 @@ export default function PatientProfile() {
             <div className="space-y-3">
               {formData.allergies.map((allergy, index) => (
                 <div key={index} className="flex items-center space-x-3">
-                  <input
-                    type="text"
-                    value={allergy}
-                    onChange={(e) => handleArrayChange('allergies', index, e.target.value)}
-                    disabled={!isEditing}
-                    className="input flex-1 disabled:bg-gray-50 disabled:text-gray-500"
-                    placeholder="Enter allergy"
-                  />
+                  <div className="flex-1">
+                    <AllergySelect
+                      value={allergy}
+                      onChange={(value) => handleArrayChange('allergies', index, value)}
+                      disabled={!isEditing}
+                      placeholder="Select or enter allergy"
+                    />
+                  </div>
                   {isEditing && formData.allergies.length > 1 && (
                     <button
                       onClick={() => removeArrayItem('allergies', index)}
