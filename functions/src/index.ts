@@ -446,6 +446,120 @@ app.delete('/api/medications/:id', authenticate, async (req, res) => {
 	}
 });
 
+// Patient profile endpoints
+app.get('/api/patients/profile', authenticate, async (req, res) => {
+	try {
+		const uid = (req as any).user.uid;
+		const patientsRef = firestore.collection('patients').where('userId', '==', uid);
+		const snapshot = await patientsRef.get();
+		
+		if (snapshot.empty) {
+			return res.json({
+				success: true,
+				data: null,
+				message: 'No patient profile found'
+			});
+		}
+		
+		const patientDoc = snapshot.docs[0];
+		const patientData = {
+			id: patientDoc.id,
+			...patientDoc.data(),
+			createdAt: patientDoc.data().createdAt?.toDate() || new Date(),
+			updatedAt: patientDoc.data().updatedAt?.toDate() || new Date(),
+		};
+
+		res.json({
+			success: true,
+			data: patientData,
+			message: 'Patient profile retrieved successfully'
+		});
+	} catch (error) {
+		console.error('Error getting patient profile:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+app.post('/api/patients/profile', authenticate, async (req, res) => {
+	try {
+		const uid = (req as any).user.uid;
+		const profileData = {
+			...req.body,
+			userId: uid,
+			createdAt: admin.firestore.Timestamp.now(),
+			updatedAt: admin.firestore.Timestamp.now(),
+		};
+
+		const docRef = await firestore.collection('patients').add(profileData);
+		const newDoc = await docRef.get();
+		const newProfile = {
+			id: newDoc.id,
+			...newDoc.data(),
+			createdAt: newDoc.data()?.createdAt?.toDate() || new Date(),
+			updatedAt: newDoc.data()?.updatedAt?.toDate() || new Date(),
+		};
+
+		res.status(201).json({
+			success: true,
+			data: newProfile,
+			message: 'Patient profile created successfully'
+		});
+	} catch (error) {
+		console.error('Error creating patient profile:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+app.put('/api/patients/profile', authenticate, async (req, res) => {
+	try {
+		const uid = (req as any).user.uid;
+		
+		// Find existing patient profile
+		const patientsRef = firestore.collection('patients').where('userId', '==', uid);
+		const snapshot = await patientsRef.get();
+		
+		if (snapshot.empty) {
+			return res.status(404).json({
+				success: false,
+				error: 'Patient profile not found'
+			});
+		}
+		
+		const patientDoc = snapshot.docs[0];
+		const updateData = {
+			...req.body,
+			updatedAt: admin.firestore.Timestamp.now(),
+		};
+
+		await patientDoc.ref.update(updateData);
+		const updatedDoc = await patientDoc.ref.get();
+		const updatedProfile = {
+			id: updatedDoc.id,
+			...updatedDoc.data(),
+			createdAt: updatedDoc.data()?.createdAt?.toDate() || new Date(),
+			updatedAt: updatedDoc.data()?.updatedAt?.toDate() || new Date(),
+		};
+
+		res.json({
+			success: true,
+			data: updatedProfile,
+			message: 'Patient profile updated successfully'
+		});
+	} catch (error) {
+		console.error('Error updating patient profile:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
 // Patient invitation endpoints
 app.post('/api/invitations/send', authenticate, async (req, res) => {
 	try {

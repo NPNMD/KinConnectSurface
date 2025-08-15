@@ -13,6 +13,8 @@ import {
 import { Medication, NewMedication } from '@shared/types';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import MedicationManager from '@/components/MedicationManager';
+import AddressAutocomplete from '@/components/AddressAutocomplete';
+import CalendarIntegration from '@/components/CalendarIntegration';
 
 export default function PatientProfile() {
   const { user } = useAuth();
@@ -59,11 +61,55 @@ export default function PatientProfile() {
 
   const handleSave = async () => {
     try {
-      // TODO: Implement API call to save profile
       console.log('Saving profile:', formData);
-      setIsEditing(false);
+      
+      // Prepare the data for the API
+      const profileData = {
+        dateOfBirth: formData.dateOfBirth || undefined,
+        gender: formData.gender || undefined,
+        address: formData.address || undefined,
+        phoneNumber: formData.phoneNumber || undefined,
+        emergencyContact: formData.emergencyContact || undefined,
+        medicalConditions: formData.medicalConditions.filter(condition => condition.trim() !== ''),
+        allergies: formData.allergies.filter(allergy => allergy.trim() !== ''),
+      };
+
+      // Try to update existing profile first
+      try {
+        const response = await apiClient.put<{ success: boolean; data: any }>(
+          API_ENDPOINTS.PATIENT_PROFILE,
+          profileData
+        );
+        
+        if (response.success) {
+          console.log('✅ Profile updated successfully');
+          setIsEditing(false);
+          return;
+        }
+      } catch (updateError: any) {
+        console.log('Profile update failed, trying to create new profile');
+        
+        // If update fails, try to create a new profile
+        try {
+          const createResponse = await apiClient.post<{ success: boolean; data: any }>(
+            API_ENDPOINTS.PATIENT_PROFILE,
+            profileData
+          );
+          
+          if (createResponse.success) {
+            console.log('✅ Profile created successfully');
+            setIsEditing(false);
+            return;
+          }
+        } catch (createError) {
+          console.error('❌ Failed to create profile:', createError);
+          throw createError;
+        }
+      }
     } catch (error) {
-      console.error('Error saving profile:', error);
+      console.error('❌ Error saving profile:', error);
+      // You could add a toast notification here for better UX
+      alert('Failed to save profile. Please try again.');
     }
   };
 
@@ -72,8 +118,37 @@ export default function PatientProfile() {
     // Reset form data to original values
   };
 
-  // Load medications on component mount
+  // Load profile data and medications on component mount
   React.useEffect(() => {
+    const loadProfileData = async () => {
+      try {
+        console.log('🔍 PatientProfile: Loading profile data for user:', user?.id);
+        const response = await apiClient.get<{ success: boolean; data: any }>(
+          API_ENDPOINTS.PATIENT_PROFILE
+        );
+        
+        console.log('🔍 PatientProfile: Load profile response:', response);
+        
+        if (response.success && response.data) {
+          const profileData = response.data;
+          setFormData({
+            dateOfBirth: profileData.dateOfBirth || '',
+            gender: profileData.gender || '',
+            address: profileData.address || '',
+            phoneNumber: profileData.phoneNumber || '',
+            emergencyContact: profileData.emergencyContact || '',
+            medicalConditions: profileData.medicalConditions && profileData.medicalConditions.length > 0 ? profileData.medicalConditions : [''],
+            allergies: profileData.allergies && profileData.allergies.length > 0 ? profileData.allergies : [''],
+          });
+          console.log('✅ PatientProfile: Loaded profile data:', profileData);
+        } else {
+          console.log('⚠️ PatientProfile: No existing profile found');
+        }
+      } catch (error) {
+        console.error('❌ PatientProfile: Error loading profile data:', error);
+      }
+    };
+
     const loadMedications = async () => {
       try {
         console.log('🔍 PatientProfile: Loading medications for user:', user?.id);
@@ -107,10 +182,11 @@ export default function PatientProfile() {
     };
 
     if (user?.id) {
-      console.log('🔍 PatientProfile: User found, loading medications');
+      console.log('🔍 PatientProfile: User found, loading profile and medications');
+      loadProfileData();
       loadMedications();
     } else {
-      console.log('⚠️ PatientProfile: No user ID found, skipping medication load');
+      console.log('⚠️ PatientProfile: No user ID found, skipping data load');
     }
   }, [user?.id]);
 
@@ -310,11 +386,10 @@ export default function PatientProfile() {
             {/* Address */}
             <div className="md:col-span-2">
               <label className="label">Address</label>
-              <textarea
+              <AddressAutocomplete
                 value={formData.address}
-                onChange={(e) => handleInputChange('address', e.target.value)}
+                onChange={(address) => handleInputChange('address', address)}
                 disabled={!isEditing}
-                rows={3}
                 className="input disabled:bg-gray-50 disabled:text-gray-500"
                 placeholder="Enter your full address"
               />
@@ -421,7 +496,7 @@ export default function PatientProfile() {
         </div>
 
         {/* Medications Section */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
           <MedicationManager
             patientId={user?.id || ''}
             medications={medications}
@@ -430,6 +505,11 @@ export default function PatientProfile() {
             onDeleteMedication={handleDeleteMedication}
             isLoading={isLoadingMedications}
           />
+        </div>
+
+        {/* Calendar Integration Section */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <CalendarIntegration patientId={user?.id || ''} />
         </div>
       </main>
     </div>
