@@ -1,0 +1,212 @@
+import React from 'react';
+import { Link } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
+import { signOutUser } from '@/lib/firebase';
+import { 
+  Heart, 
+  Calendar, 
+  Pill, 
+  Users, 
+  Settings, 
+  LogOut,
+  Plus,
+  Bell
+} from 'lucide-react';
+
+export default function Dashboard() {
+  const { user, firebaseUser } = useAuth();
+
+  const handleSignOut = async () => {
+    try {
+      await signOutUser();
+    } catch (error) {
+      console.error('Sign out error:', error);
+    }
+  };
+
+  const quickActions = [
+    {
+      title: 'Add Medication',
+      description: 'Record a new prescription',
+      icon: Pill,
+      href: '/profile',
+      color: 'bg-blue-500',
+    },
+    {
+      title: 'Schedule Appointment',
+      description: 'Book a healthcare visit',
+      icon: Calendar,
+      href: '/appointments/new',
+      color: 'bg-green-500',
+    },
+    {
+      title: 'Invite Family Member',
+      description: 'Add someone to your care team',
+      icon: Users,
+      href: '/family/invite',
+      color: 'bg-purple-500',
+    },
+    {
+      title: 'Update Profile',
+      description: 'Edit your medical information',
+      icon: Heart,
+      href: '/profile',
+      color: 'bg-red-500',
+    },
+  ];
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <Heart className="w-8 h-8 text-primary-600" />
+              <span className="text-2xl font-bold text-gray-900">KinConnect</span>
+            </div>
+            
+            <div className="flex items-center space-x-4">
+              <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
+                <Bell className="w-6 h-6" />
+              </button>
+              
+              <div className="flex items-center space-x-3">
+                {firebaseUser?.photoURL && (
+                  <img
+                    src={firebaseUser.photoURL}
+                    alt="Profile"
+                    className="w-8 h-8 rounded-full"
+                  />
+                )}
+                <span className="text-gray-700 font-medium">
+                  {user?.name || firebaseUser?.displayName || 'User'}
+                </span>
+              </div>
+              
+              <button
+                onClick={handleSignOut}
+                className="p-2 text-gray-400 hover:text-red-600 transition-colors"
+                title="Sign out"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        {/* Welcome Section */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            Welcome back, {user?.name || 'there'}! 👋
+          </h1>
+          <p className="text-gray-600">
+            Here's what's happening with your family's care today.
+          </p>
+        </div>
+
+        {/* Quick Actions */}
+        <div className="mb-8">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Quick Actions</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {quickActions.map((action) => (
+              <Link
+                key={action.title}
+                to={action.href}
+                className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow group"
+              >
+                <div className="flex items-center space-x-4">
+                  <div className={`${action.color} p-3 rounded-lg group-hover:scale-110 transition-transform`}>
+                    <action.icon className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 group-hover:text-primary-600 transition-colors">
+                      {action.title}
+                    </h3>
+                    <p className="text-sm text-gray-600">{action.description}</p>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+
+        {/* Dashboard Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Recent Activity */}
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
+              <div className="space-y-4">
+                <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span className="text-sm text-gray-600">
+                    Medication reminder: Take blood pressure medication at 9:00 AM
+                  </span>
+                </div>
+                <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                  <span className="text-sm text-gray-600">
+                    Appointment scheduled: Dr. Smith on March 15th at 2:00 PM
+                  </span>
+                </div>
+                <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
+                  <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
+                  <span className="text-sm text-gray-600">
+                    Task assigned: Pick up prescription refill
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Stats */}
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Today's Overview</h3>
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Medications Due</span>
+                  <span className="font-semibold text-primary-600">3</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Appointments</span>
+                  <span className="font-semibold text-green-600">1</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Pending Tasks</span>
+                  <span className="font-semibold text-yellow-600">2</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Family Members</h3>
+              <div className="space-y-3">
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center">
+                    <span className="text-primary-600 font-medium text-sm">JS</span>
+                  </div>
+                  <span className="text-gray-700">John Smith</span>
+                </div>
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                    <span className="text-green-600 font-medium text-sm">MS</span>
+                  </div>
+                  <span className="text-gray-700">Mary Smith</span>
+                </div>
+              </div>
+              <button className="w-full mt-4 text-primary-600 hover:text-primary-700 text-sm font-medium">
+                <Plus className="w-4 h-4 inline mr-1" />
+                Add Member
+              </button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
