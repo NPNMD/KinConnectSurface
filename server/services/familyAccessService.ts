@@ -219,6 +219,46 @@ export class FamilyAccessService {
     }
   }
 
+  // Get family access by invitation token
+  async getFamilyAccessByToken(invitationToken: string): Promise<ApiResponse<FamilyCalendarAccess>> {
+    try {
+      const query = await this.familyAccessCollection
+        .where('invitationToken', '==', invitationToken)
+        .where('status', '==', 'pending')
+        .limit(1)
+        .get();
+
+      if (query.empty) {
+        return {
+          success: false,
+          error: 'Invitation not found or expired'
+        };
+      }
+
+      const doc = query.docs[0];
+      const invitation = { id: doc.id, ...doc.data() } as FamilyCalendarAccess;
+
+      // Check if invitation has expired
+      if (invitation.invitationExpiresAt && new Date() > invitation.invitationExpiresAt) {
+        return {
+          success: false,
+          error: 'Invitation has expired'
+        };
+      }
+
+      return {
+        success: true,
+        data: invitation
+      };
+    } catch (error) {
+      console.error('Error getting invitation by token:', error);
+      return {
+        success: false,
+        error: 'Failed to retrieve invitation'
+      };
+    }
+  }
+
   // Check if user has specific permission for patient
   async checkPermission(
     patientId: string,

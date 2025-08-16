@@ -134,6 +134,47 @@ router.get('/pending', authenticateToken, async (req, res) => {
   }
 });
 
+// Get invitation details by token
+router.get('/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    // Find invitation by token
+    const invitation = await familyAccessService.getFamilyAccessByToken(token);
+    
+    if (!invitation.success || !invitation.data) {
+      return res.status(404).json({
+        success: false,
+        error: 'Invitation not found or expired'
+      });
+    }
+
+    // Get patient info (the person who sent the invitation)
+    const patientUser = await userService.getUserById(invitation.data.createdBy);
+    
+    res.json({
+      success: true,
+      data: {
+        id: invitation.data.id,
+        inviterName: patientUser.success ? patientUser.data?.name : 'Unknown',
+        inviterEmail: patientUser.success ? patientUser.data?.email : 'Unknown',
+        patientName: patientUser.success ? patientUser.data?.name : 'Unknown',
+        patientEmail: patientUser.success ? patientUser.data?.email : 'Unknown',
+        message: '', // Could add a message field to the invitation
+        status: invitation.data.status,
+        createdAt: invitation.data.invitedAt,
+        expiresAt: invitation.data.invitationExpiresAt
+      }
+    });
+  } catch (error) {
+    console.error('Error getting invitation details:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
 // Accept invitation
 router.post('/accept/:token', authenticateToken, async (req, res) => {
   try {

@@ -17,7 +17,7 @@ interface InvitationData {
 }
 
 export default function AcceptInvitation() {
-  const { invitationId } = useParams<{ invitationId: string }>();
+  const { invitationId: invitationToken } = useParams<{ invitationId: string }>();
   const navigate = useNavigate();
   const { isAuthenticated, firebaseUser } = useAuth();
   
@@ -28,15 +28,15 @@ export default function AcceptInvitation() {
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    if (invitationId) {
+    if (invitationToken) {
       fetchInvitation();
     }
-  }, [invitationId]);
+  }, [invitationToken]);
 
   const fetchInvitation = async () => {
     try {
       const response = await fetch(
-        `https://us-central1-claritystream-uldp9.cloudfunctions.net/api/api/invitations/${invitationId}`
+        `https://us-central1-claritystream-uldp9.cloudfunctions.net/api/api/invitations/${invitationToken}`
       );
       
       const result = await response.json();
@@ -70,7 +70,7 @@ export default function AcceptInvitation() {
       const token = await firebaseUser.getIdToken();
       
       const response = await fetch(
-        `https://us-central1-claritystream-uldp9.cloudfunctions.net/api/api/invitations/${invitationId}/accept`,
+        `https://us-central1-claritystream-uldp9.cloudfunctions.net/api/api/invitations/accept/${invitationToken}`,
         {
           method: 'POST',
           headers: {

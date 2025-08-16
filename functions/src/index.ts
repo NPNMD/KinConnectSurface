@@ -162,7 +162,7 @@ app.post('/api/invitations/send', authenticate, async (req, res) => {
 			}
 
 			sgMail.setApiKey(apiKey);
-			const invitationLink = `${APP_URL}/accept-invitation?token=${invitationToken}`;
+			const invitationLink = `${APP_URL}/invitation/${invitationToken}`;
 			console.log('🔗 Invitation link:', invitationLink);
 			
 			const emailContent = {
@@ -229,6 +229,121 @@ app.post('/api/invitations/send', authenticate, async (req, res) => {
 		res.status(500).json({
 			success: false,
 			error: 'Internal server error while sending invitation'
+		});
+	}
+});
+
+// Get invitation details by token
+app.get('/api/invitations/:token', async (req, res) => {
+	try {
+		const { token } = req.params;
+
+		// Find invitation by token
+		const invitationQuery = await firestore.collection('family_calendar_access')
+			.where('invitationToken', '==', token)
+			.where('status', '==', 'pending')
+			.limit(1)
+			.get();
+
+		if (invitationQuery.empty) {
+			return res.status(404).json({
+				success: false,
+				error: 'Invitation not found or expired'
+			});
+		}
+
+		const invitationDoc = invitationQuery.docs[0];
+		const invitation = invitationDoc.data();
+
+		// Check if invitation has expired
+		if (invitation.invitationExpiresAt && new Date() > invitation.invitationExpiresAt.toDate()) {
+			return res.status(404).json({
+				success: false,
+				error: 'Invitation has expired'
+			});
+		}
+
+		// Get sender's user info for display
+		const senderDoc = await firestore.collection('users').doc(invitation.createdBy).get();
+		const senderData = senderDoc.data();
+
+		res.json({
+			success: true,
+			data: {
+				id: invitationDoc.id,
+				inviterName: senderData?.name || 'Unknown',
+				inviterEmail: senderData?.email || 'Unknown',
+				patientName: senderData?.name || 'Unknown',
+				patientEmail: senderData?.email || 'Unknown',
+				message: '',
+				status: invitation.status,
+				createdAt: invitation.invitedAt.toDate(),
+				expiresAt: invitation.invitationExpiresAt.toDate()
+			}
+		});
+	} catch (error) {
+		console.error('Error getting invitation details:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Accept invitation
+app.post('/api/invitations/accept/:token', authenticate, async (req, res) => {
+	try {
+		const { token } = req.params;
+		const userId = (req as any).user.uid;
+
+		// Find invitation by token
+		const invitationQuery = await firestore.collection('family_calendar_access')
+			.where('invitationToken', '==', token)
+			.where('status', '==', 'pending')
+			.limit(1)
+			.get();
+
+		if (invitationQuery.empty) {
+			return res.status(404).json({
+				success: false,
+				error: 'Invalid or expired invitation token'
+			});
+		}
+
+		const invitationDoc = invitationQuery.docs[0];
+		const invitation = invitationDoc.data();
+
+		// Check if invitation has expired
+		if (invitation.invitationExpiresAt && new Date() > invitation.invitationExpiresAt.toDate()) {
+			return res.status(400).json({
+				success: false,
+				error: 'Invitation has expired'
+			});
+		}
+
+		// Update invitation with family member ID and activate
+		await invitationDoc.ref.update({
+			familyMemberId: userId,
+			status: 'active',
+			acceptedAt: admin.firestore.Timestamp.now(),
+			updatedAt: admin.firestore.Timestamp.now(),
+			invitationToken: admin.firestore.FieldValue.delete(),
+			invitationExpiresAt: admin.firestore.FieldValue.delete()
+		});
+
+		res.json({
+			success: true,
+			message: 'Invitation accepted successfully',
+			data: {
+				id: invitationDoc.id,
+				status: 'active'
+			}
+		});
+	} catch (error) {
+		console.error('Error accepting invitation:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
 		});
 	}
 });

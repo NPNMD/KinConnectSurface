@@ -10,7 +10,8 @@
     "clean": "rimraf dist",
     "type-check": "tsc --noEmit",
     "setup:firebase": "node scripts/setup-firebase.js",
-    "deploy": "npm run build && firebase deploy"
+    "deploy": "npm run build && firebase deploy",
+    "deploy:cache-bust": "node scripts/deploy-with-cache-bust.js"
   },
   "keywords": [
     "healthcare",
