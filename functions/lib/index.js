@@ -499,9 +499,25 @@ app.put('/api/patients/profile', authenticate, async (req, res) => {
         const patientsRef = firestore.collection('patients').where('userId', '==', uid);
         const snapshot = await patientsRef.get();
         if (snapshot.empty) {
-            return res.status(404).json({
-                success: false,
-                error: 'Patient profile not found'
+            // If no patient profile exists, create one instead of returning 404
+            const patientData = {
+                ...req.body,
+                userId: uid,
+                createdAt: admin.firestore.Timestamp.now(),
+                updatedAt: admin.firestore.Timestamp.now(),
+            };
+            const docRef = await firestore.collection('patients').add(patientData);
+            const newDoc = await docRef.get();
+            const newProfile = {
+                id: newDoc.id,
+                ...newDoc.data(),
+                createdAt: newDoc.data()?.createdAt?.toDate() || new Date(),
+                updatedAt: newDoc.data()?.updatedAt?.toDate() || new Date(),
+            };
+            return res.status(201).json({
+                success: true,
+                data: newProfile,
+                message: 'Patient profile created successfully'
             });
         }
         const patientDoc = snapshot.docs[0];
@@ -841,6 +857,235 @@ app.get('/api/family/group', authenticate, async (req, res) => {
         res.status(500).json({
             success: false,
             error: 'Failed to get family group'
+        });
+    }
+});
+// ===== MEDICATION CALENDAR ROUTES =====
+// Get medication schedules for the authenticated user
+app.get('/api/medication-calendar/schedules', authenticate, async (req, res) => {
+    try {
+        const patientId = req.user.uid;
+        const schedulesRef = firestore.collection('medication_schedules').where('patientId', '==', patientId);
+        const snapshot = await schedulesRef.get();
+        const schedules = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            createdAt: doc.data().createdAt?.toDate() || new Date(),
+            updatedAt: doc.data().updatedAt?.toDate() || new Date(),
+            startDate: doc.data().startDate?.toDate(),
+            endDate: doc.data().endDate?.toDate(),
+            nextDueDate: doc.data().nextDueDate?.toDate(),
+            pausedUntil: doc.data().pausedUntil?.toDate(),
+        }));
+        res.json({
+            success: true,
+            data: schedules,
+            message: 'Medication schedules retrieved successfully'
+        });
+    }
+    catch (error) {
+        console.error('Error getting medication schedules:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Create a new medication schedule
+app.post('/api/medication-calendar/schedules', authenticate, async (req, res) => {
+    try {
+        const uid = req.user.uid;
+        const scheduleData = {
+            ...req.body,
+            patientId: uid,
+            createdAt: admin.firestore.Timestamp.now(),
+            updatedAt: admin.firestore.Timestamp.now(),
+            startDate: req.body.startDate ? admin.firestore.Timestamp.fromDate(new Date(req.body.startDate)) : null,
+            endDate: req.body.endDate ? admin.firestore.Timestamp.fromDate(new Date(req.body.endDate)) : null,
+            nextDueDate: req.body.nextDueDate ? admin.firestore.Timestamp.fromDate(new Date(req.body.nextDueDate)) : null,
+            pausedUntil: req.body.pausedUntil ? admin.firestore.Timestamp.fromDate(new Date(req.body.pausedUntil)) : null,
+        };
+        // Validate required fields
+        if (!scheduleData.medicationId || !scheduleData.frequency || !scheduleData.times || !scheduleData.dosageAmount) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: medicationId, frequency, times, dosageAmount'
+            });
+        }
+        const docRef = await firestore.collection('medication_schedules').add(scheduleData);
+        const newDoc = await docRef.get();
+        const newSchedule = {
+            id: newDoc.id,
+            ...newDoc.data(),
+            createdAt: newDoc.data()?.createdAt?.toDate() || new Date(),
+            updatedAt: newDoc.data()?.updatedAt?.toDate() || new Date(),
+            startDate: newDoc.data()?.startDate?.toDate(),
+            endDate: newDoc.data()?.endDate?.toDate(),
+            nextDueDate: newDoc.data()?.nextDueDate?.toDate(),
+            pausedUntil: newDoc.data()?.pausedUntil?.toDate(),
+        };
+        res.status(201).json({
+            success: true,
+            data: newSchedule,
+            message: 'Medication schedule created successfully'
+        });
+    }
+    catch (error) {
+        console.error('Error creating medication schedule:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Get medication calendar events
+app.get('/api/medication-calendar/events', authenticate, async (req, res) => {
+    try {
+        const patientId = req.user.uid;
+        const { startDate, endDate, status } = req.query;
+        let eventsRef = firestore.collection('medication_calendar_events').where('patientId', '==', patientId);
+        if (startDate) {
+            eventsRef = eventsRef.where('scheduledDateTime', '>=', admin.firestore.Timestamp.fromDate(new Date(startDate)));
+        }
+        if (endDate) {
+            eventsRef = eventsRef.where('scheduledDateTime', '<=', admin.firestore.Timestamp.fromDate(new Date(endDate)));
+        }
+        if (status) {
+            eventsRef = eventsRef.where('status', '==', status);
+        }
+        const snapshot = await eventsRef.get();
+        const events = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            scheduledDateTime: doc.data().scheduledDateTime?.toDate() || new Date(),
+            takenAt: doc.data().takenAt?.toDate(),
+            createdAt: doc.data().createdAt?.toDate() || new Date(),
+            updatedAt: doc.data().updatedAt?.toDate() || new Date(),
+        }));
+        res.json({
+            success: true,
+            data: events,
+            message: 'Medication calendar events retrieved successfully'
+        });
+    }
+    catch (error) {
+        console.error('Error getting medication calendar events:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Mark medication as taken
+app.post('/api/medication-calendar/events/:eventId/taken', authenticate, async (req, res) => {
+    try {
+        const uid = req.user.uid;
+        const { eventId } = req.params;
+        const { takenAt, notes } = req.body;
+        const docRef = firestore.collection('medication_calendar_events').doc(eventId);
+        const doc = await docRef.get();
+        if (!doc.exists || doc.data()?.patientId !== uid) {
+            return res.status(404).json({
+                success: false,
+                error: 'Medication event not found'
+            });
+        }
+        const updateData = {
+            status: 'taken',
+            takenAt: takenAt ? admin.firestore.Timestamp.fromDate(new Date(takenAt)) : admin.firestore.Timestamp.now(),
+            takenBy: uid,
+            notes: notes || '',
+            updatedAt: admin.firestore.Timestamp.now(),
+        };
+        await docRef.update(updateData);
+        const updatedDoc = await docRef.get();
+        const updatedEvent = {
+            id: updatedDoc.id,
+            ...updatedDoc.data(),
+            scheduledDateTime: updatedDoc.data()?.scheduledDateTime?.toDate() || new Date(),
+            takenAt: updatedDoc.data()?.takenAt?.toDate(),
+            createdAt: updatedDoc.data()?.createdAt?.toDate() || new Date(),
+            updatedAt: updatedDoc.data()?.updatedAt?.toDate() || new Date(),
+        };
+        res.json({
+            success: true,
+            data: updatedEvent,
+            message: 'Medication marked as taken successfully'
+        });
+    }
+    catch (error) {
+        console.error('Error marking medication as taken:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Get medication adherence analytics
+app.get('/api/medication-calendar/adherence', authenticate, async (req, res) => {
+    try {
+        const patientId = req.user.uid;
+        const { medicationId, startDate, endDate } = req.query;
+        // Default to last 30 days if no dates provided
+        const end = endDate ? new Date(endDate) : new Date();
+        const start = startDate ? new Date(startDate) : new Date(end.getTime() - (30 * 24 * 60 * 60 * 1000));
+        let eventsRef = firestore.collection('medication_calendar_events')
+            .where('patientId', '==', patientId)
+            .where('scheduledDateTime', '>=', admin.firestore.Timestamp.fromDate(start))
+            .where('scheduledDateTime', '<=', admin.firestore.Timestamp.fromDate(end));
+        if (medicationId) {
+            eventsRef = eventsRef.where('medicationId', '==', medicationId);
+        }
+        const snapshot = await eventsRef.get();
+        const events = snapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+                id: doc.id,
+                ...data,
+                scheduledDateTime: data.scheduledDateTime?.toDate() || new Date(),
+                takenAt: data.takenAt?.toDate(),
+            };
+        });
+        // Calculate adherence by medication
+        const medicationAdherence = {};
+        events.forEach(event => {
+            const data = event;
+            const medId = data.medicationId;
+            if (!medicationAdherence[medId]) {
+                medicationAdherence[medId] = {
+                    medicationId: medId,
+                    medicationName: data.medicationName || 'Unknown',
+                    totalScheduledDoses: 0,
+                    takenDoses: 0,
+                    missedDoses: 0,
+                    adherenceRate: 0
+                };
+            }
+            medicationAdherence[medId].totalScheduledDoses++;
+            if (data.status === 'taken') {
+                medicationAdherence[medId].takenDoses++;
+            }
+            else if (data.status === 'missed') {
+                medicationAdherence[medId].missedDoses++;
+            }
+        });
+        // Calculate adherence rates
+        Object.values(medicationAdherence).forEach((med) => {
+            med.adherenceRate = med.totalScheduledDoses > 0
+                ? Math.round((med.takenDoses / med.totalScheduledDoses) * 100) / 100
+                : 0;
+        });
+        res.json({
+            success: true,
+            data: Object.values(medicationAdherence),
+            message: 'Medication adherence calculated successfully'
+        });
+    }
+    catch (error) {
+        console.error('Error calculating medication adherence:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
         });
     }
 });

@@ -9,8 +9,11 @@ import path from 'path';
 import authRoutes from './routes/auth';
 import patientRoutes from './routes/patients';
 import medicationRoutes from './routes/medications';
+import medicationCalendarRoutes from './routes/medicationCalendar';
 import drugRoutes from './routes/drugs';
 import healthcareProviderRoutes from './routes/healthcare-providers';
+import calendarRoutes from './routes/calendar';
+import familyAccessRoutes from './routes/familyAccess';
 
 // Load environment variables
 dotenv.config();
@@ -52,8 +55,11 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/api/auth', authRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/medications', medicationRoutes);
+app.use('/api/medication-calendar', medicationCalendarRoutes);
 app.use('/api/drugs', drugRoutes);
 app.use('/api/healthcare', healthcareProviderRoutes);
+app.use('/api/calendar', calendarRoutes);
+app.use('/api/family-access', familyAccessRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

@@ -49,7 +49,190 @@ service cloud.firestore {
       allow write: if request.auth != null;
     }
     
-    // Allow authenticated users to read/write their own data by default
+    // Healthcare Providers - patients can manage their own providers
+    match /healthcare_providers/{providerId} {
+      allow read, write: if request.auth != null && (
+        // Patient owns the provider record
+        resource.data.patientId == request.auth.uid ||
+        // Family member has access to the patient
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canView == true
+      );
+    }
+    
+    // Medical Facilities - patients can manage their own facilities
+    match /medical_facilities/{facilityId} {
+      allow read, write: if request.auth != null && (
+        // Patient owns the facility record
+        resource.data.patientId == request.auth.uid ||
+        // Family member has access to the patient
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canView == true
+      );
+    }
+    
+    // Medical Events - complex access control for calendar events
+    match /medical_events/{eventId} {
+      allow read: if request.auth != null && (
+        // Patient owns the event
+        resource.data.patientId == request.auth.uid ||
+        // Family member has calendar access
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canView == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active' ||
+        // Healthcare provider has access to the patient
+        exists(/databases/$(database)/documents/patient_access/$(request.auth.uid + '_' + resource.data.patientId))
+      );
+      
+      allow create: if request.auth != null && (
+        // Patient creates their own events
+        request.resource.data.patientId == request.auth.uid ||
+        // Family member with create permissions
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + request.resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + request.resource.data.patientId)).data.permissions.canCreate == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + request.resource.data.patientId)).data.status == 'active' ||
+        // Healthcare provider with access
+        exists(/databases/$(database)/documents/patient_access/$(request.auth.uid + '_' + request.resource.data.patientId))
+      ) &&
+      // Validate required fields
+      request.resource.data.keys().hasAll(['patientId', 'title', 'eventType', 'startDateTime', 'endDateTime', 'createdBy']) &&
+      request.resource.data.createdBy == request.auth.uid;
+      
+      allow update: if request.auth != null && (
+        // Patient updates their own events
+        resource.data.patientId == request.auth.uid ||
+        // Family member with edit permissions
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canEdit == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active' ||
+        // Healthcare provider with access
+        exists(/databases/$(database)/documents/patient_access/$(request.auth.uid + '_' + resource.data.patientId)) ||
+        // Family member claiming responsibility (limited update)
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canClaimResponsibility == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active' &&
+        // Only allow responsibility-related fields to be updated
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['responsiblePersonId', 'responsiblePersonName', 'responsibilityStatus', 'responsibilityClaimedAt', 'transportationNotes', 'updatedBy', 'updatedAt'])
+      ) &&
+      // Ensure updatedBy is set correctly
+      request.resource.data.updatedBy == request.auth.uid;
+      
+      allow delete: if request.auth != null && (
+        // Patient deletes their own events
+        resource.data.patientId == request.auth.uid ||
+        // Family member with delete permissions
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canDelete == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active'
+      );
+    }
+    
+    // Family Calendar Access - controls who can access patient calendars
+    match /family_calendar_access/{accessId} {
+      allow read: if request.auth != null && (
+        // Patient can read access records for their calendar
+        resource.data.patientId == request.auth.uid ||
+        // Family member can read their own access record
+        resource.data.familyMemberId == request.auth.uid
+      );
+      
+      allow create: if request.auth != null && (
+        // Patient creates access for family members
+        request.resource.data.patientId == request.auth.uid ||
+        // Family member with manage permissions creates access for others
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + request.resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + request.resource.data.patientId)).data.permissions.canManageFamily == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + request.resource.data.patientId)).data.status == 'active'
+      ) &&
+      // Validate required fields
+      request.resource.data.keys().hasAll(['patientId', 'familyMemberId', 'familyMemberName', 'familyMemberEmail', 'permissions', 'accessLevel', 'createdBy']) &&
+      request.resource.data.createdBy == request.auth.uid;
+      
+      allow update: if request.auth != null && (
+        // Patient updates access for their calendar
+        resource.data.patientId == request.auth.uid ||
+        // Family member with manage permissions
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canManageFamily == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active' ||
+        // Family member accepting their own invitation
+        resource.data.familyMemberId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acceptedAt', 'lastAccessAt', 'updatedAt'])
+      );
+      
+      allow delete: if request.auth != null && (
+        // Patient deletes access for their calendar
+        resource.data.patientId == request.auth.uid ||
+        // Family member removes their own access
+        resource.data.familyMemberId == request.auth.uid ||
+        // Family member with manage permissions
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canManageFamily == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active'
+      );
+    }
+    
+    // Calendar View Settings - users can manage their own view settings
+    match /calendar_view_settings/{settingsId} {
+      allow read, write: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        // Family member with access to the patient's calendar
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canView == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active'
+      );
+    }
+    
+    // Google Calendar Sync Settings - users can manage their own sync settings
+    match /google_calendar_sync_settings/{settingsId} {
+      allow read, write: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+    
+    // Family Notifications - notifications for family members about calendar events
+    match /family_notifications/{notificationId} {
+      allow read: if request.auth != null && (
+        // Patient can read notifications about their events
+        resource.data.patientId == request.auth.uid ||
+        // Recipient can read their own notifications
+        resource.data.recipientId == request.auth.uid
+      );
+      
+      allow create: if request.auth != null && (
+        // System creates notifications (validated by cloud functions)
+        request.resource.data.keys().hasAll(['patientId', 'recipientId', 'notificationType', 'message'])
+      );
+      
+      allow update: if request.auth != null && (
+        // Recipient can mark notifications as read or take action
+        resource.data.recipientId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt', 'actionTaken', 'actionTakenAt'])
+      );
+    }
+    
+    // Appointment Responsibilities - track family member responsibilities
+    match /appointment_responsibilities/{responsibilityId} {
+      allow read: if request.auth != null && (
+        // Patient can read responsibilities for their appointments
+        resource.data.patientId == request.auth.uid ||
+        // Responsible person can read their own responsibilities
+        resource.data.responsiblePersonId == request.auth.uid ||
+        // Family member with access can read
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canView == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active'
+      );
+      
+      allow create, update: if request.auth != null && (
+        // Patient manages responsibilities for their appointments
+        resource.data.patientId == request.auth.uid ||
+        // Family member with responsibility permissions
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canClaimResponsibility == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active'
+      );
+    }
+    
+    // Allow authenticated users to read/write their own data by default (fallback)
     match /{document=**} {
       allow read, write: if request.auth != null;
     }

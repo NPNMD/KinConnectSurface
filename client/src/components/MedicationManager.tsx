@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Calendar, Pill, Save, X, AlertTriangle, CheckCircle, Info } from 'lucide-react';
+import { Plus, Edit, Trash2, Calendar, Pill, Save, X, AlertTriangle, CheckCircle, Info, Clock } from 'lucide-react';
 import { Medication, NewMedication } from '@shared/types';
 import { DrugConcept, drugApiService } from '@/lib/drugApi';
 import MedicationSearch from './MedicationSearch';
+import MedicationScheduleManager from './MedicationScheduleManager';
 
 interface MedicationManagerProps {
   patientId: string;
@@ -96,6 +97,7 @@ export default function MedicationManager({
   const [isCheckingInteractions, setIsCheckingInteractions] = useState(false);
   const [relatedDrugs, setRelatedDrugs] = useState<DrugConcept[]>([]);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  const [showScheduleFor, setShowScheduleFor] = useState<string | null>(null);
 
   const handleDrugSelect = async (drug: DrugConcept) => {
     console.log('🔍 Selected drug:', drug);
@@ -770,6 +772,17 @@ export default function MedicationManager({
                   </div>
                   <div className="flex items-center space-x-2">
                     <button
+                      onClick={() => setShowScheduleFor(showScheduleFor === medication.id ? null : medication.id)}
+                      className={`p-2 transition-colors ${
+                        showScheduleFor === medication.id
+                          ? 'text-primary-600 bg-primary-50'
+                          : 'text-gray-400 hover:text-primary-600 hover:bg-primary-50'
+                      }`}
+                      title="Manage schedule"
+                    >
+                      <Clock className="w-4 h-4" />
+                    </button>
+                    <button
                       onClick={() => handleEdit(medication)}
                       className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
                       title="Edit medication"
@@ -785,6 +798,19 @@ export default function MedicationManager({
                     </button>
                   </div>
                 </div>
+                
+                {/* Medication Schedule Manager */}
+                {showScheduleFor === medication.id && (
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <MedicationScheduleManager
+                      medication={medication}
+                      onScheduleChange={() => {
+                        // Optionally refresh medication data or show success message
+                        console.log('Schedule updated for medication:', medication.name);
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             ))}
           </div>

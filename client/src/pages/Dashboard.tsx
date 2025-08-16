@@ -2,16 +2,19 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { signOutUser } from '@/lib/firebase';
-import { 
-  Heart, 
-  Calendar, 
-  Pill, 
-  Users, 
-  Settings, 
+import {
+  Heart,
+  Calendar,
+  Pill,
+  Users,
+  Settings,
   LogOut,
   Plus,
-  Bell
+  Bell,
+  Activity
 } from 'lucide-react';
+import MedicationReminders from '@/components/MedicationReminders';
+import MedicationAdherenceDashboard from '@/components/MedicationAdherenceDashboard';
 
 export default function Dashboard() {
   const { user, firebaseUser } = useAuth();
@@ -136,19 +139,13 @@ export default function Dashboard() {
 
         {/* Dashboard Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Recent Activity */}
+          {/* Medication Reminders */}
           <div className="lg:col-span-2">
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
-              <div className="text-center py-8">
-                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Bell className="w-6 h-6 text-gray-400" />
-                </div>
-                <h4 className="text-lg font-medium text-gray-900 mb-2">No recent activity</h4>
-                <p className="text-gray-500 mb-4">
-                  Activity will appear here when you add medications, schedule appointments, or complete tasks.
-                </p>
-              </div>
+              <MedicationReminders
+                patientId={user?.id || firebaseUser?.uid || ''}
+                maxItems={5}
+              />
             </div>
           </div>
 
@@ -159,7 +156,7 @@ export default function Dashboard() {
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Medications Due</span>
-                  <span className="font-semibold text-gray-400">0</span>
+                  <span className="font-semibold text-gray-400">Loading...</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Appointments</span>
@@ -171,9 +168,12 @@ export default function Dashboard() {
                 </div>
               </div>
               <div className="mt-4 pt-4 border-t border-gray-100">
-                <p className="text-sm text-gray-500 text-center">
-                  Add medications and appointments to see your daily overview.
-                </p>
+                <Link
+                  to="/profile"
+                  className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                >
+                  View all medications →
+                </Link>
               </div>
             </div>
 
@@ -196,6 +196,15 @@ export default function Dashboard() {
                 </Link>
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* Medication Adherence Section */}
+        <div className="mt-8">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <MedicationAdherenceDashboard
+              patientId={user?.id || firebaseUser?.uid || ''}
+            />
           </div>
         </div>
       </main>

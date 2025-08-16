@@ -15,9 +15,20 @@ export const COLLECTIONS = {
   FAMILY_GROUPS: 'family_groups',
   MEDICATIONS: 'medications',
   MEDICATION_LOGS: 'medication_logs',
+  MEDICATION_SCHEDULES: 'medication_schedules',
+  MEDICATION_CALENDAR_EVENTS: 'medication_calendar_events',
+  MEDICATION_ADHERENCE: 'medication_adherence',
   TASKS: 'tasks',
   APPOINTMENTS: 'appointments',
   VISIT_RECORDS: 'visit_records',
+  HEALTHCARE_PROVIDERS: 'healthcare_providers',
+  MEDICAL_FACILITIES: 'medical_facilities',
+  MEDICAL_EVENTS: 'medical_events',
+  FAMILY_CALENDAR_ACCESS: 'family_calendar_access',
+  CALENDAR_VIEW_SETTINGS: 'calendar_view_settings',
+  GOOGLE_CALENDAR_SYNC_SETTINGS: 'google_calendar_sync_settings',
+  FAMILY_NOTIFICATIONS: 'family_notifications',
+  APPOINTMENT_RESPONSIBILITIES: 'appointment_responsibilities',
 } as const;
 
 // Firebase security rules (for reference)
