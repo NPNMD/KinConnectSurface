@@ -1,12 +1,27 @@
-import type { 
-  MedicationSchedule, 
-  NewMedicationSchedule, 
-  MedicationCalendarEvent, 
+import type {
+  MedicationSchedule,
+  NewMedicationSchedule,
+  MedicationCalendarEvent,
   MedicationAdherence,
-  ApiResponse 
+  ApiResponse
 } from '@shared/types';
+import { getIdToken } from './firebase';
 
-const API_BASE = '/api/medication-calendar';
+const API_BASE = 'https://claritystream-uldp9.web.app/api/medication-calendar';
+
+// Helper function to get authenticated headers
+async function getAuthHeaders(): Promise<HeadersInit> {
+  const token = await getIdToken();
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  return headers;
+}
 
 class MedicationCalendarApi {
   // ===== MEDICATION SCHEDULE API =====
@@ -14,11 +29,10 @@ class MedicationCalendarApi {
   // Get medication schedules for the current user
   async getMedicationSchedules(): Promise<ApiResponse<MedicationSchedule[]>> {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/schedules`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         credentials: 'include',
       });
 
@@ -35,11 +49,10 @@ class MedicationCalendarApi {
   // Get medication schedules for a specific medication
   async getMedicationSchedulesByMedicationId(medicationId: string): Promise<ApiResponse<MedicationSchedule[]>> {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/schedules/medication/${medicationId}`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         credentials: 'include',
       });
 
@@ -56,11 +69,10 @@ class MedicationCalendarApi {
   // Create a new medication schedule
   async createMedicationSchedule(scheduleData: NewMedicationSchedule): Promise<ApiResponse<MedicationSchedule>> {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/schedules`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         credentials: 'include',
         body: JSON.stringify(scheduleData),
       });
@@ -77,15 +89,14 @@ class MedicationCalendarApi {
 
   // Update a medication schedule
   async updateMedicationSchedule(
-    scheduleId: string, 
+    scheduleId: string,
     updates: Partial<MedicationSchedule>
   ): Promise<ApiResponse<MedicationSchedule>> {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/schedules/${scheduleId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         credentials: 'include',
         body: JSON.stringify(updates),
       });
@@ -103,11 +114,10 @@ class MedicationCalendarApi {
   // Pause a medication schedule
   async pauseMedicationSchedule(scheduleId: string, pausedUntil?: Date): Promise<ApiResponse<MedicationSchedule>> {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/schedules/${scheduleId}/pause`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         credentials: 'include',
         body: JSON.stringify({ pausedUntil: pausedUntil?.toISOString() }),
       });
@@ -125,11 +135,10 @@ class MedicationCalendarApi {
   // Resume a medication schedule
   async resumeMedicationSchedule(scheduleId: string): Promise<ApiResponse<MedicationSchedule>> {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/schedules/${scheduleId}/resume`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         credentials: 'include',
       });
 
@@ -171,11 +180,10 @@ class MedicationCalendarApi {
       const queryString = params.toString();
       const url = `${API_BASE}/events${queryString ? `?${queryString}` : ''}`;
 
+      const headers = await getAuthHeaders();
       const response = await fetch(url, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         credentials: 'include',
       });
 
@@ -191,16 +199,15 @@ class MedicationCalendarApi {
 
   // Mark medication as taken
   async markMedicationTaken(
-    eventId: string, 
-    takenAt?: Date, 
+    eventId: string,
+    takenAt?: Date,
     notes?: string
   ): Promise<ApiResponse<MedicationCalendarEvent>> {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/events/${eventId}/taken`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         credentials: 'include',
         body: JSON.stringify({
           takenAt: takenAt?.toISOString(),
@@ -242,11 +249,10 @@ class MedicationCalendarApi {
       const queryString = params.toString();
       const url = `${API_BASE}/adherence${queryString ? `?${queryString}` : ''}`;
 
+      const headers = await getAuthHeaders();
       const response = await fetch(url, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         credentials: 'include',
       });
 
@@ -278,11 +284,10 @@ class MedicationCalendarApi {
     medications: MedicationAdherence[];
   }>> {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(`${API_BASE}/adherence/summary`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         credentials: 'include',
       });
 

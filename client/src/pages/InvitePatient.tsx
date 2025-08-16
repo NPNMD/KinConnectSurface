@@ -28,10 +28,10 @@ export default function InvitePatient() {
       <main className="max-w-7xl mx-auto px-6 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Invite a Patient
+            Invite Family Members
           </h1>
           <p className="text-gray-600">
-            Send an invitation to a patient to join your family care network on KinConnect.
+            Send an invitation to family members to help manage your medical care on KinConnect.
           </p>
         </div>
 
@@ -47,7 +47,7 @@ export default function InvitePatient() {
         {/* Information Section */}
         <div className="mt-12 max-w-4xl mx-auto">
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">How Patient Invitations Work</h2>
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">How Family Invitations Work</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="text-center">
                 <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
@@ -55,7 +55,7 @@ export default function InvitePatient() {
                 </div>
                 <h3 className="font-semibold text-gray-900 mb-2">Send Invitation</h3>
                 <p className="text-sm text-gray-600">
-                  Enter the patient's email and name to send them a secure invitation link.
+                  Enter your family member's email and name to send them a secure invitation link.
                 </p>
               </div>
               
@@ -63,9 +63,9 @@ export default function InvitePatient() {
                 <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
                   <span className="text-green-600 font-bold text-lg">2</span>
                 </div>
-                <h3 className="font-semibold text-gray-900 mb-2">Patient Accepts</h3>
+                <h3 className="font-semibold text-gray-900 mb-2">Family Member Accepts</h3>
                 <p className="text-sm text-gray-600">
-                  The patient receives an email and clicks the link to join your care network.
+                  Your family member receives an email and clicks the link to join your care network.
                 </p>
               </div>
               
@@ -75,7 +75,7 @@ export default function InvitePatient() {
                 </div>
                 <h3 className="font-semibold text-gray-900 mb-2">Connected Care</h3>
                 <p className="text-sm text-gray-600">
-                  You can now coordinate care and share important health information securely.
+                  Your family members can now help coordinate your care and manage your medical calendar.
                 </p>
               </div>
             </div>

@@ -15,31 +15,23 @@
         {
           "fieldPath": "createdAt",
           "order": "DESCENDING"
-        },
-        {
-          "fieldPath": "__name__",
-          "order": "DESCENDING"
         }
       ]
     },
     {
-      "collectionGroup": "medical_facilities",
+      "collectionGroup": "healthcare_providers",
       "queryScope": "COLLECTION",
       "fields": [
-        {
-          "fieldPath": "isActive",
-          "order": "ASCENDING"
-        },
         {
           "fieldPath": "patientId",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "createdAt",
+          "fieldPath": "isPrimaryProvider",
           "order": "DESCENDING"
         },
         {
-          "fieldPath": "__name__",
+          "fieldPath": "createdAt",
           "order": "DESCENDING"
         }
       ]
@@ -54,6 +46,42 @@
         },
         {
           "fieldPath": "specialty",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "invitations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "patientEmail",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "medical_facilities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "isActive",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "patientId",
           "order": "ASCENDING"
         },
         {
@@ -81,504 +109,6 @@
       ]
     },
     {
-      "collectionGroup": "healthcare_providers",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "isPrimaryProvider",
-          "order": "DESCENDING"
-        },
-        {
-          "fieldPath": "createdAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medical_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "startDateTime",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medical_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "startDateTime",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medical_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "eventType",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "startDateTime",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medical_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "startDateTime",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medical_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "priority",
-          "order": "DESCENDING"
-        },
-        {
-          "fieldPath": "startDateTime",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medical_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "providerId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "startDateTime",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medical_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "facilityId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "startDateTime",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medical_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "responsibilityStatus",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "startDateTime",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medical_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "requiresTransportation",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "startDateTime",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medical_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "responsiblePersonId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "startDateTime",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medical_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "isRecurring",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "startDateTime",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medical_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "parentEventId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "startDateTime",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medical_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "followUpRequired",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "followUpDate",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medical_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "hasResults",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "resultsAvailable",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "startDateTime",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medical_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "syncedToGoogleCalendar",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "lastSyncedAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "family_calendar_access",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "createdAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "family_calendar_access",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "familyMemberId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "lastAccessAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "family_calendar_access",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "emergencyAccess",
-          "order": "DESCENDING"
-        },
-        {
-          "fieldPath": "emergencyContactPriority",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "calendar_view_settings",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "userId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "google_calendar_sync_settings",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "userId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "syncEnabled",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "lastSyncAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "google_calendar_sync_settings",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "lastSyncStatus",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "lastSyncAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "family_notifications",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "recipientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "readAt",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "sentAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "family_notifications",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "notificationType",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "sentAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "family_notifications",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "appointmentId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "sentAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "appointment_responsibilities",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "claimedAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "appointment_responsibilities",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "responsiblePersonId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "claimedAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "appointment_responsibilities",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "appointmentId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "claimedAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medications",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "isActive",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "createdAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
       "collectionGroup": "medication_logs",
       "queryScope": "COLLECTION",
       "fields": [
@@ -597,25 +127,7 @@
       ]
     },
     {
-      "collectionGroup": "invitations",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientEmail",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "createdAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medication_schedules",
+      "collectionGroup": "medications",
       "queryScope": "COLLECTION",
       "fields": [
         {
@@ -628,98 +140,6 @@
         },
         {
           "fieldPath": "createdAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medication_schedules",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "nextDueDate",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medication_calendar_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "scheduledDateTime",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medication_calendar_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "scheduledDateTime",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medication_calendar_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "scheduleId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "scheduledDateTime",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medication_adherence",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "scheduleId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "date",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "medication_adherence",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "patientId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "date",
           "order": "DESCENDING"
         }
       ]

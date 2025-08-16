@@ -2,6 +2,7 @@
 // Run with: node test-calendar-api.js
 
 const API_BASE = 'http://localhost:5000/api';
+const TEST_PATIENT_ID = 'test-patient-123';
 
 // Mock Firebase ID token for testing (you'll need a real token for actual testing)
 const TEST_TOKEN = 'your-firebase-id-token-here';
@@ -23,9 +24,9 @@ async function testCalendarAPI() {
     console.log('');
 
     // Test 2: Get medical events (will fail without valid token, but tests route)
-    console.log('2. Testing GET /api/calendar/events...');
+    console.log('2. Testing GET /api/calendar/events/:patientId ...');
     try {
-      const eventsResponse = await fetch(`${API_BASE}/calendar/events`, { headers });
+      const eventsResponse = await fetch(`${API_BASE}/calendar/events/${TEST_PATIENT_ID}`, { headers });
       console.log('📊 Events endpoint status:', eventsResponse.status);
       
       if (eventsResponse.status === 401) {
@@ -40,9 +41,9 @@ async function testCalendarAPI() {
     console.log('');
 
     // Test 3: Test upcoming events endpoint
-    console.log('3. Testing GET /api/calendar/upcoming...');
+    console.log('3. Testing GET /api/calendar/upcoming/:patientId ...');
     try {
-      const upcomingResponse = await fetch(`${API_BASE}/calendar/upcoming`, { headers });
+      const upcomingResponse = await fetch(`${API_BASE}/calendar/upcoming/${TEST_PATIENT_ID}`, { headers });
       console.log('📊 Upcoming endpoint status:', upcomingResponse.status);
       
       if (upcomingResponse.status === 401) {
@@ -54,9 +55,9 @@ async function testCalendarAPI() {
     console.log('');
 
     // Test 4: Test family access endpoint
-    console.log('4. Testing GET /api/calendar/family-access...');
+    console.log('4. Testing GET /api/calendar/family-access/:patientId ...');
     try {
-      const familyResponse = await fetch(`${API_BASE}/calendar/family-access`, { headers });
+      const familyResponse = await fetch(`${API_BASE}/calendar/family-access/${TEST_PATIENT_ID}`, { headers });
       console.log('📊 Family access endpoint status:', familyResponse.status);
       
       if (familyResponse.status === 401) {
@@ -68,9 +69,9 @@ async function testCalendarAPI() {
     console.log('');
 
     // Test 5: Test calendar analytics endpoint
-    console.log('5. Testing GET /api/calendar/analytics...');
+    console.log('5. Testing GET /api/calendar/analytics/:patientId ...');
     try {
-      const analyticsResponse = await fetch(`${API_BASE}/calendar/analytics`, { headers });
+      const analyticsResponse = await fetch(`${API_BASE}/calendar/analytics/${TEST_PATIENT_ID}`, { headers });
       console.log('📊 Analytics endpoint status:', analyticsResponse.status);
       
       if (analyticsResponse.status === 401) {
@@ -82,7 +83,7 @@ async function testCalendarAPI() {
     console.log('');
 
     // Test 6: Test POST endpoint (create medical event)
-    console.log('6. Testing POST /api/calendar/events...');
+    console.log('6. Testing POST /api/calendar/events/:patientId ...');
     try {
       const createEventData = {
         title: 'Test Appointment',
@@ -98,7 +99,7 @@ async function testCalendarAPI() {
         reminders: []
       };
 
-      const createResponse = await fetch(`${API_BASE}/calendar/events`, {
+      const createResponse = await fetch(`${API_BASE}/calendar/events/${TEST_PATIENT_ID}`, {
         method: 'POST',
         headers,
         body: JSON.stringify(createEventData)

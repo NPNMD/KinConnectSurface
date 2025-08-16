@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import LoadingSpinner from './LoadingSpinner';
+import { useAuth } from '@/contexts/AuthContext';
+import { apiClient, type ApiResponse } from '@/lib/api';
 
 interface PatientInvitationProps {
   onInvitationSent?: () => void;
 }
 
 export const PatientInvitation: React.FC<PatientInvitationProps> = ({ onInvitationSent }) => {
+  const { firebaseUser, isAuthenticated } = useAuth();
   const [formData, setFormData] = useState({
     email: '',
     patientName: '',
@@ -22,33 +25,30 @@ export const PatientInvitation: React.FC<PatientInvitationProps> = ({ onInvitati
     setSuccess(null);
 
     try {
-      const token = await (window as any).firebase?.auth()?.currentUser?.getIdToken();
-      
-      if (!token) {
+      // Check authentication first
+      if (!isAuthenticated || !firebaseUser) {
         throw new Error('Please sign in to send invitations');
       }
 
-      const response = await fetch('https://us-central1-claritystream-uldp9.cloudfunctions.net/api/api/invitations/send', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(formData)
-      });
+      console.log('🚀 Sending invitation request:', formData);
+      const result = await apiClient.post<ApiResponse<any>>('/invitations/send', formData);
+      console.log('📨 Invitation response:', result);
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to send invitation');
+      if (!result.success) {
+        const errorMessage = result.error || 'Failed to send invitation';
+        console.error('❌ Invitation failed:', errorMessage);
+        throw new Error(errorMessage);
       }
 
-      setSuccess('Invitation sent successfully!');
+      console.log('✅ Invitation sent successfully!');
+      setSuccess('Invitation sent successfully! The patient will receive an email shortly.');
       setFormData({ email: '', patientName: '', message: '' });
       onInvitationSent?.();
 
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send invitation');
+    } catch (err: any) {
+      console.error('❌ Invitation error:', err);
+      const errorMessage = err?.message || err?.details || 'Failed to send invitation';
+      setError(`Failed to send invitation: ${errorMessage}`);
     } finally {
       setIsLoading(false);
     }
@@ -63,12 +63,18 @@ export const PatientInvitation: React.FC<PatientInvitationProps> = ({ onInvitati
 
   return (
     <div className="max-w-md mx-auto bg-white rounded-lg shadow-md p-6">
-      <h2 className="text-2xl font-bold text-gray-900 mb-6">Invite Patient to KinConnect</h2>
+      <h2 className="text-2xl font-bold text-gray-900 mb-6">Invite Family Member to KinConnect</h2>
+      
+      {!isAuthenticated && (
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-md mb-4">
+          <p className="text-sm">Please sign in to send invitations to family members.</p>
+        </div>
+      )}
       
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-            Patient Email *
+            Family Member Email *
           </label>
           <input
             type="email"
@@ -78,13 +84,13 @@ export const PatientInvitation: React.FC<PatientInvitationProps> = ({ onInvitati
             onChange={handleChange}
             required
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="patient@example.com"
+            placeholder="family.member@example.com"
           />
         </div>
 
         <div>
           <label htmlFor="patientName" className="block text-sm font-medium text-gray-700 mb-1">
-            Patient Name *
+            Family Member Name *
           </label>
           <input
             type="text"
@@ -94,7 +100,7 @@ export const PatientInvitation: React.FC<PatientInvitationProps> = ({ onInvitati
             onChange={handleChange}
             required
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="John Doe"
+            placeholder="John Smith"
           />
         </div>
 
@@ -127,7 +133,7 @@ export const PatientInvitation: React.FC<PatientInvitationProps> = ({ onInvitati
 
         <button
           type="submit"
-          disabled={isLoading || !formData.email || !formData.patientName}
+          disabled={isLoading || !formData.email || !formData.patientName || !isAuthenticated}
           className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
         >
           {isLoading ? (
@@ -142,7 +148,7 @@ export const PatientInvitation: React.FC<PatientInvitationProps> = ({ onInvitati
       </form>
 
       <div className="mt-6 text-sm text-gray-600">
-        <p>The patient will receive an email invitation to join your family care network on KinConnect.</p>
+        <p>Your family member will receive an email invitation to help manage your medical care on KinConnect.</p>
       </div>
     </div>
   );

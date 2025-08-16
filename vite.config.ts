@@ -23,23 +23,6 @@ export default defineConfig({
       'Cross-Origin-Opener-Policy': 'unsafe-none',
       'Cross-Origin-Embedder-Policy': 'unsafe-none',
     },
-    proxy: (() => {
-      const useFunctionsEmulator = process.env.USE_FUNCTIONS_EMULATOR === '1';
-      if (useFunctionsEmulator) {
-        return {
-          "/api": {
-            target: "http://127.0.0.1:5001",
-            changeOrigin: true,
-            rewrite: (path) => path.replace(/^\/api/, "/claritystream-uldp9/us-central1/api"),
-          },
-        };
-      }
-      return {
-        "/api": {
-          target: "http://localhost:5000",
-          changeOrigin: true,
-        },
-      };
-    })(),
+    // No proxy - all API calls will go directly to Firebase Functions in production
   },
 });

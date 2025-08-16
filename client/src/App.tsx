@@ -5,11 +5,9 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import Landing from '@/pages/Landing';
 import Dashboard from '@/pages/Dashboard';
 import PatientProfile from '@/pages/PatientProfile';
-import MedicationTest from '@/pages/MedicationTest';
 import InvitePatient from '@/pages/InvitePatient';
 import AcceptInvitation from '@/pages/AcceptInvitation';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import DropdownTest from '@/pages/DropdownTest';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -82,12 +80,6 @@ function AppRoutes() {
       
       {/* Public invitation acceptance route */}
       <Route path="/invitation/:invitationId" element={<AcceptInvitation />} />
-      
-      {/* Test route - public for testing */}
-      <Route path="/test-medications" element={<MedicationTest />} />
-      
-      {/* Dropdown test route */}
-      <Route path="/test-dropdowns" element={<DropdownTest />} />
       
       {/* Catch all route */}
       <Route path="*" element={<Navigate to="/" replace />} />

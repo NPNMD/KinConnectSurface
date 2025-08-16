@@ -1,6 +1,7 @@
 import { getIdToken } from './firebase';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+// Always use the production Firebase Functions URL
+const API_BASE_URL = 'https://claritystream-uldp9.web.app/api';
 
 // API client class
 class ApiClient {

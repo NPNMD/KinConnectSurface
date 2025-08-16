@@ -5,19 +5,12 @@
   "description": "Family care coordination platform for managing patient medical information",
   "main": "server/index.js",
   "scripts": {
-    "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
-    "dev:functions": "concurrently \"npm run emulators\" \"npm run client:dev:functions\"",
-    "emulators": "firebase emulators:start --only functions",
-    "server:dev": "tsx watch server/index.ts",
-    "client:dev": "vite",
-    "client:dev:functions": "cross-env USE_FUNCTIONS_EMULATOR=1 vite",
-    "build": "npm run build:server && npm run build:client",
-    "build:server": "tsc -p tsconfig.server.json",
-    "build:client": "vite build",
-    "start": "node dist/server/server/index.js",
+    "dev": "vite",
+    "build": "vite build",
     "clean": "rimraf dist",
     "type-check": "tsc --noEmit",
-    "setup:firebase": "node scripts/setup-firebase.js"
+    "setup:firebase": "node scripts/setup-firebase.js",
+    "deploy": "npm run build && firebase deploy"
   },
   "keywords": [
     "healthcare",

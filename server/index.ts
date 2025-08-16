@@ -6,14 +6,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 
 // Import routes
-import authRoutes from './routes/auth';
-import patientRoutes from './routes/patients';
-import medicationRoutes from './routes/medications';
-import medicationCalendarRoutes from './routes/medicationCalendar';
-import drugRoutes from './routes/drugs';
-import healthcareProviderRoutes from './routes/healthcare-providers';
-import calendarRoutes from './routes/calendar';
-import familyAccessRoutes from './routes/familyAccess';
+import invitationRoutes from './routes/invitations';
 
 // Load environment variables
 dotenv.config();
@@ -52,14 +45,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // API routes
-app.use('/api/auth', authRoutes);
-app.use('/api/patients', patientRoutes);
-app.use('/api/medications', medicationRoutes);
-app.use('/api/medication-calendar', medicationCalendarRoutes);
-app.use('/api/drugs', drugRoutes);
-app.use('/api/healthcare', healthcareProviderRoutes);
-app.use('/api/calendar', calendarRoutes);
-app.use('/api/family-access', familyAccessRoutes);
+app.use('/api/invitations', invitationRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
