@@ -143,17 +143,20 @@ app.post('/api/invitations/send', authenticate, async (req, res) => {
 		// Send invitation email
 		try {
 			console.log('📨 Initializing SendGrid...');
-			const apiKey = sendgridApiKey.value();
+			const rawApiKey = sendgridApiKey.value();
+			// Clean the API key by removing any quotes and trimming whitespace
+			const apiKey = rawApiKey ? rawApiKey.replace(/^["']|["']$/g, '').trim() : '';
 			console.log('🔑 SendGrid API key available:', !!apiKey);
+			console.log('🔑 API key starts with SG.:', apiKey.startsWith('SG.'));
 			
-			if (!apiKey) {
-				console.warn('⚠️ SendGrid API key not found, skipping email');
+			if (!apiKey || !apiKey.startsWith('SG.')) {
+				console.warn('⚠️ SendGrid API key not found or invalid format, skipping email');
 				return res.status(200).json({
 					success: true,
 					message: 'Invitation created but email delivery failed. Please try again or contact support.',
 					data: {
 						invitationId: familyAccessRef.id,
-						emailError: 'SendGrid API key not configured'
+						emailError: 'SendGrid API key not configured properly'
 					}
 				});
 			}
