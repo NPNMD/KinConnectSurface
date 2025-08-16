@@ -88,6 +88,10 @@ async function authenticate(req, res, next) {
 app.get('/api/health', (req, res) => {
     res.json({ success: true, message: 'Functions API healthy', timestamp: new Date().toISOString() });
 });
+// Test endpoint to verify deployment
+app.get('/api/test-deployment', (req, res) => {
+    res.json({ success: true, message: 'Deployment working!', timestamp: new Date().toISOString() });
+});
 // ===== INVITATION ROUTES =====
 // Send family invitation
 app.post('/api/invitations/send', authenticate, async (req, res) => {
@@ -243,6 +247,81 @@ app.post('/api/invitations/send', authenticate, async (req, res) => {
         res.status(500).json({
             success: false,
             error: 'Internal server error while sending invitation'
+        });
+    }
+});
+// Get family access for current user (both as patient and family member)
+app.get('/api/family-access', authenticate, async (req, res) => {
+    try {
+        console.log('🔍 Fetching family access for user:', req.user.uid);
+        const userId = req.user.uid;
+        // Get family access where user is a family member
+        const familyMemberQuery = await firestore.collection('family_calendar_access')
+            .where('familyMemberId', '==', userId)
+            .where('status', '==', 'active')
+            .get();
+        // Get family access where user is the patient (created by them)
+        const patientQuery = await firestore.collection('family_calendar_access')
+            .where('createdBy', '==', userId)
+            .get();
+        // Process patients the user has access to as a family member
+        const patientsIHaveAccessTo = [];
+        for (const doc of familyMemberQuery.docs) {
+            const access = doc.data();
+            // Get patient info
+            const patientDoc = await firestore.collection('users').doc(access.createdBy).get();
+            const patientData = patientDoc.data();
+            if (patientData) {
+                patientsIHaveAccessTo.push({
+                    id: doc.id,
+                    patientId: access.patientId,
+                    patientName: patientData.name,
+                    patientEmail: patientData.email,
+                    accessLevel: access.accessLevel,
+                    permissions: access.permissions,
+                    status: access.status,
+                    acceptedAt: access.acceptedAt?.toDate(),
+                    relationship: 'family_member'
+                });
+            }
+        }
+        // Process family members who have access to the current user as a patient
+        const familyMembersWithAccessToMe = [];
+        for (const doc of patientQuery.docs) {
+            const access = doc.data();
+            if (access.status === 'active' && access.familyMemberId) {
+                // Get family member info
+                const familyMemberDoc = await firestore.collection('users').doc(access.familyMemberId).get();
+                const familyMemberData = familyMemberDoc.data();
+                if (familyMemberData) {
+                    familyMembersWithAccessToMe.push({
+                        id: doc.id,
+                        familyMemberId: access.familyMemberId,
+                        familyMemberName: familyMemberData.name,
+                        familyMemberEmail: familyMemberData.email,
+                        accessLevel: access.accessLevel,
+                        permissions: access.permissions,
+                        status: access.status,
+                        acceptedAt: access.acceptedAt?.toDate(),
+                        relationship: 'patient'
+                    });
+                }
+            }
+        }
+        res.json({
+            success: true,
+            data: {
+                patientsIHaveAccessTo,
+                familyMembersWithAccessToMe,
+                totalConnections: patientsIHaveAccessTo.length + familyMembersWithAccessToMe.length
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error getting family access:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
         });
     }
 });
@@ -424,6 +503,508 @@ app.get('/api/medication-calendar/adherence', authenticate, async (req, res) => 
     }
     catch (error) {
         console.error('Error calculating medication adherence:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// ===== HEALTHCARE PROVIDER ROUTES =====
+// Get healthcare providers for a user
+app.get('/api/healthcare/providers/:userId', authenticate, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const currentUserId = req.user.uid;
+        // Check if user has access to this patient's data
+        if (userId !== currentUserId) {
+            // Check family access
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', currentUserId)
+                .where('patientId', '==', userId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+        }
+        // Get healthcare providers for this user
+        const providersQuery = await firestore.collection('healthcare_providers')
+            .where('patientId', '==', userId)
+            .orderBy('name')
+            .get();
+        const providers = providersQuery.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            createdAt: doc.data().createdAt?.toDate(),
+            updatedAt: doc.data().updatedAt?.toDate()
+        }));
+        res.json({
+            success: true,
+            data: providers
+        });
+    }
+    catch (error) {
+        console.error('Error getting healthcare providers:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Add healthcare provider
+app.post('/api/healthcare/providers', authenticate, async (req, res) => {
+    try {
+        const userId = req.user.uid;
+        const { name, specialty, phone, email, address, notes } = req.body;
+        if (!name || !specialty) {
+            return res.status(400).json({
+                success: false,
+                error: 'Name and specialty are required'
+            });
+        }
+        const providerData = {
+            patientId: userId,
+            name,
+            specialty,
+            phone: phone || '',
+            email: email || '',
+            address: address || '',
+            notes: notes || '',
+            createdAt: admin.firestore.Timestamp.now(),
+            updatedAt: admin.firestore.Timestamp.now()
+        };
+        const providerRef = await firestore.collection('healthcare_providers').add(providerData);
+        res.json({
+            success: true,
+            data: {
+                id: providerRef.id,
+                ...providerData,
+                createdAt: providerData.createdAt.toDate(),
+                updatedAt: providerData.updatedAt.toDate()
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error adding healthcare provider:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// ===== HEALTHCARE FACILITIES ROUTES =====
+// Get healthcare facilities for a user
+app.get('/api/healthcare/facilities/:userId', authenticate, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const currentUserId = req.user.uid;
+        // Check if user has access to this patient's data
+        if (userId !== currentUserId) {
+            // Check family access
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', currentUserId)
+                .where('patientId', '==', userId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+        }
+        // Get healthcare facilities for this user
+        const facilitiesQuery = await firestore.collection('healthcare_facilities')
+            .where('patientId', '==', userId)
+            .orderBy('name')
+            .get();
+        const facilities = facilitiesQuery.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            createdAt: doc.data().createdAt?.toDate(),
+            updatedAt: doc.data().updatedAt?.toDate()
+        }));
+        res.json({
+            success: true,
+            data: facilities
+        });
+    }
+    catch (error) {
+        console.error('Error getting healthcare facilities:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// ===== PATIENT PROFILE ROUTES =====
+// Get patient profile
+app.get('/api/patients/profile', authenticate, async (req, res) => {
+    try {
+        const userId = req.user.uid;
+        const userDoc = await firestore.collection('users').doc(userId).get();
+        if (!userDoc.exists) {
+            return res.status(404).json({
+                success: false,
+                error: 'Profile not found'
+            });
+        }
+        const userData = userDoc.data();
+        res.json({
+            success: true,
+            data: {
+                ...userData,
+                createdAt: userData?.createdAt?.toDate(),
+                updatedAt: userData?.updatedAt?.toDate()
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error getting patient profile:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Update patient profile
+app.put('/api/patients/profile', authenticate, async (req, res) => {
+    try {
+        const userId = req.user.uid;
+        const updateData = req.body;
+        // Remove sensitive fields that shouldn't be updated via this endpoint
+        delete updateData.id;
+        delete updateData.createdAt;
+        // Add updated timestamp
+        updateData.updatedAt = admin.firestore.Timestamp.now();
+        await firestore.collection('users').doc(userId).update(updateData);
+        // Get updated profile
+        const updatedDoc = await firestore.collection('users').doc(userId).get();
+        const updatedData = updatedDoc.data();
+        res.json({
+            success: true,
+            data: {
+                ...updatedData,
+                createdAt: updatedData?.createdAt?.toDate(),
+                updatedAt: updatedData?.updatedAt?.toDate()
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error updating patient profile:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// ===== MEDICATIONS ROUTES =====
+// Get medications for a user
+app.get('/api/medications', authenticate, async (req, res) => {
+    try {
+        const userId = req.user.uid;
+        // Get medications for this user
+        const medicationsQuery = await firestore.collection('medications')
+            .where('patientId', '==', userId)
+            .orderBy('name')
+            .get();
+        const medications = medicationsQuery.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            createdAt: doc.data().createdAt?.toDate(),
+            updatedAt: doc.data().updatedAt?.toDate()
+        }));
+        res.json({
+            success: true,
+            data: medications
+        });
+    }
+    catch (error) {
+        console.error('Error getting medications:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Add medication
+app.post('/api/medications', authenticate, async (req, res) => {
+    try {
+        const userId = req.user.uid;
+        const medicationData = req.body;
+        if (!medicationData.name) {
+            return res.status(400).json({
+                success: false,
+                error: 'Medication name is required'
+            });
+        }
+        const newMedication = {
+            ...medicationData,
+            patientId: userId,
+            createdAt: admin.firestore.Timestamp.now(),
+            updatedAt: admin.firestore.Timestamp.now()
+        };
+        const medicationRef = await firestore.collection('medications').add(newMedication);
+        res.json({
+            success: true,
+            data: {
+                id: medicationRef.id,
+                ...newMedication,
+                createdAt: newMedication.createdAt.toDate(),
+                updatedAt: newMedication.updatedAt.toDate()
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error adding medication:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// ===== MEDICAL EVENTS/CALENDAR ROUTES =====
+// Get medical events for a patient
+app.get('/api/medical-events/:patientId', authenticate, async (req, res) => {
+    try {
+        const { patientId } = req.params;
+        const currentUserId = req.user.uid;
+        // Check if user has access to this patient's data
+        if (patientId !== currentUserId) {
+            // Check family access
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', currentUserId)
+                .where('patientId', '==', patientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+        }
+        // Get medical events for this patient
+        const eventsQuery = await firestore.collection('medical_events')
+            .where('patientId', '==', patientId)
+            .orderBy('startDateTime')
+            .get();
+        const events = eventsQuery.docs.map(doc => {
+            const data = doc.data();
+            return {
+                id: doc.id,
+                ...data,
+                startDateTime: data.startDateTime?.toDate(),
+                endDateTime: data.endDateTime?.toDate(),
+                createdAt: data.createdAt?.toDate(),
+                updatedAt: data.updatedAt?.toDate()
+            };
+        });
+        res.json({
+            success: true,
+            data: events
+        });
+    }
+    catch (error) {
+        console.error('Error getting medical events:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Create a new medical event
+app.post('/api/medical-events', authenticate, async (req, res) => {
+    try {
+        const userId = req.user.uid;
+        const eventData = req.body;
+        if (!eventData.title || !eventData.startDateTime || !eventData.patientId) {
+            return res.status(400).json({
+                success: false,
+                error: 'Title, start date/time, and patient ID are required'
+            });
+        }
+        // Check if user has access to create events for this patient
+        if (eventData.patientId !== userId) {
+            // Check family access with create permissions
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', userId)
+                .where('patientId', '==', eventData.patientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+            // Check if user has create permissions
+            const accessData = familyAccess.docs[0].data();
+            if (!accessData.permissions?.canCreate) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Insufficient permissions to create events'
+                });
+            }
+        }
+        const newEvent = {
+            ...eventData,
+            startDateTime: admin.firestore.Timestamp.fromDate(new Date(eventData.startDateTime)),
+            endDateTime: admin.firestore.Timestamp.fromDate(new Date(eventData.endDateTime)),
+            createdBy: userId,
+            createdAt: admin.firestore.Timestamp.now(),
+            updatedAt: admin.firestore.Timestamp.now(),
+            version: 1
+        };
+        const eventRef = await firestore.collection('medical_events').add(newEvent);
+        res.json({
+            success: true,
+            data: {
+                id: eventRef.id,
+                ...newEvent,
+                startDateTime: newEvent.startDateTime.toDate(),
+                endDateTime: newEvent.endDateTime.toDate(),
+                createdAt: newEvent.createdAt.toDate(),
+                updatedAt: newEvent.updatedAt.toDate()
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error creating medical event:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Update a medical event
+app.put('/api/medical-events/:eventId', authenticate, async (req, res) => {
+    try {
+        const { eventId } = req.params;
+        const userId = req.user.uid;
+        const updateData = req.body;
+        // Get the existing event
+        const eventDoc = await firestore.collection('medical_events').doc(eventId).get();
+        if (!eventDoc.exists) {
+            return res.status(404).json({
+                success: false,
+                error: 'Event not found'
+            });
+        }
+        const existingEvent = eventDoc.data();
+        // Check if user has access to update this event
+        if (existingEvent?.patientId !== userId) {
+            // Check family access with edit permissions
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', userId)
+                .where('patientId', '==', existingEvent?.patientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+            // Check if user has edit permissions
+            const accessData = familyAccess.docs[0].data();
+            if (!accessData.permissions?.canEdit) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Insufficient permissions to edit events'
+                });
+            }
+        }
+        // Prepare update data
+        const updatedEvent = {
+            ...updateData,
+            updatedAt: admin.firestore.Timestamp.now(),
+            version: (existingEvent?.version || 1) + 1
+        };
+        // Convert date strings to timestamps if provided
+        if (updateData.startDateTime) {
+            updatedEvent.startDateTime = admin.firestore.Timestamp.fromDate(new Date(updateData.startDateTime));
+        }
+        if (updateData.endDateTime) {
+            updatedEvent.endDateTime = admin.firestore.Timestamp.fromDate(new Date(updateData.endDateTime));
+        }
+        // Remove fields that shouldn't be updated
+        delete updatedEvent.id;
+        delete updatedEvent.createdAt;
+        delete updatedEvent.createdBy;
+        delete updatedEvent.patientId;
+        await eventDoc.ref.update(updatedEvent);
+        // Get updated event
+        const updatedDoc = await eventDoc.ref.get();
+        const updatedData = updatedDoc.data();
+        res.json({
+            success: true,
+            data: {
+                id: eventId,
+                ...updatedData,
+                startDateTime: updatedData?.startDateTime?.toDate(),
+                endDateTime: updatedData?.endDateTime?.toDate(),
+                createdAt: updatedData?.createdAt?.toDate(),
+                updatedAt: updatedData?.updatedAt?.toDate()
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error updating medical event:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Delete a medical event
+app.delete('/api/medical-events/:eventId', authenticate, async (req, res) => {
+    try {
+        const { eventId } = req.params;
+        const userId = req.user.uid;
+        // Get the existing event
+        const eventDoc = await firestore.collection('medical_events').doc(eventId).get();
+        if (!eventDoc.exists) {
+            return res.status(404).json({
+                success: false,
+                error: 'Event not found'
+            });
+        }
+        const existingEvent = eventDoc.data();
+        // Check if user has access to delete this event
+        if (existingEvent?.patientId !== userId) {
+            // Check family access with delete permissions
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', userId)
+                .where('patientId', '==', existingEvent?.patientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+            // Check if user has delete permissions
+            const accessData = familyAccess.docs[0].data();
+            if (!accessData.permissions?.canDelete) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Insufficient permissions to delete events'
+                });
+            }
+        }
+        await eventDoc.ref.delete();
+        res.json({
+            success: true,
+            message: 'Event deleted successfully'
+        });
+    }
+    catch (error) {
+        console.error('Error deleting medical event:', error);
         res.status(500).json({
             success: false,
             error: 'Internal server error'

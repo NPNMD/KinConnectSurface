@@ -6,6 +6,7 @@ import FamilyResponsibilityDashboard from './FamilyResponsibilityDashboard';
 import NotificationSystem from './NotificationSystem';
 import CalendarAnalytics from './CalendarAnalytics';
 import AppointmentTemplates from './AppointmentTemplates';
+import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import type {
   MedicalEvent,
   MedicalEventType,
@@ -104,7 +105,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
     tags: [] as string[]
   });
 
-  // Initialize Google Calendar API
+  // Initialize Google Calendar API and load events
   useEffect(() => {
     const initializeGoogleCalendar = async () => {
       try {
@@ -142,7 +143,12 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
     };
 
     initializeGoogleCalendar();
-  }, []);
+    
+    // Load calendar events when component mounts
+    if (patientId) {
+      loadCalendarEvents();
+    }
+  }, [patientId]);
 
   // Calendar view utility functions
   const getCalendarDays = (date: Date, view: 'month' | 'week') => {
@@ -325,13 +331,29 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
     try {
       setIsLoading(true);
       
-      // In a real implementation, this would fetch from our medical calendar API
-      // For now, we start with an empty array to show the empty state
-      const events: MedicalEvent[] = [];
+      // Fetch events from the API
+      const response = await apiClient.get<{ success: boolean; data: MedicalEvent[] }>(
+        API_ENDPOINTS.MEDICAL_EVENTS(patientId)
+      );
       
-      setEvents(events);
+      if (response.success && response.data) {
+        // Convert date strings back to Date objects
+        const events = response.data.map(event => ({
+          ...event,
+          startDateTime: new Date(event.startDateTime),
+          endDateTime: new Date(event.endDateTime),
+          createdAt: new Date(event.createdAt),
+          updatedAt: new Date(event.updatedAt)
+        }));
+        setEvents(events);
+      } else {
+        console.warn('Failed to load events:', response);
+        setEvents([]);
+      }
     } catch (error) {
       console.error('Error loading calendar events:', error);
+      // Set empty array on error to show empty state
+      setEvents([]);
     } finally {
       setIsLoading(false);
     }
@@ -354,16 +376,15 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
         if (!proceed) return;
       }
 
-      const event: MedicalEvent = {
-        id: Date.now().toString(),
+      const eventData = {
         patientId,
         title: newEvent.title,
         description: newEvent.description,
         eventType: newEvent.eventType,
         priority: newEvent.priority,
         status: newEvent.status,
-        startDateTime,
-        endDateTime,
+        startDateTime: startDateTime.toISOString(),
+        endDateTime: endDateTime.toISOString(),
         duration: newEvent.duration,
         isAllDay: newEvent.isAllDay,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -395,60 +416,76 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
         preAuthRequired: newEvent.preAuthRequired,
         preAuthNumber: newEvent.preAuthNumber,
         notes: newEvent.notes,
-        tags: newEvent.tags,
-        createdBy: patientId, // In real app, this would be the current user ID
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        version: 1
+        tags: newEvent.tags
       };
 
-      // In a real implementation, this would create the event via our medical calendar API
-      setEvents(prev => [...prev, event]);
-      
-      // Reset form
-      setNewEvent({
-        title: '',
-        description: '',
-        eventType: 'appointment',
-        priority: 'medium',
-        status: 'scheduled',
-        date: '',
-        time: '',
-        duration: 60,
-        isAllDay: false,
-        location: '',
-        address: '',
-        facilityId: '',
-        facilityName: '',
-        room: '',
-        providerId: '',
-        providerName: '',
-        providerSpecialty: '',
-        providerPhone: '',
-        providerEmail: '',
-        medicalConditions: [],
-        medications: [],
-        allergies: [],
-        specialInstructions: '',
-        preparationInstructions: '',
-        requiresTransportation: false,
-        responsiblePersonId: '',
-        responsiblePersonName: '',
-        transportationNotes: '',
-        accompanimentRequired: false,
-        isRecurring: false,
-        insuranceRequired: false,
-        copayAmount: 0,
-        preAuthRequired: false,
-        preAuthNumber: '',
-        notes: '',
-        tags: []
-      });
-      setShowAddEvent(false);
-      
-      console.log('Medical event added:', event);
+      // Save event to API
+      const response = await apiClient.post<{ success: boolean; data: MedicalEvent }>(
+        API_ENDPOINTS.MEDICAL_EVENT_CREATE,
+        eventData
+      );
+
+      if (response.success && response.data) {
+        // Convert date strings back to Date objects
+        const savedEvent = {
+          ...response.data,
+          startDateTime: new Date(response.data.startDateTime),
+          endDateTime: new Date(response.data.endDateTime),
+          createdAt: new Date(response.data.createdAt),
+          updatedAt: new Date(response.data.updatedAt)
+        };
+        
+        // Add to local state
+        setEvents(prev => [...prev, savedEvent]);
+        
+        // Reset form
+        setNewEvent({
+          title: '',
+          description: '',
+          eventType: 'appointment',
+          priority: 'medium',
+          status: 'scheduled',
+          date: '',
+          time: '',
+          duration: 60,
+          isAllDay: false,
+          location: '',
+          address: '',
+          facilityId: '',
+          facilityName: '',
+          room: '',
+          providerId: '',
+          providerName: '',
+          providerSpecialty: '',
+          providerPhone: '',
+          providerEmail: '',
+          medicalConditions: [],
+          medications: [],
+          allergies: [],
+          specialInstructions: '',
+          preparationInstructions: '',
+          requiresTransportation: false,
+          responsiblePersonId: '',
+          responsiblePersonName: '',
+          transportationNotes: '',
+          accompanimentRequired: false,
+          isRecurring: false,
+          insuranceRequired: false,
+          copayAmount: 0,
+          preAuthRequired: false,
+          preAuthNumber: '',
+          notes: '',
+          tags: []
+        });
+        setShowAddEvent(false);
+        
+        console.log('Medical event saved successfully:', savedEvent);
+      } else {
+        throw new Error('Failed to save event');
+      }
     } catch (error) {
       console.error('Error adding medical event:', error);
+      alert('Failed to save appointment. Please try again.');
     }
   };
 
@@ -513,15 +550,14 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
         if (!proceed) return;
       }
 
-      const updatedEvent: MedicalEvent = {
-        ...editingEvent,
+      const updateData = {
         title: newEvent.title,
         description: newEvent.description,
         eventType: newEvent.eventType,
         priority: newEvent.priority,
         status: newEvent.status,
-        startDateTime,
-        endDateTime,
+        startDateTime: startDateTime.toISOString(),
+        endDateTime: endDateTime.toISOString(),
         duration: newEvent.duration,
         isAllDay: newEvent.isAllDay,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -551,59 +587,77 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
         preAuthRequired: newEvent.preAuthRequired,
         preAuthNumber: newEvent.preAuthNumber,
         notes: newEvent.notes,
-        tags: newEvent.tags,
-        updatedAt: new Date(),
-        version: editingEvent.version + 1
+        tags: newEvent.tags
       };
 
-      // Update the event in the list
-      setEvents(prev => prev.map(e => e.id === editingEvent.id ? updatedEvent : e));
-      
-      // Reset form and editing state
-      setNewEvent({
-        title: '',
-        description: '',
-        eventType: 'appointment',
-        priority: 'medium',
-        status: 'scheduled',
-        date: '',
-        time: '',
-        duration: 60,
-        isAllDay: false,
-        location: '',
-        address: '',
-        facilityId: '',
-        facilityName: '',
-        room: '',
-        providerId: '',
-        providerName: '',
-        providerSpecialty: '',
-        providerPhone: '',
-        providerEmail: '',
-        medicalConditions: [],
-        medications: [],
-        allergies: [],
-        specialInstructions: '',
-        preparationInstructions: '',
-        requiresTransportation: false,
-        responsiblePersonId: '',
-        responsiblePersonName: '',
-        transportationNotes: '',
-        accompanimentRequired: false,
-        isRecurring: false,
-        insuranceRequired: false,
-        copayAmount: 0,
-        preAuthRequired: false,
-        preAuthNumber: '',
-        notes: '',
-        tags: []
-      });
-      setEditingEvent(null);
-      setShowAddEvent(false);
-      
-      console.log('Medical event updated:', updatedEvent);
+      // Update event via API
+      const response = await apiClient.put<{ success: boolean; data: MedicalEvent }>(
+        API_ENDPOINTS.MEDICAL_EVENT_UPDATE(editingEvent.id),
+        updateData
+      );
+
+      if (response.success && response.data) {
+        // Convert date strings back to Date objects
+        const updatedEvent = {
+          ...response.data,
+          startDateTime: new Date(response.data.startDateTime),
+          endDateTime: new Date(response.data.endDateTime),
+          createdAt: new Date(response.data.createdAt),
+          updatedAt: new Date(response.data.updatedAt)
+        };
+        
+        // Update the event in local state
+        setEvents(prev => prev.map(e => e.id === editingEvent.id ? updatedEvent : e));
+        
+        // Reset form and editing state
+        setNewEvent({
+          title: '',
+          description: '',
+          eventType: 'appointment',
+          priority: 'medium',
+          status: 'scheduled',
+          date: '',
+          time: '',
+          duration: 60,
+          isAllDay: false,
+          location: '',
+          address: '',
+          facilityId: '',
+          facilityName: '',
+          room: '',
+          providerId: '',
+          providerName: '',
+          providerSpecialty: '',
+          providerPhone: '',
+          providerEmail: '',
+          medicalConditions: [],
+          medications: [],
+          allergies: [],
+          specialInstructions: '',
+          preparationInstructions: '',
+          requiresTransportation: false,
+          responsiblePersonId: '',
+          responsiblePersonName: '',
+          transportationNotes: '',
+          accompanimentRequired: false,
+          isRecurring: false,
+          insuranceRequired: false,
+          copayAmount: 0,
+          preAuthRequired: false,
+          preAuthNumber: '',
+          notes: '',
+          tags: []
+        });
+        setEditingEvent(null);
+        setShowAddEvent(false);
+        
+        console.log('Medical event updated successfully:', updatedEvent);
+      } else {
+        throw new Error('Failed to update event');
+      }
     } catch (error) {
       console.error('Error updating medical event:', error);
+      alert('Failed to update appointment. Please try again.');
     }
   };
 

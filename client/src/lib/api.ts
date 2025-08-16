@@ -1,7 +1,7 @@
 import { getIdToken } from './firebase';
 
 // Always use the production Firebase Functions URL
-const API_BASE_URL = 'https://claritystream-uldp9.web.app/api';
+const API_BASE_URL = 'https://us-central1-claritystream-uldp9.cloudfunctions.net/api/api';
 
 // Local storage keys for development fallback
 const STORAGE_KEYS = {
@@ -68,7 +68,12 @@ class ApiClient {
       console.warn(`API request failed for ${endpoint}, attempting fallback:`, error);
       
       if (fallbackHandler) {
-        return await fallbackHandler();
+        try {
+          return await fallbackHandler();
+        } catch (fallbackError) {
+          console.error(`Fallback also failed for ${endpoint}:`, fallbackError);
+          throw error; // Throw original error, not fallback error
+        }
       }
       
       throw error;
@@ -91,14 +96,35 @@ class ApiClient {
       const response = await fetch(url, config);
       
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch {
+          // If we can't parse error response, use status-based message
+          if (response.status === 401) {
+            errorMessage = 'Authentication required';
+          } else if (response.status === 403) {
+            errorMessage = 'Access denied';
+          } else if (response.status === 404) {
+            errorMessage = 'Resource not found';
+          } else if (response.status >= 500) {
+            errorMessage = 'Internal server error';
+          }
+        }
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error('API request failed:', error);
+      console.error(`API request failed for ${endpoint}:`, error);
+      
+      // Add more context to network errors
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        throw new Error('Network error - please check your internet connection');
+      }
+      
       throw error;
     }
   }
@@ -249,6 +275,13 @@ export const API_ENDPOINTS = {
   
   // Health check
   HEALTH: '/health',
+  
+  // Medical Events/Calendar
+  MEDICAL_EVENTS: (patientId: string) => `/medical-events/${patientId}`,
+  MEDICAL_EVENT_CREATE: '/medical-events',
+  MEDICAL_EVENT_BY_ID: (eventId: string) => `/medical-events/${eventId}`,
+  MEDICAL_EVENT_UPDATE: (eventId: string) => `/medical-events/${eventId}`,
+  MEDICAL_EVENT_DELETE: (eventId: string) => `/medical-events/${eventId}`,
   
   // Family Access
   FAMILY_ACCESS: '/family-access',

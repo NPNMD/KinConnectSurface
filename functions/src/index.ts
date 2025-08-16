@@ -814,6 +814,284 @@ app.post('/api/medications', authenticate, async (req, res) => {
 	}
 });
 
+// ===== MEDICAL EVENTS/CALENDAR ROUTES =====
+
+// Get medical events for a patient
+app.get('/api/medical-events/:patientId', authenticate, async (req, res) => {
+	try {
+		const { patientId } = req.params;
+		const currentUserId = (req as any).user.uid;
+		
+		// Check if user has access to this patient's data
+		if (patientId !== currentUserId) {
+			// Check family access
+			const familyAccess = await firestore.collection('family_calendar_access')
+				.where('familyMemberId', '==', currentUserId)
+				.where('patientId', '==', patientId)
+				.where('status', '==', 'active')
+				.get();
+			
+			if (familyAccess.empty) {
+				return res.status(403).json({
+					success: false,
+					error: 'Access denied'
+				});
+			}
+		}
+		
+		// Get medical events for this patient
+		const eventsQuery = await firestore.collection('medical_events')
+			.where('patientId', '==', patientId)
+			.orderBy('startDateTime')
+			.get();
+		
+		const events = eventsQuery.docs.map(doc => {
+			const data = doc.data();
+			return {
+				id: doc.id,
+				...data,
+				startDateTime: data.startDateTime?.toDate(),
+				endDateTime: data.endDateTime?.toDate(),
+				createdAt: data.createdAt?.toDate(),
+				updatedAt: data.updatedAt?.toDate()
+			};
+		});
+		
+		res.json({
+			success: true,
+			data: events
+		});
+	} catch (error) {
+		console.error('Error getting medical events:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Create a new medical event
+app.post('/api/medical-events', authenticate, async (req, res) => {
+	try {
+		const userId = (req as any).user.uid;
+		const eventData = req.body;
+		
+		if (!eventData.title || !eventData.startDateTime || !eventData.patientId) {
+			return res.status(400).json({
+				success: false,
+				error: 'Title, start date/time, and patient ID are required'
+			});
+		}
+		
+		// Check if user has access to create events for this patient
+		if (eventData.patientId !== userId) {
+			// Check family access with create permissions
+			const familyAccess = await firestore.collection('family_calendar_access')
+				.where('familyMemberId', '==', userId)
+				.where('patientId', '==', eventData.patientId)
+				.where('status', '==', 'active')
+				.get();
+			
+			if (familyAccess.empty) {
+				return res.status(403).json({
+					success: false,
+					error: 'Access denied'
+				});
+			}
+			
+			// Check if user has create permissions
+			const accessData = familyAccess.docs[0].data();
+			if (!accessData.permissions?.canCreate) {
+				return res.status(403).json({
+					success: false,
+					error: 'Insufficient permissions to create events'
+				});
+			}
+		}
+		
+		const newEvent = {
+			...eventData,
+			startDateTime: admin.firestore.Timestamp.fromDate(new Date(eventData.startDateTime)),
+			endDateTime: admin.firestore.Timestamp.fromDate(new Date(eventData.endDateTime)),
+			createdBy: userId,
+			createdAt: admin.firestore.Timestamp.now(),
+			updatedAt: admin.firestore.Timestamp.now(),
+			version: 1
+		};
+		
+		const eventRef = await firestore.collection('medical_events').add(newEvent);
+		
+		res.json({
+			success: true,
+			data: {
+				id: eventRef.id,
+				...newEvent,
+				startDateTime: newEvent.startDateTime.toDate(),
+				endDateTime: newEvent.endDateTime.toDate(),
+				createdAt: newEvent.createdAt.toDate(),
+				updatedAt: newEvent.updatedAt.toDate()
+			}
+		});
+	} catch (error) {
+		console.error('Error creating medical event:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Update a medical event
+app.put('/api/medical-events/:eventId', authenticate, async (req, res) => {
+	try {
+		const { eventId } = req.params;
+		const userId = (req as any).user.uid;
+		const updateData = req.body;
+		
+		// Get the existing event
+		const eventDoc = await firestore.collection('medical_events').doc(eventId).get();
+		
+		if (!eventDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Event not found'
+			});
+		}
+		
+		const existingEvent = eventDoc.data();
+		
+		// Check if user has access to update this event
+		if (existingEvent?.patientId !== userId) {
+			// Check family access with edit permissions
+			const familyAccess = await firestore.collection('family_calendar_access')
+				.where('familyMemberId', '==', userId)
+				.where('patientId', '==', existingEvent?.patientId)
+				.where('status', '==', 'active')
+				.get();
+			
+			if (familyAccess.empty) {
+				return res.status(403).json({
+					success: false,
+					error: 'Access denied'
+				});
+			}
+			
+			// Check if user has edit permissions
+			const accessData = familyAccess.docs[0].data();
+			if (!accessData.permissions?.canEdit) {
+				return res.status(403).json({
+					success: false,
+					error: 'Insufficient permissions to edit events'
+				});
+			}
+		}
+		
+		// Prepare update data
+		const updatedEvent = {
+			...updateData,
+			updatedAt: admin.firestore.Timestamp.now(),
+			version: (existingEvent?.version || 1) + 1
+		};
+		
+		// Convert date strings to timestamps if provided
+		if (updateData.startDateTime) {
+			updatedEvent.startDateTime = admin.firestore.Timestamp.fromDate(new Date(updateData.startDateTime));
+		}
+		if (updateData.endDateTime) {
+			updatedEvent.endDateTime = admin.firestore.Timestamp.fromDate(new Date(updateData.endDateTime));
+		}
+		
+		// Remove fields that shouldn't be updated
+		delete updatedEvent.id;
+		delete updatedEvent.createdAt;
+		delete updatedEvent.createdBy;
+		delete updatedEvent.patientId;
+		
+		await eventDoc.ref.update(updatedEvent);
+		
+		// Get updated event
+		const updatedDoc = await eventDoc.ref.get();
+		const updatedData = updatedDoc.data();
+		
+		res.json({
+			success: true,
+			data: {
+				id: eventId,
+				...updatedData,
+				startDateTime: updatedData?.startDateTime?.toDate(),
+				endDateTime: updatedData?.endDateTime?.toDate(),
+				createdAt: updatedData?.createdAt?.toDate(),
+				updatedAt: updatedData?.updatedAt?.toDate()
+			}
+		});
+	} catch (error) {
+		console.error('Error updating medical event:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Delete a medical event
+app.delete('/api/medical-events/:eventId', authenticate, async (req, res) => {
+	try {
+		const { eventId } = req.params;
+		const userId = (req as any).user.uid;
+		
+		// Get the existing event
+		const eventDoc = await firestore.collection('medical_events').doc(eventId).get();
+		
+		if (!eventDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Event not found'
+			});
+		}
+		
+		const existingEvent = eventDoc.data();
+		
+		// Check if user has access to delete this event
+		if (existingEvent?.patientId !== userId) {
+			// Check family access with delete permissions
+			const familyAccess = await firestore.collection('family_calendar_access')
+				.where('familyMemberId', '==', userId)
+				.where('patientId', '==', existingEvent?.patientId)
+				.where('status', '==', 'active')
+				.get();
+			
+			if (familyAccess.empty) {
+				return res.status(403).json({
+					success: false,
+					error: 'Access denied'
+				});
+			}
+			
+			// Check if user has delete permissions
+			const accessData = familyAccess.docs[0].data();
+			if (!accessData.permissions?.canDelete) {
+				return res.status(403).json({
+					success: false,
+					error: 'Insufficient permissions to delete events'
+				});
+			}
+		}
+		
+		await eventDoc.ref.delete();
+		
+		res.json({
+			success: true,
+			message: 'Event deleted successfully'
+		});
+	} catch (error) {
+		console.error('Error deleting medical event:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
 // Error handling middleware
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('Unhandled error:', err);
