@@ -57,11 +57,9 @@ export default function HealthcareProviderSearch({
     setSearchQuery(value);
     
     // Debounce search
-    const timeoutId = setTimeout(() => {
+    setTimeout(() => {
       handleSearch(value);
     }, 500);
-
-    return () => clearTimeout(timeoutId);
   };
 
   const handleProviderSelect = (provider: GooglePlaceResult) => {

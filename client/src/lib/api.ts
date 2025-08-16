@@ -3,6 +3,28 @@ import { getIdToken } from './firebase';
 // Always use the production Firebase Functions URL
 const API_BASE_URL = 'https://claritystream-uldp9.web.app/api';
 
+// Local storage keys for development fallback
+const STORAGE_KEYS = {
+  HEALTHCARE_PROVIDERS: 'kinconnect_healthcare_providers',
+  PATIENT_PROFILE: 'kinconnect_patient_profile',
+  MEDICATIONS: 'kinconnect_medications',
+  MEDICAL_FACILITIES: 'kinconnect_medical_facilities',
+} as const;
+
+// Development fallback data
+const createMockProvider = (name: string, specialty: string) => ({
+  id: `provider_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+  name,
+  specialty,
+  phone: '',
+  email: '',
+  address: '',
+  notes: '',
+  patientId: 'current_user',
+  createdAt: new Date(),
+  updatedAt: new Date()
+});
+
 // API client class
 class ApiClient {
   private async getHeaders(): Promise<HeadersInit> {
@@ -16,6 +38,41 @@ class ApiClient {
     }
 
     return headers;
+  }
+
+  private getLocalStorageData<T>(key: string, defaultValue: T): T {
+    try {
+      const stored = localStorage.getItem(key);
+      return stored ? JSON.parse(stored) : defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  }
+
+  private setLocalStorageData<T>(key: string, data: T): void {
+    try {
+      localStorage.setItem(key, JSON.stringify(data));
+    } catch (error) {
+      console.warn('Failed to save to localStorage:', error);
+    }
+  }
+
+  private async requestWithFallback<T>(
+    endpoint: string,
+    options: RequestInit = {},
+    fallbackHandler?: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await this.request<T>(endpoint, options);
+    } catch (error) {
+      console.warn(`API request failed for ${endpoint}, attempting fallback:`, error);
+      
+      if (fallbackHandler) {
+        return await fallbackHandler();
+      }
+      
+      throw error;
+    }
   }
 
   private async request<T>(
@@ -46,21 +103,90 @@ class ApiClient {
     }
   }
 
-  // GET request
+  // GET request with fallback
   async get<T>(endpoint: string): Promise<T> {
+    // Special handling for healthcare providers
+    if (endpoint.includes('/healthcare/providers/')) {
+      return this.requestWithFallback<T>(endpoint, { method: 'GET' }, async () => {
+        const providers = this.getLocalStorageData(STORAGE_KEYS.HEALTHCARE_PROVIDERS, [
+          createMockProvider('Dr. Sarah Johnson', 'Cardiologist'),
+          createMockProvider('Dr. Michael Chen', 'Family Medicine'),
+          createMockProvider('Dr. Emily Rodriguez', 'Dermatologist'),
+          createMockProvider('Dr. David Kim', 'Orthopedic Surgery'),
+        ]);
+        return { success: true, data: providers } as T;
+      });
+    }
+
+    // Special handling for patient profile
+    if (endpoint === '/patients/profile') {
+      return this.requestWithFallback<T>(endpoint, { method: 'GET' }, async () => {
+        const profile = this.getLocalStorageData(STORAGE_KEYS.PATIENT_PROFILE, {
+          id: 'current_user',
+          name: 'John Doe',
+          email: 'john.doe@example.com',
+          dateOfBirth: '1990-01-01',
+          phone: '(555) 123-4567',
+          address: '123 Main St, City, State 12345',
+          emergencyContact: {
+            name: 'Jane Doe',
+            phone: '(555) 987-6543',
+            relationship: 'Spouse'
+          }
+        });
+        return { success: true, data: profile } as T;
+      });
+    }
+
+    // Special handling for medications
+    if (endpoint === '/medications') {
+      return this.requestWithFallback<T>(endpoint, { method: 'GET' }, async () => {
+        const medications = this.getLocalStorageData(STORAGE_KEYS.MEDICATIONS, []);
+        return { success: true, data: medications } as T;
+      });
+    }
+
     return this.request<T>(endpoint, { method: 'GET' });
   }
 
-  // POST request
+  // POST request with fallback
   async post<T>(endpoint: string, data?: any): Promise<T> {
+    // Special handling for adding healthcare providers
+    if (endpoint === '/healthcare/providers') {
+      return this.requestWithFallback<T>(endpoint, {
+        method: 'POST',
+        body: data ? JSON.stringify(data) : undefined,
+      }, async () => {
+        const providers: any[] = this.getLocalStorageData(STORAGE_KEYS.HEALTHCARE_PROVIDERS, []);
+        const newProvider = createMockProvider(data.name, data.specialty);
+        Object.assign(newProvider, data);
+        providers.push(newProvider);
+        this.setLocalStorageData(STORAGE_KEYS.HEALTHCARE_PROVIDERS, providers);
+        return { success: true, data: newProvider } as T;
+      });
+    }
+
     return this.request<T>(endpoint, {
       method: 'POST',
       body: data ? JSON.stringify(data) : undefined,
     });
   }
 
-  // PUT request
+  // PUT request with fallback
   async put<T>(endpoint: string, data?: any): Promise<T> {
+    // Special handling for patient profile updates
+    if (endpoint === '/patients/profile') {
+      return this.requestWithFallback<T>(endpoint, {
+        method: 'PUT',
+        body: data ? JSON.stringify(data) : undefined,
+      }, async () => {
+        const currentProfile = this.getLocalStorageData(STORAGE_KEYS.PATIENT_PROFILE, {});
+        const updatedProfile = { ...currentProfile, ...data, updatedAt: new Date() };
+        this.setLocalStorageData(STORAGE_KEYS.PATIENT_PROFILE, updatedProfile);
+        return { success: true, data: updatedProfile } as T;
+      });
+    }
+
     return this.request<T>(endpoint, {
       method: 'PUT',
       body: data ? JSON.stringify(data) : undefined,

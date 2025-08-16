@@ -76,6 +76,9 @@ function AppRoutes() {
         </PublicRoute>
       } />
       
+      {/* Development test route - bypasses authentication */}
+      <Route path="/test-dashboard" element={<Dashboard />} />
+      
       {/* Protected routes */}
       <Route path="/dashboard" element={
         <ProtectedRoute>

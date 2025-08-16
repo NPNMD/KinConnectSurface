@@ -881,24 +881,22 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
             <span className="hidden sm:inline">Family Access</span>
           </button>
           
-          {!isAuthenticated ? (
-            <button
-              onClick={handleGoogleSignIn}
-              className="btn-secondary text-sm"
-            >
-              <span className="hidden sm:inline">Connect Google Calendar</span>
-              <span className="sm:hidden">Connect</span>
-            </button>
-          ) : (
-            <button
-              onClick={() => setShowAddEvent(true)}
-              className="btn-primary flex items-center space-x-2"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">Add Medical Event</span>
-              <span className="sm:hidden">Add</span>
-            </button>
-          )}
+          <button
+            onClick={handleGoogleSignIn}
+            className="btn-secondary text-sm mr-2"
+          >
+            <span className="hidden sm:inline">Connect Google Calendar</span>
+            <span className="sm:hidden">Connect</span>
+          </button>
+          
+          <button
+            onClick={() => setShowAddEvent(true)}
+            className="btn-primary flex items-center space-x-2"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">Add Medical Event</span>
+            <span className="sm:hidden">Add</span>
+          </button>
         </div>
       </div>
 
