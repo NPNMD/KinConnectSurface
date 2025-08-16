@@ -10,6 +10,7 @@ import authRoutes from './routes/auth';
 import patientRoutes from './routes/patients';
 import medicationRoutes from './routes/medications';
 import drugRoutes from './routes/drugs';
+import healthcareProviderRoutes from './routes/healthcare-providers';
 
 // Load environment variables
 dotenv.config();
@@ -52,6 +53,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/medications', medicationRoutes);
 app.use('/api/drugs', drugRoutes);
+app.use('/api/healthcare', healthcareProviderRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

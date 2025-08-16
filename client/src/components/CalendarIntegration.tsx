@@ -89,27 +89,11 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
     try {
       setIsLoading(true);
       
-      // Mock data for now - in a real implementation, this would fetch from Google Calendar API
-      const mockEvents: CalendarEvent[] = [
-        {
-          id: '1',
-          title: 'Dr. Smith - Annual Checkup',
-          start: new Date(Date.now() + 24 * 60 * 60 * 1000), // Tomorrow
-          end: new Date(Date.now() + 24 * 60 * 60 * 1000 + 60 * 60 * 1000), // Tomorrow + 1 hour
-          location: '123 Medical Center Dr, City, State',
-          description: 'Annual physical examination and health screening'
-        },
-        {
-          id: '2',
-          title: 'Cardiology Appointment',
-          start: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Next week
-          end: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000 + 45 * 60 * 1000), // Next week + 45 min
-          location: 'Heart Specialists Clinic',
-          description: 'Follow-up appointment for blood pressure monitoring'
-        }
-      ];
+      // In a real implementation, this would fetch from Google Calendar API
+      // For now, we start with an empty array to show the empty state
+      const events: CalendarEvent[] = [];
       
-      setEvents(mockEvents);
+      setEvents(events);
     } catch (error) {
       console.error('Error loading calendar events:', error);
     } finally {

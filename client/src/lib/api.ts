@@ -110,6 +110,16 @@ export const API_ENDPOINTS = {
   DRUG_DETAILS: (rxcui: string) => `/drugs/${rxcui}`,
   DRUG_INTERACTIONS: (rxcui: string) => `/drugs/${rxcui}/interactions`,
   
+  // Healthcare Providers
+  HEALTHCARE_PROVIDERS: (patientId: string) => `/healthcare/providers/${patientId}`,
+  HEALTHCARE_PROVIDER_CREATE: '/healthcare/providers',
+  HEALTHCARE_PROVIDER_BY_ID: (id: string) => `/healthcare/providers/${id}`,
+  
+  // Medical Facilities
+  MEDICAL_FACILITIES: (patientId: string) => `/healthcare/facilities/${patientId}`,
+  MEDICAL_FACILITY_CREATE: '/healthcare/facilities',
+  MEDICAL_FACILITY_BY_ID: (id: string) => `/healthcare/facilities/${id}`,
+  
   // Health check
   HEALTH: '/health',
 } as const;

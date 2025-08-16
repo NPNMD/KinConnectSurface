@@ -1,7 +1,51 @@
 {
   "indexes": [
     {
-      "collectionGroup": "medications",
+      "collectionGroup": "healthcare_providers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "isActive",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "patientId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "medical_facilities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "isActive",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "patientId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "healthcare_providers",
       "queryScope": "COLLECTION",
       "fields": [
         {
@@ -9,7 +53,7 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "isActive",
+          "fieldPath": "specialty",
           "order": "ASCENDING"
         },
         {
@@ -19,7 +63,7 @@
       ]
     },
     {
-      "collectionGroup": "medication_logs",
+      "collectionGroup": "medical_facilities",
       "queryScope": "COLLECTION",
       "fields": [
         {
@@ -27,26 +71,26 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "medicationId",
+          "fieldPath": "facilityType",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "takenAt",
+          "fieldPath": "createdAt",
           "order": "DESCENDING"
         }
       ]
     },
     {
-      "collectionGroup": "invitations",
+      "collectionGroup": "healthcare_providers",
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "patientEmail",
+          "fieldPath": "patientId",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "status",
-          "order": "ASCENDING"
+          "fieldPath": "isPrimaryProvider",
+          "order": "DESCENDING"
         },
         {
           "fieldPath": "createdAt",

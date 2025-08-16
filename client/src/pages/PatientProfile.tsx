@@ -10,19 +10,30 @@ import {
   Plus,
   Trash2
 } from 'lucide-react';
-import { Medication, NewMedication } from '@shared/types';
+import {
+  Medication,
+  NewMedication,
+  HealthcareProvider,
+  NewHealthcareProvider,
+  MedicalFacility,
+  NewMedicalFacility
+} from '@shared/types';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import MedicationManager from '@/components/MedicationManager';
 import AddressAutocomplete from '@/components/AddressAutocomplete';
 import CalendarIntegration from '@/components/CalendarIntegration';
 import MedicalConditionSelect from '@/components/MedicalConditionSelect';
 import AllergySelect from '@/components/AllergySelect';
+import HealthcareProvidersManager from '@/components/HealthcareProvidersManager';
 
 export default function PatientProfile() {
   const { user } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [medications, setMedications] = useState<Medication[]>([]);
   const [isLoadingMedications, setIsLoadingMedications] = useState(false);
+  const [healthcareProviders, setHealthcareProviders] = useState<HealthcareProvider[]>([]);
+  const [medicalFacilities, setMedicalFacilities] = useState<MedicalFacility[]>([]);
+  const [isLoadingProviders, setIsLoadingProviders] = useState(false);
   const [formData, setFormData] = useState({
     dateOfBirth: '',
     gender: '',
@@ -161,9 +172,42 @@ export default function PatientProfile() {
       }
     };
 
+    const loadHealthcareProviders = async () => {
+      try {
+        setIsLoadingProviders(true);
+        const response = await apiClient.get<{ success: boolean; data: HealthcareProvider[] }>(
+          API_ENDPOINTS.HEALTHCARE_PROVIDERS(user?.id || '')
+        );
+        
+        if (response.success && response.data) {
+          setHealthcareProviders(response.data);
+        }
+      } catch (error) {
+        console.error('Error loading healthcare providers:', error);
+      } finally {
+        setIsLoadingProviders(false);
+      }
+    };
+
+    const loadMedicalFacilities = async () => {
+      try {
+        const response = await apiClient.get<{ success: boolean; data: MedicalFacility[] }>(
+          API_ENDPOINTS.MEDICAL_FACILITIES(user?.id || '')
+        );
+        
+        if (response.success && response.data) {
+          setMedicalFacilities(response.data);
+        }
+      } catch (error) {
+        console.error('Error loading medical facilities:', error);
+      }
+    };
+
     if (user?.id) {
       loadProfileData();
       loadMedications();
+      loadHealthcareProviders();
+      loadMedicalFacilities();
     }
   }, [user?.id]);
 
@@ -243,6 +287,118 @@ export default function PatientProfile() {
       throw error;
     } finally {
       setIsLoadingMedications(false);
+    }
+  };
+
+  // Healthcare Provider management functions
+  const handleAddProvider = async (provider: NewHealthcareProvider) => {
+    try {
+      setIsLoadingProviders(true);
+      const response = await apiClient.post<{ success: boolean; data: HealthcareProvider }>(
+        API_ENDPOINTS.HEALTHCARE_PROVIDER_CREATE,
+        provider
+      );
+      
+      if (response.success && response.data) {
+        setHealthcareProviders(prev => [...prev, response.data]);
+      }
+    } catch (error) {
+      console.error('Error adding healthcare provider:', error);
+      throw error;
+    } finally {
+      setIsLoadingProviders(false);
+    }
+  };
+
+  const handleUpdateProvider = async (id: string, updates: Partial<HealthcareProvider>) => {
+    try {
+      setIsLoadingProviders(true);
+      const response = await apiClient.put<{ success: boolean; data: HealthcareProvider }>(
+        API_ENDPOINTS.HEALTHCARE_PROVIDER_BY_ID(id),
+        updates
+      );
+      
+      if (response.success && response.data) {
+        setHealthcareProviders(prev =>
+          prev.map(provider =>
+            provider.id === id ? response.data : provider
+          )
+        );
+      }
+    } catch (error) {
+      console.error('Error updating healthcare provider:', error);
+      throw error;
+    } finally {
+      setIsLoadingProviders(false);
+    }
+  };
+
+  const handleDeleteProvider = async (id: string) => {
+    try {
+      setIsLoadingProviders(true);
+      const response = await apiClient.delete<{ success: boolean }>(
+        API_ENDPOINTS.HEALTHCARE_PROVIDER_BY_ID(id)
+      );
+      
+      if (response.success) {
+        setHealthcareProviders(prev => prev.filter(provider => provider.id !== id));
+      }
+    } catch (error) {
+      console.error('Error deleting healthcare provider:', error);
+      throw error;
+    } finally {
+      setIsLoadingProviders(false);
+    }
+  };
+
+  const handleAddFacility = async (facility: NewMedicalFacility) => {
+    try {
+      const response = await apiClient.post<{ success: boolean; data: MedicalFacility }>(
+        API_ENDPOINTS.MEDICAL_FACILITY_CREATE,
+        facility
+      );
+      
+      if (response.success && response.data) {
+        setMedicalFacilities(prev => [...prev, response.data]);
+      }
+    } catch (error) {
+      console.error('Error adding medical facility:', error);
+      throw error;
+    }
+  };
+
+  const handleUpdateFacility = async (id: string, updates: Partial<MedicalFacility>) => {
+    try {
+      const response = await apiClient.put<{ success: boolean; data: MedicalFacility }>(
+        API_ENDPOINTS.MEDICAL_FACILITY_BY_ID(id),
+        updates
+      );
+      
+      if (response.success && response.data) {
+        setMedicalFacilities(prev =>
+          prev.map(facility =>
+            facility.id === id ? response.data : facility
+          )
+        );
+      }
+    } catch (error) {
+      console.error('Error updating medical facility:', error);
+      throw error;
+    }
+  };
+
+  const handleDeleteFacility = async (id: string) => {
+    try {
+      const response = await apiClient.delete<{ success: boolean }>(
+        API_ENDPOINTS.MEDICAL_FACILITY_BY_ID(id)
+      );
+      
+      if (response.success) {
+        setMedicalFacilities(prev => prev.filter(facility => facility.id !== id));
+      }
+    } catch (error) {
+      console.error('Error deleting medical facility:', error);
+      throw error;
     }
   };
 
@@ -461,6 +617,22 @@ export default function PatientProfile() {
               )}
             </div>
           </div>
+        </div>
+
+        {/* Healthcare Providers Section */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
+          <HealthcareProvidersManager
+            patientId={user?.id || ''}
+            providers={healthcareProviders}
+            facilities={medicalFacilities}
+            onAddProvider={handleAddProvider}
+            onUpdateProvider={handleUpdateProvider}
+            onDeleteProvider={handleDeleteProvider}
+            onAddFacility={handleAddFacility}
+            onUpdateFacility={handleUpdateFacility}
+            onDeleteFacility={handleDeleteFacility}
+            isLoading={isLoadingProviders}
+          />
         </div>
 
         {/* Medications Section */}

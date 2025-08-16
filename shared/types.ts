@@ -208,7 +208,23 @@ export interface Appointment {
   duration: number; // in minutes
   location: string;
   provider: string;
+  providerId?: string; // Reference to healthcare provider
+  facilityId?: string; // Reference to medical facility
   status: 'scheduled' | 'confirmed' | 'cancelled' | 'completed';
+  
+  // Family Responsibility Features
+  responsiblePersonId?: string; // Family member responsible for taking patient
+  responsiblePersonName?: string; // Name of responsible person for display
+  responsibilityStatus: 'unassigned' | 'claimed' | 'confirmed' | 'declined';
+  responsibilityClaimedAt?: Date; // When someone claimed responsibility
+  responsibilityConfirmedAt?: Date; // When patient/primary confirmed the assignment
+  transportationNotes?: string; // Special transportation requirements or notes
+  requiresTransportation: boolean; // Whether patient needs someone to take them
+  
+  // Notifications and Reminders
+  remindersSent?: Date[]; // Track when reminders were sent
+  familyNotified?: boolean; // Whether family was notified about the appointment
+  
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -222,8 +238,70 @@ export interface NewAppointment {
   duration: number;
   location: string;
   provider: string;
+  providerId?: string;
+  facilityId?: string;
   status: 'scheduled' | 'confirmed' | 'cancelled' | 'completed';
+  
+  // Family Responsibility Features
+  responsiblePersonId?: string;
+  responsiblePersonName?: string;
+  responsibilityStatus: 'unassigned' | 'claimed' | 'confirmed' | 'declined';
+  transportationNotes?: string;
+  requiresTransportation: boolean;
+  
   notes?: string;
+}
+
+// Family Responsibility Management
+export interface AppointmentResponsibility {
+  id: string;
+  appointmentId: string;
+  patientId: string;
+  responsiblePersonId: string;
+  responsiblePersonName: string;
+  status: 'claimed' | 'confirmed' | 'declined' | 'completed';
+  claimedAt: Date;
+  confirmedAt?: Date;
+  completedAt?: Date;
+  transportationNotes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface NewAppointmentResponsibility {
+  appointmentId: string;
+  patientId: string;
+  responsiblePersonId: string;
+  responsiblePersonName: string;
+  status: 'claimed' | 'confirmed' | 'declined' | 'completed';
+  transportationNotes?: string;
+}
+
+// Family Member Notification Types
+export interface FamilyNotification {
+  id: string;
+  patientId: string;
+  appointmentId: string;
+  recipientId: string; // Family member receiving notification
+  recipientEmail: string;
+  recipientName: string;
+  notificationType: 'appointment_created' | 'responsibility_needed' | 'responsibility_claimed' | 'appointment_reminder' | 'appointment_cancelled';
+  message: string;
+  sentAt: Date;
+  readAt?: Date;
+  actionTaken?: 'claimed' | 'declined' | 'acknowledged';
+  actionTakenAt?: Date;
+  createdAt: Date;
+}
+
+export interface NewFamilyNotification {
+  patientId: string;
+  appointmentId: string;
+  recipientId: string;
+  recipientEmail: string;
+  recipientName: string;
+  notificationType: 'appointment_created' | 'responsibility_needed' | 'responsibility_claimed' | 'appointment_reminder' | 'appointment_cancelled';
+  message: string;
 }
 
 // Visit Record types
@@ -269,3 +347,241 @@ export interface PaginatedResponse<T> {
   limit: number;
   hasMore: boolean;
 }
+
+// Healthcare Provider types
+export interface HealthcareProvider {
+  id: string;
+  patientId: string;
+  name: string;
+  specialty: string;
+  subSpecialty?: string;
+  credentials?: string; // MD, DO, NP, PA, etc.
+  
+  // Contact Information
+  phoneNumber?: string;
+  email?: string;
+  website?: string;
+  
+  // Address Information
+  address: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  country?: string;
+  
+  // Google Places Data
+  placeId?: string; // Google Places ID for verification
+  googleRating?: number;
+  googleReviews?: number;
+  businessStatus?: 'OPERATIONAL' | 'CLOSED_TEMPORARILY' | 'CLOSED_PERMANENTLY';
+  
+  // Practice Information
+  practiceName?: string;
+  hospitalAffiliation?: string[];
+  acceptedInsurance?: string[];
+  languages?: string[];
+  
+  // Scheduling Information
+  preferredAppointmentTime?: string; // e.g., "morning", "afternoon", "evening"
+  typicalWaitTime?: string; // e.g., "1-2 weeks", "same day"
+  
+  // Relationship Information
+  isPrimary?: boolean; // Primary care physician
+  relationshipStart?: Date;
+  lastVisit?: Date;
+  nextAppointment?: Date;
+  
+  // Notes and Preferences
+  notes?: string;
+  isActive: boolean;
+  
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface NewHealthcareProvider {
+  patientId: string;
+  name: string;
+  specialty: string;
+  subSpecialty?: string;
+  credentials?: string;
+  phoneNumber?: string;
+  email?: string;
+  website?: string;
+  address: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  country?: string;
+  placeId?: string;
+  googleRating?: number;
+  googleReviews?: number;
+  businessStatus?: 'OPERATIONAL' | 'CLOSED_TEMPORARILY' | 'CLOSED_PERMANENTLY';
+  practiceName?: string;
+  hospitalAffiliation?: string[];
+  acceptedInsurance?: string[];
+  languages?: string[];
+  preferredAppointmentTime?: string;
+  typicalWaitTime?: string;
+  isPrimary?: boolean;
+  relationshipStart?: Date;
+  lastVisit?: Date;
+  nextAppointment?: Date;
+  notes?: string;
+  isActive: boolean;
+}
+
+// Medical Facility types (hospitals, imaging centers, labs, etc.)
+export interface MedicalFacility {
+  id: string;
+  patientId: string;
+  name: string;
+  facilityType: 'hospital' | 'imaging_center' | 'laboratory' | 'urgent_care' | 'pharmacy' | 'physical_therapy' | 'other';
+  
+  // Contact Information
+  phoneNumber?: string;
+  email?: string;
+  website?: string;
+  
+  // Address Information
+  address: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  country?: string;
+  
+  // Google Places Data
+  placeId?: string;
+  googleRating?: number;
+  googleReviews?: number;
+  businessStatus?: 'OPERATIONAL' | 'CLOSED_TEMPORARILY' | 'CLOSED_PERMANENTLY';
+  
+  // Facility Information
+  services?: string[]; // e.g., ["MRI", "CT Scan", "X-Ray"]
+  acceptedInsurance?: string[];
+  emergencyServices?: boolean;
+  
+  // Preferences
+  isPreferred?: boolean;
+  notes?: string;
+  isActive: boolean;
+  
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface NewMedicalFacility {
+  patientId: string;
+  name: string;
+  facilityType: 'hospital' | 'imaging_center' | 'laboratory' | 'urgent_care' | 'pharmacy' | 'physical_therapy' | 'other';
+  phoneNumber?: string;
+  email?: string;
+  website?: string;
+  address: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  country?: string;
+  placeId?: string;
+  googleRating?: number;
+  googleReviews?: number;
+  businessStatus?: 'OPERATIONAL' | 'CLOSED_TEMPORARILY' | 'CLOSED_PERMANENTLY';
+  services?: string[];
+  acceptedInsurance?: string[];
+  emergencyServices?: boolean;
+  isPreferred?: boolean;
+  notes?: string;
+  isActive: boolean;
+}
+
+// Google Places API types
+export interface GooglePlaceResult {
+  place_id: string;
+  name: string;
+  formatted_address: string;
+  formatted_phone_number?: string;
+  website?: string;
+  rating?: number;
+  user_ratings_total?: number;
+  business_status?: 'OPERATIONAL' | 'CLOSED_TEMPORARILY' | 'CLOSED_PERMANENTLY';
+  types: string[];
+  geometry: {
+    location: {
+      lat: number;
+      lng: number;
+    };
+  };
+  address_components: Array<{
+    long_name: string;
+    short_name: string;
+    types: string[];
+  }>;
+  opening_hours?: {
+    open_now: boolean;
+    weekday_text: string[];
+  };
+}
+
+export interface GooglePlaceSearchRequest {
+  query: string;
+  type?: 'doctor' | 'hospital' | 'pharmacy' | 'health';
+  location?: {
+    lat: number;
+    lng: number;
+  };
+  radius?: number; // in meters
+}
+
+// Medical Specialties enum for consistency
+export const MEDICAL_SPECIALTIES = [
+  'Primary Care',
+  'Internal Medicine',
+  'Family Medicine',
+  'Pediatrics',
+  'Cardiology',
+  'Dermatology',
+  'Endocrinology',
+  'Gastroenterology',
+  'Hematology/Oncology',
+  'Infectious Disease',
+  'Nephrology',
+  'Neurology',
+  'Obstetrics/Gynecology',
+  'Ophthalmology',
+  'Orthopedics',
+  'Otolaryngology (ENT)',
+  'Psychiatry',
+  'Psychology',
+  'Pulmonology',
+  'Radiology',
+  'Rheumatology',
+  'Urology',
+  'Emergency Medicine',
+  'Anesthesiology',
+  'Pathology',
+  'Physical Medicine & Rehabilitation',
+  'Plastic Surgery',
+  'General Surgery',
+  'Dentistry',
+  'Optometry',
+  'Physical Therapy',
+  'Occupational Therapy',
+  'Speech Therapy',
+  'Nutrition/Dietitian',
+  'Other'
+] as const;
+
+export type MedicalSpecialty = typeof MEDICAL_SPECIALTIES[number];
+
+// Facility types for consistency
+export const FACILITY_TYPES = [
+  'hospital',
+  'imaging_center',
+  'laboratory',
+  'urgent_care',
+  'pharmacy',
+  'physical_therapy',
+  'other'
+] as const;
+
+export type FacilityType = typeof FACILITY_TYPES[number];

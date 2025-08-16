@@ -140,25 +140,14 @@ export default function Dashboard() {
           <div className="lg:col-span-2">
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
-              <div className="space-y-4">
-                <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span className="text-sm text-gray-600">
-                    Medication reminder: Take blood pressure medication at 9:00 AM
-                  </span>
+              <div className="text-center py-8">
+                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Bell className="w-6 h-6 text-gray-400" />
                 </div>
-                <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                  <span className="text-sm text-gray-600">
-                    Appointment scheduled: Dr. Smith on March 15th at 2:00 PM
-                  </span>
-                </div>
-                <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-                  <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
-                  <span className="text-sm text-gray-600">
-                    Task assigned: Pick up prescription refill
-                  </span>
-                </div>
+                <h4 className="text-lg font-medium text-gray-900 mb-2">No recent activity</h4>
+                <p className="text-gray-500 mb-4">
+                  Activity will appear here when you add medications, schedule appointments, or complete tasks.
+                </p>
               </div>
             </div>
           </div>
@@ -170,39 +159,42 @@ export default function Dashboard() {
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Medications Due</span>
-                  <span className="font-semibold text-primary-600">3</span>
+                  <span className="font-semibold text-gray-400">0</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Appointments</span>
-                  <span className="font-semibold text-green-600">1</span>
+                  <span className="font-semibold text-gray-400">0</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Pending Tasks</span>
-                  <span className="font-semibold text-yellow-600">2</span>
+                  <span className="font-semibold text-gray-400">0</span>
                 </div>
+              </div>
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <p className="text-sm text-gray-500 text-center">
+                  Add medications and appointments to see your daily overview.
+                </p>
               </div>
             </div>
 
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Family Members</h3>
-              <div className="space-y-3">
-                <div className="flex items-center space-x-3">
-                  <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center">
-                    <span className="text-primary-600 font-medium text-sm">JS</span>
-                  </div>
-                  <span className="text-gray-700">John Smith</span>
+              <div className="text-center py-6">
+                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Users className="w-6 h-6 text-gray-400" />
                 </div>
-                <div className="flex items-center space-x-3">
-                  <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                    <span className="text-green-600 font-medium text-sm">MS</span>
-                  </div>
-                  <span className="text-gray-700">Mary Smith</span>
-                </div>
+                <h4 className="text-lg font-medium text-gray-900 mb-2">No caretakers invited</h4>
+                <p className="text-gray-500 mb-4 text-sm">
+                  Invite family members to help coordinate care.
+                </p>
+                <Link
+                  to="/family/invite"
+                  className="inline-flex items-center text-primary-600 hover:text-primary-700 text-sm font-medium"
+                >
+                  <Plus className="w-4 h-4 mr-1" />
+                  Invite Member
+                </Link>
               </div>
-              <button className="w-full mt-4 text-primary-600 hover:text-primary-700 text-sm font-medium">
-                <Plus className="w-4 h-4 inline mr-1" />
-                Add Member
-              </button>
             </div>
           </div>
         </div>
