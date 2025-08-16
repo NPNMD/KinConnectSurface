@@ -58,6 +58,11 @@ app.get('/api/health', (req, res) => {
 	res.json({ success: true, message: 'Functions API healthy', timestamp: new Date().toISOString() });
 });
 
+// Test endpoint to verify deployment
+app.get('/api/test-deployment', (req, res) => {
+	res.json({ success: true, message: 'Deployment working!', timestamp: new Date().toISOString() });
+});
+
 // ===== INVITATION ROUTES =====
 
 // Send family invitation
@@ -229,6 +234,89 @@ app.post('/api/invitations/send', authenticate, async (req, res) => {
 		res.status(500).json({
 			success: false,
 			error: 'Internal server error while sending invitation'
+		});
+	}
+});
+
+// Get family access for current user (both as patient and family member)
+app.get('/api/family-access', authenticate, async (req, res) => {
+	try {
+		console.log('🔍 Fetching family access for user:', (req as any).user.uid);
+		const userId = (req as any).user.uid;
+		
+		// Get family access where user is a family member
+		const familyMemberQuery = await firestore.collection('family_calendar_access')
+			.where('familyMemberId', '==', userId)
+			.where('status', '==', 'active')
+			.get();
+		
+		// Get family access where user is the patient (created by them)
+		const patientQuery = await firestore.collection('family_calendar_access')
+			.where('createdBy', '==', userId)
+			.get();
+
+		// Process patients the user has access to as a family member
+		const patientsIHaveAccessTo = [];
+		for (const doc of familyMemberQuery.docs) {
+			const access = doc.data();
+			// Get patient info
+			const patientDoc = await firestore.collection('users').doc(access.createdBy).get();
+			const patientData = patientDoc.data();
+			
+			if (patientData) {
+				patientsIHaveAccessTo.push({
+					id: doc.id,
+					patientId: access.patientId,
+					patientName: patientData.name,
+					patientEmail: patientData.email,
+					accessLevel: access.accessLevel,
+					permissions: access.permissions,
+					status: access.status,
+					acceptedAt: access.acceptedAt?.toDate(),
+					relationship: 'family_member'
+				});
+			}
+		}
+
+		// Process family members who have access to the current user as a patient
+		const familyMembersWithAccessToMe = [];
+		for (const doc of patientQuery.docs) {
+			const access = doc.data();
+			if (access.status === 'active' && access.familyMemberId) {
+				// Get family member info
+				const familyMemberDoc = await firestore.collection('users').doc(access.familyMemberId).get();
+				const familyMemberData = familyMemberDoc.data();
+				
+				if (familyMemberData) {
+					familyMembersWithAccessToMe.push({
+						id: doc.id,
+						familyMemberId: access.familyMemberId,
+						familyMemberName: familyMemberData.name,
+						familyMemberEmail: familyMemberData.email,
+						accessLevel: access.accessLevel,
+						permissions: access.permissions,
+						status: access.status,
+						acceptedAt: access.acceptedAt?.toDate(),
+						relationship: 'patient'
+					});
+				}
+			}
+		}
+
+		res.json({
+			success: true,
+			data: {
+				patientsIHaveAccessTo,
+				familyMembersWithAccessToMe,
+				totalConnections: patientsIHaveAccessTo.length + familyMembersWithAccessToMe.length
+			}
+		});
+
+	} catch (error) {
+		console.error('Error getting family access:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
 		});
 	}
 });

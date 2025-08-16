@@ -123,6 +123,13 @@ export const API_ENDPOINTS = {
   
   // Health check
   HEALTH: '/health',
+  
+  // Family Access
+  FAMILY_ACCESS: '/family-access',
+  SEND_INVITATION: '/invitations/send',
+  PENDING_INVITATIONS: '/invitations/pending',
+  ACCEPT_INVITATION: (token: string) => `/invitations/accept/${token}`,
+  DECLINE_INVITATION: (token: string) => `/invitations/decline/${token}`,
 } as const;
 
 // Type-safe API response

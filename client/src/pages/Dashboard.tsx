@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { signOutUser } from '@/lib/firebase';
@@ -11,19 +11,85 @@ import {
   LogOut,
   Plus,
   Bell,
-  Activity
+  Activity,
+  Shield,
+  Mail
 } from 'lucide-react';
 import MedicationReminders from '@/components/MedicationReminders';
 import MedicationAdherenceDashboard from '@/components/MedicationAdherenceDashboard';
+import CalendarIntegration from '@/components/CalendarIntegration';
+import { apiClient, API_ENDPOINTS } from '@/lib/api';
+import LoadingSpinner from '@/components/LoadingSpinner';
+
+interface FamilyConnection {
+  id: string;
+  patientId?: string;
+  familyMemberId?: string;
+  patientName?: string;
+  familyMemberName?: string;
+  patientEmail?: string;
+  familyMemberEmail?: string;
+  accessLevel: string;
+  permissions: any;
+  status: string;
+  acceptedAt?: Date;
+  relationship: 'family_member' | 'patient';
+}
+
+interface FamilyAccessData {
+  patientsIHaveAccessTo: FamilyConnection[];
+  familyMembersWithAccessToMe: FamilyConnection[];
+  totalConnections: number;
+}
 
 export default function Dashboard() {
   const { user, firebaseUser } = useAuth();
+  const [familyAccess, setFamilyAccess] = useState<FamilyAccessData | null>(null);
+  const [loadingFamily, setLoadingFamily] = useState(true);
+  const [familyError, setFamilyError] = useState<string | null>(null);
 
   const handleSignOut = async () => {
     try {
       await signOutUser();
     } catch (error) {
       console.error('Sign out error:', error);
+    }
+  };
+
+  const fetchFamilyAccess = async () => {
+    try {
+      setLoadingFamily(true);
+      setFamilyError(null);
+      const response = await apiClient.get<{ success: boolean; data: FamilyAccessData }>(
+        API_ENDPOINTS.FAMILY_ACCESS
+      );
+      
+      if (response.success) {
+        setFamilyAccess(response.data);
+      } else {
+        setFamilyError('Failed to load family connections');
+      }
+    } catch (error) {
+      console.error('Error fetching family access:', error);
+      setFamilyError('Failed to load family connections');
+    } finally {
+      setLoadingFamily(false);
+    }
+  };
+
+  useEffect(() => {
+    if (firebaseUser) {
+      fetchFamilyAccess();
+    }
+  }, [firebaseUser]);
+
+  const getAccessLevelColor = (level: string) => {
+    switch (level) {
+      case 'full': return 'bg-green-100 text-green-800 border-green-200';
+      case 'limited': return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'view_only': return 'bg-gray-100 text-gray-800 border-gray-200';
+      case 'emergency_only': return 'bg-red-100 text-red-800 border-red-200';
+      default: return 'bg-gray-100 text-gray-800 border-gray-200';
     }
   };
 
@@ -178,24 +244,122 @@ export default function Dashboard() {
             </div>
 
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Family Members</h3>
-              <div className="text-center py-6">
-                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Users className="w-6 h-6 text-gray-400" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Family Connections</h3>
+              
+              {loadingFamily ? (
+                <div className="text-center py-6">
+                  <LoadingSpinner size="sm" />
+                  <p className="text-gray-500 mt-2">Loading family connections...</p>
                 </div>
-                <h4 className="text-lg font-medium text-gray-900 mb-2">No caretakers invited</h4>
-                <p className="text-gray-500 mb-4 text-sm">
-                  Invite family members to help coordinate care.
-                </p>
-                <Link
-                  to="/family/invite"
-                  className="inline-flex items-center text-primary-600 hover:text-primary-700 text-sm font-medium"
-                >
-                  <Plus className="w-4 h-4 mr-1" />
-                  Invite Member
-                </Link>
-              </div>
+              ) : familyError ? (
+                <div className="text-center py-6">
+                  <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Users className="w-6 h-6 text-red-400" />
+                  </div>
+                  <p className="text-red-600 mb-4 text-sm">{familyError}</p>
+                  <button
+                    onClick={fetchFamilyAccess}
+                    className="text-primary-600 hover:text-primary-700 text-sm font-medium"
+                  >
+                    Try Again
+                  </button>
+                </div>
+              ) : familyAccess && familyAccess.totalConnections > 0 ? (
+                <div className="space-y-4">
+                  {/* Patients I have access to */}
+                  {familyAccess.patientsIHaveAccessTo.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Patients I Help Care For</h4>
+                      <div className="space-y-2">
+                        {familyAccess.patientsIHaveAccessTo.map((connection) => (
+                          <div key={connection.id} className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+                            <div className="flex items-center space-x-3">
+                              <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                                <Users className="w-4 h-4 text-blue-600" />
+                              </div>
+                              <div>
+                                <p className="font-medium text-gray-900">{connection.patientName}</p>
+                                <p className="text-xs text-gray-600">{connection.patientEmail}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getAccessLevelColor(connection.accessLevel)}`}>
+                                <Shield className="w-3 h-3 mr-1" />
+                                {connection.accessLevel.replace('_', ' ')}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Family members who have access to me */}
+                  {familyAccess.familyMembersWithAccessToMe.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">My Care Team</h4>
+                      <div className="space-y-2">
+                        {familyAccess.familyMembersWithAccessToMe.map((connection) => (
+                          <div key={connection.id} className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+                            <div className="flex items-center space-x-3">
+                              <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                                <Users className="w-4 h-4 text-green-600" />
+                              </div>
+                              <div>
+                                <p className="font-medium text-gray-900">{connection.familyMemberName}</p>
+                                <p className="text-xs text-gray-600">{connection.familyMemberEmail}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getAccessLevelColor(connection.accessLevel)}`}>
+                                <Shield className="w-3 h-3 mr-1" />
+                                {connection.accessLevel.replace('_', ' ')}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-4 border-t border-gray-100">
+                    <Link
+                      to="/family/invite"
+                      className="inline-flex items-center text-primary-600 hover:text-primary-700 text-sm font-medium"
+                    >
+                      <Plus className="w-4 h-4 mr-1" />
+                      Invite Family Member
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-6">
+                  <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Users className="w-6 h-6 text-gray-400" />
+                  </div>
+                  <h4 className="text-lg font-medium text-gray-900 mb-2">No family connections yet</h4>
+                  <p className="text-gray-500 mb-4 text-sm">
+                    Invite family members to help coordinate care or accept invitations from patients.
+                  </p>
+                  <Link
+                    to="/family/invite"
+                    className="inline-flex items-center text-primary-600 hover:text-primary-700 text-sm font-medium"
+                  >
+                    <Plus className="w-4 h-4 mr-1" />
+                    Invite Family Member
+                  </Link>
+                </div>
+              )}
             </div>
+          </div>
+        </div>
+
+        {/* Medical Calendar Section */}
+        <div className="mt-8">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <CalendarIntegration
+              patientId={user?.id || firebaseUser?.uid || ''}
+            />
           </div>
         </div>
 

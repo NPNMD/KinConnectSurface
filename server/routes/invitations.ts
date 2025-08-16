@@ -250,4 +250,86 @@ router.post('/decline/:token', authenticateToken, async (req, res) => {
   }
 });
 
+// Get family access for current user (both as patient and family member)
+router.get('/family-access', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user!.uid;
+    
+    // Get family access where user is a family member
+    const familyMemberAccess = await familyAccessService.getFamilyAccessByMemberId(userId);
+    
+    // Get user's patient profile to check for family members who have access to them
+    const userPatient = await patientService.getPatientByUserId(userId);
+    let patientFamilyAccess: { success: boolean; data?: FamilyCalendarAccess[] } = { success: true, data: [] };
+    
+    if (userPatient.success && userPatient.data) {
+      patientFamilyAccess = await familyAccessService.getFamilyAccessByPatientId(userPatient.data.id);
+    }
+
+    // Combine and format the data
+    const patientsIHaveAccessTo = [];
+    const familyMembersWithAccessToMe = [];
+
+    // Process patients the user has access to as a family member
+    if (familyMemberAccess.success && familyMemberAccess.data) {
+      for (const access of familyMemberAccess.data) {
+        // Get patient info
+        const patientUser = await userService.getUserById(access.createdBy);
+        if (patientUser.success && patientUser.data) {
+          patientsIHaveAccessTo.push({
+            id: access.id,
+            patientId: access.patientId,
+            patientName: patientUser.data.name,
+            patientEmail: patientUser.data.email,
+            accessLevel: access.accessLevel,
+            permissions: access.permissions,
+            status: access.status,
+            acceptedAt: access.acceptedAt,
+            relationship: 'family_member' // User is a family member of this patient
+          });
+        }
+      }
+    }
+
+    // Process family members who have access to the current user as a patient
+    if (patientFamilyAccess.success && patientFamilyAccess.data) {
+      for (const access of patientFamilyAccess.data.filter(a => a.status === 'active')) {
+        // Get family member info
+        if (access.familyMemberId) {
+          const familyMemberUser = await userService.getUserById(access.familyMemberId);
+          if (familyMemberUser.success && familyMemberUser.data) {
+            familyMembersWithAccessToMe.push({
+              id: access.id,
+              familyMemberId: access.familyMemberId,
+              familyMemberName: familyMemberUser.data.name,
+              familyMemberEmail: familyMemberUser.data.email,
+              accessLevel: access.accessLevel,
+              permissions: access.permissions,
+              status: access.status,
+              acceptedAt: access.acceptedAt,
+              relationship: 'patient' // User is the patient, this person is their family member
+            });
+          }
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        patientsIHaveAccessTo,
+        familyMembersWithAccessToMe,
+        totalConnections: patientsIHaveAccessTo.length + familyMembersWithAccessToMe.length
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting family access:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
 export default router;
