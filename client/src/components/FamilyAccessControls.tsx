@@ -1,72 +1,12 @@
-import React, { useState } from 'react';
-import { Users, Shield, Mail, Phone, Settings, Plus, Edit, Trash2, Check, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Users, Shield, Mail, Phone, Settings, Plus, Edit, Trash2, Check, X, AlertCircle } from 'lucide-react';
 import type { FamilyMember, FamilyAccessLevel, FamilyPermission } from '@shared/types';
+import { apiClient, API_ENDPOINTS } from '../lib/api';
 
 interface FamilyAccessControlsProps {
   patientId: string;
   onClose?: () => void;
 }
-
-// Mock data for demonstration
-const mockFamilyMembers: FamilyMember[] = [
-  {
-    id: 'family1',
-    patientId: 'patient1',
-    userId: 'user1',
-    name: 'Sarah Johnson',
-    email: 'sarah.johnson@email.com',
-    phone: '+1-555-0123',
-    relationship: 'spouse',
-    accessLevel: 'full',
-    permissions: ['view_appointments', 'create_appointments', 'edit_appointments', 'view_medical_records', 'receive_notifications'],
-    isEmergencyContact: true,
-    canReceiveNotifications: true,
-    preferredContactMethod: 'email',
-    invitationStatus: 'accepted',
-    invitedAt: new Date('2024-01-15'),
-    acceptedAt: new Date('2024-01-16'),
-    createdAt: new Date('2024-01-15'),
-    updatedAt: new Date('2024-01-16')
-  },
-  {
-    id: 'family2',
-    patientId: 'patient1',
-    userId: 'user2',
-    name: 'Mike Johnson',
-    email: 'mike.johnson@email.com',
-    phone: '+1-555-0124',
-    relationship: 'child',
-    accessLevel: 'limited',
-    permissions: ['view_appointments', 'receive_notifications'],
-    isEmergencyContact: false,
-    canReceiveNotifications: true,
-    preferredContactMethod: 'phone',
-    invitationStatus: 'accepted',
-    invitedAt: new Date('2024-01-20'),
-    acceptedAt: new Date('2024-01-21'),
-    createdAt: new Date('2024-01-20'),
-    updatedAt: new Date('2024-01-21')
-  },
-  {
-    id: 'family3',
-    patientId: 'patient1',
-    userId: null,
-    name: 'Emma Johnson',
-    email: 'emma.johnson@email.com',
-    phone: '+1-555-0125',
-    relationship: 'child',
-    accessLevel: 'view_only',
-    permissions: ['view_appointments'],
-    isEmergencyContact: false,
-    canReceiveNotifications: false,
-    preferredContactMethod: 'email',
-    invitationStatus: 'pending',
-    invitedAt: new Date('2024-01-25'),
-    acceptedAt: null,
-    createdAt: new Date('2024-01-25'),
-    updatedAt: new Date('2024-01-25')
-  }
-];
 
 const ACCESS_LEVELS: { value: FamilyAccessLevel; label: string; description: string }[] = [
   { value: 'full', label: 'Full Access', description: 'Can view, create, and edit all medical information' },
@@ -92,9 +32,11 @@ const RELATIONSHIPS = [
 ];
 
 export default function FamilyAccessControls({ patientId, onClose }: FamilyAccessControlsProps) {
-  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>(mockFamilyMembers);
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [editingMember, setEditingMember] = useState<FamilyMember | null>(null);
   const [showInviteForm, setShowInviteForm] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [newInvite, setNewInvite] = useState({
     name: '',
     email: '',
@@ -105,6 +47,49 @@ export default function FamilyAccessControls({ patientId, onClose }: FamilyAcces
     isEmergencyContact: false,
     preferredContactMethod: 'email' as 'email' | 'phone' | 'sms'
   });
+
+  useEffect(() => {
+    loadFamilyMembers();
+  }, [patientId]);
+
+  const loadFamilyMembers = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const response = await apiClient.get<{ success: boolean; data: any }>(API_ENDPOINTS.FAMILY_ACCESS);
+      if (response.success && response.data) {
+        // Convert family access data to family members format
+        const members: FamilyMember[] = [
+          ...(response.data.familyMembersWithAccessToMe || []).map((access: any) => ({
+            id: access.id,
+            patientId: patientId,
+            userId: access.familyMemberId,
+            name: access.familyMemberName,
+            email: access.familyMemberEmail,
+            phone: '',
+            relationship: 'family_member',
+            accessLevel: access.accessLevel,
+            permissions: Object.keys(access.permissions || {}).filter(key => access.permissions[key]),
+            isEmergencyContact: false,
+            canReceiveNotifications: access.permissions?.canReceiveNotifications || false,
+            preferredContactMethod: 'email' as const,
+            invitationStatus: 'accepted' as const,
+            invitedAt: new Date(access.acceptedAt || Date.now()),
+            acceptedAt: new Date(access.acceptedAt || Date.now()),
+            createdAt: new Date(access.acceptedAt || Date.now()),
+            updatedAt: new Date(access.acceptedAt || Date.now())
+          }))
+        ];
+        setFamilyMembers(members);
+      }
+    } catch (err) {
+      console.error('Error loading family members:', err);
+      setError('Failed to load family members. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const getAccessLevelColor = (level: FamilyAccessLevel) => {
     switch (level) {
@@ -141,48 +126,43 @@ export default function FamilyAccessControls({ patientId, onClose }: FamilyAcces
     }
   };
 
-  const handleSendInvite = () => {
+  const handleSendInvite = async () => {
     if (!newInvite.name || !newInvite.email) {
       alert('Please fill in all required fields');
       return;
     }
 
-    const invite: FamilyMember = {
-      id: `family_${Date.now()}`,
-      patientId,
-      userId: null,
-      name: newInvite.name,
-      email: newInvite.email,
-      phone: newInvite.phone,
-      relationship: newInvite.relationship,
-      accessLevel: newInvite.accessLevel,
-      permissions: newInvite.permissions,
-      isEmergencyContact: newInvite.isEmergencyContact,
-      canReceiveNotifications: newInvite.permissions.includes('receive_notifications'),
-      preferredContactMethod: newInvite.preferredContactMethod,
-      invitationStatus: 'pending',
-      invitedAt: new Date(),
-      acceptedAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
+    try {
+      const response = await apiClient.post<{ success: boolean; data: any }>(API_ENDPOINTS.SEND_INVITATION, {
+        email: newInvite.email,
+        patientName: newInvite.name
+      });
 
-    setFamilyMembers(prev => [...prev, invite]);
-    
-    // Reset form
-    setNewInvite({
-      name: '',
-      email: '',
-      phone: '',
-      relationship: 'spouse',
-      accessLevel: 'limited',
-      permissions: ['view_appointments', 'receive_notifications'],
-      isEmergencyContact: false,
-      preferredContactMethod: 'email'
-    });
-    setShowInviteForm(false);
+      if (response.success) {
+        // Reset form
+        setNewInvite({
+          name: '',
+          email: '',
+          phone: '',
+          relationship: 'spouse',
+          accessLevel: 'limited',
+          permissions: ['view_appointments', 'receive_notifications'],
+          isEmergencyContact: false,
+          preferredContactMethod: 'email'
+        });
+        setShowInviteForm(false);
 
-    console.log('Family member invitation sent:', invite);
+        // Reload family members to show the new invitation
+        await loadFamilyMembers();
+        
+        alert('Invitation sent successfully!');
+      } else {
+        alert('Failed to send invitation. Please try again.');
+      }
+    } catch (err) {
+      console.error('Error sending invitation:', err);
+      alert('Failed to send invitation. Please try again.');
+    }
   };
 
   const handleResendInvite = (member: FamilyMember) => {
@@ -340,9 +320,34 @@ export default function FamilyAccessControls({ patientId, onClose }: FamilyAcces
         </div>
       )}
 
+      {/* Loading State */}
+      {loading && (
+        <div className="text-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-500">Loading family members...</p>
+        </div>
+      )}
+
+      {/* Error State */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="flex items-center space-x-2">
+            <AlertCircle className="w-5 h-5 text-red-600" />
+            <p className="text-red-700">{error}</p>
+          </div>
+          <button
+            onClick={loadFamilyMembers}
+            className="mt-2 text-red-600 hover:text-red-700 text-sm underline"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+
       {/* Family Members List */}
-      <div className="space-y-4">
-        {familyMembers.map((member) => (
+      {!loading && !error && (
+        <div className="space-y-4">
+          {familyMembers.map((member) => (
           <div
             key={member.id}
             className="bg-white border border-gray-200 rounded-lg p-4"
@@ -421,10 +426,11 @@ export default function FamilyAccessControls({ patientId, onClose }: FamilyAcces
               </div>
             </div>
           </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
-      {familyMembers.length === 0 && (
+      {!loading && !error && familyMembers.length === 0 && (
         <div className="text-center py-8">
           <Users className="w-12 h-12 text-gray-300 mx-auto mb-4" />
           <h4 className="text-lg font-medium text-gray-900 mb-2">No family members added</h4>

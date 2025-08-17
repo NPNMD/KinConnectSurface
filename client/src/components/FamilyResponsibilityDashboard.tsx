@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, MapPin, User, Car, AlertCircle, CheckCircle, Users, Bell, Phone, Mail } from 'lucide-react';
 import type { MedicalEvent, FamilyMember } from '@shared/types';
+import { apiClient, API_ENDPOINTS } from '../lib/api';
 
 interface FamilyResponsibilityDashboardProps {
   patientId: string;
@@ -8,139 +9,68 @@ interface FamilyResponsibilityDashboardProps {
   onClose?: () => void;
 }
 
-// Mock data for demonstration
-const mockUpcomingEvents: MedicalEvent[] = [
-  {
-    id: 'event1',
-    patientId: 'patient1',
-    title: 'Cardiology Appointment - Dr. Smith',
-    description: 'Annual heart checkup',
-    eventType: 'appointment',
-    priority: 'medium',
-    status: 'scheduled',
-    startDateTime: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // 3 days from now
-    endDateTime: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000 + 60 * 60 * 1000), // 1 hour later
-    duration: 60,
-    isAllDay: false,
-    location: '123 Medical Center Dr, City, State',
-    providerName: 'Dr. Smith',
-    providerSpecialty: 'Cardiology',
-    requiresTransportation: true,
-    responsiblePersonId: '',
-    responsiblePersonName: '',
-    responsibilityStatus: 'unassigned',
-    transportationNotes: 'Patient cannot drive due to medication side effects',
-    accompanimentRequired: true,
-    isRecurring: false,
-    reminders: [],
-    createdBy: 'patient1',
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    version: 1
-  },
-  {
-    id: 'event2',
-    patientId: 'patient1',
-    title: 'Physical Therapy Session',
-    description: 'Weekly PT for knee rehabilitation',
-    eventType: 'therapy_session',
-    priority: 'medium',
-    status: 'scheduled',
-    startDateTime: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000), // 5 days from now
-    endDateTime: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000 + 45 * 60 * 1000), // 45 minutes later
-    duration: 45,
-    isAllDay: false,
-    location: '456 Therapy Center Ave, City, State',
-    providerName: 'Sarah Johnson, PT',
-    providerSpecialty: 'Physical Therapy',
-    requiresTransportation: true,
-    responsiblePersonId: 'family1',
-    responsiblePersonName: 'Sarah Johnson',
-    responsibilityStatus: 'claimed',
-    transportationNotes: '',
-    accompanimentRequired: false,
-    isRecurring: true,
-    reminders: [],
-    createdBy: 'patient1',
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    version: 1
-  },
-  {
-    id: 'event3',
-    patientId: 'patient1',
-    title: 'Lab Work - Fasting Blood Test',
-    description: 'Quarterly blood work for diabetes monitoring',
-    eventType: 'lab_test',
-    priority: 'high',
-    status: 'scheduled',
-    startDateTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
-    endDateTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000), // 30 minutes later
-    duration: 30,
-    isAllDay: false,
-    location: '789 Lab Services Blvd, City, State',
-    providerName: 'City Lab Services',
-    requiresTransportation: true,
-    responsiblePersonId: '',
-    responsiblePersonName: '',
-    responsibilityStatus: 'unassigned',
-    transportationNotes: 'Must fast for 12 hours before appointment',
-    accompanimentRequired: false,
-    isRecurring: false,
-    reminders: [],
-    preparationInstructions: 'No food or drink (except water) for 12 hours before test',
-    createdBy: 'patient1',
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    version: 1
-  }
-];
-
-const mockFamilyMembers: FamilyMember[] = [
-  {
-    id: 'family1',
-    patientId: 'patient1',
-    userId: 'user1',
-    name: 'Sarah Johnson',
-    email: 'sarah.johnson@email.com',
-    phone: '+1-555-0123',
-    relationship: 'spouse',
-    accessLevel: 'full',
-    permissions: ['view_appointments', 'create_appointments', 'edit_appointments'],
-    isEmergencyContact: true,
-    canReceiveNotifications: true,
-    preferredContactMethod: 'email',
-    invitationStatus: 'accepted',
-    invitedAt: new Date('2024-01-15'),
-    acceptedAt: new Date('2024-01-16'),
-    createdAt: new Date('2024-01-15'),
-    updatedAt: new Date('2024-01-16')
-  },
-  {
-    id: 'family2',
-    patientId: 'patient1',
-    userId: 'user2',
-    name: 'Mike Johnson',
-    email: 'mike.johnson@email.com',
-    phone: '+1-555-0124',
-    relationship: 'child',
-    accessLevel: 'limited',
-    permissions: ['view_appointments'],
-    isEmergencyContact: false,
-    canReceiveNotifications: true,
-    preferredContactMethod: 'phone',
-    invitationStatus: 'accepted',
-    invitedAt: new Date('2024-01-20'),
-    acceptedAt: new Date('2024-01-21'),
-    createdAt: new Date('2024-01-20'),
-    updatedAt: new Date('2024-01-21')
-  }
-];
-
 export default function FamilyResponsibilityDashboard({ patientId, currentUserId, onClose }: FamilyResponsibilityDashboardProps) {
-  const [events, setEvents] = useState<MedicalEvent[]>(mockUpcomingEvents);
-  const [familyMembers] = useState<FamilyMember[]>(mockFamilyMembers);
+  const [events, setEvents] = useState<MedicalEvent[]>([]);
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'unassigned' | 'my_responsibilities'>('all');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadData();
+  }, [patientId]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Load medical events
+      const eventsResponse = await apiClient.get<{ success: boolean; data: any[] }>(API_ENDPOINTS.MEDICAL_EVENTS(patientId));
+      if (eventsResponse.success && eventsResponse.data) {
+        setEvents(eventsResponse.data.map((event: any) => ({
+          ...event,
+          startDateTime: new Date(event.startDateTime),
+          endDateTime: new Date(event.endDateTime),
+          createdAt: new Date(event.createdAt),
+          updatedAt: new Date(event.updatedAt)
+        })));
+      }
+
+      // Load family access data
+      const familyResponse = await apiClient.get<{ success: boolean; data: any }>(API_ENDPOINTS.FAMILY_ACCESS);
+      if (familyResponse.success && familyResponse.data) {
+        // Convert family access data to family members format
+        const members: FamilyMember[] = [
+          ...(familyResponse.data.familyMembersWithAccessToMe || []).map((access: any) => ({
+            id: access.id,
+            patientId: patientId,
+            userId: access.familyMemberId,
+            name: access.familyMemberName,
+            email: access.familyMemberEmail,
+            phone: '',
+            relationship: 'family_member',
+            accessLevel: access.accessLevel,
+            permissions: Object.keys(access.permissions || {}).filter(key => access.permissions[key]),
+            isEmergencyContact: false,
+            canReceiveNotifications: access.permissions?.canReceiveNotifications || false,
+            preferredContactMethod: 'email' as const,
+            invitationStatus: 'accepted' as const,
+            invitedAt: new Date(access.acceptedAt || Date.now()),
+            acceptedAt: new Date(access.acceptedAt || Date.now()),
+            createdAt: new Date(access.acceptedAt || Date.now()),
+            updatedAt: new Date(access.acceptedAt || Date.now())
+          }))
+        ];
+        setFamilyMembers(members);
+      }
+    } catch (err) {
+      console.error('Error loading family responsibility data:', err);
+      setError('Failed to load data. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const formatEventDate = (date: Date) => {
     const now = new Date();
@@ -331,10 +261,35 @@ export default function FamilyResponsibilityDashboard({ patientId, currentUserId
         </nav>
       </div>
 
+      {/* Loading State */}
+      {loading && (
+        <div className="text-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-500">Loading family responsibility data...</p>
+        </div>
+      )}
+
+      {/* Error State */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="flex items-center space-x-2">
+            <AlertCircle className="w-5 h-5 text-red-600" />
+            <p className="text-red-700">{error}</p>
+          </div>
+          <button
+            onClick={loadData}
+            className="mt-2 text-red-600 hover:text-red-700 text-sm underline"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+
       {/* Appointments List */}
-      <div className="space-y-4">
-        {filteredEvents.length > 0 ? (
-          filteredEvents.map((event) => (
+      {!loading && !error && (
+        <div className="space-y-4">
+          {filteredEvents.length > 0 ? (
+            filteredEvents.map((event) => (
             <div
               key={event.id}
               className="bg-white border border-gray-200 rounded-lg p-6 hover:shadow-sm transition-shadow"
@@ -459,28 +414,29 @@ export default function FamilyResponsibilityDashboard({ patientId, currentUserId
               </div>
             </div>
           ))
-        ) : (
-          <div className="text-center py-8">
-            <Car className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-            <h4 className="text-lg font-medium text-gray-900 mb-2">
-              {selectedFilter === 'unassigned' 
-                ? 'No appointments need help right now' 
-                : selectedFilter === 'my_responsibilities'
-                ? 'You have no upcoming responsibilities'
-                : 'No appointments requiring transportation'
-              }
-            </h4>
-            <p className="text-gray-500">
-              {selectedFilter === 'unassigned' 
-                ? 'All upcoming appointments have transportation arranged.'
-                : selectedFilter === 'my_responsibilities'
-                ? 'Check back later or help with unassigned appointments.'
-                : 'Appointments requiring family assistance will appear here.'
-              }
-            </p>
-          </div>
-        )}
-      </div>
+          ) : (
+            <div className="text-center py-8">
+              <Car className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+              <h4 className="text-lg font-medium text-gray-900 mb-2">
+                {selectedFilter === 'unassigned'
+                  ? 'No appointments need help right now'
+                  : selectedFilter === 'my_responsibilities'
+                  ? 'You have no upcoming responsibilities'
+                  : 'No appointments requiring transportation'
+                }
+              </h4>
+              <p className="text-gray-500">
+                {selectedFilter === 'unassigned'
+                  ? 'All upcoming appointments have transportation arranged.'
+                  : selectedFilter === 'my_responsibilities'
+                  ? 'Check back later or help with unassigned appointments.'
+                  : 'Appointments requiring family assistance will appear here.'
+                }
+              </p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

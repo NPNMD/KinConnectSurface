@@ -12,15 +12,15 @@ const STORAGE_KEYS = {
 } as const;
 
 // Development fallback data
-const createMockProvider = (name: string, specialty: string) => ({
-  id: `provider_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-  name,
-  specialty,
+const createEmptyProvider = () => ({
+  id: '',
+  name: '',
+  specialty: '',
   phone: '',
   email: '',
   address: '',
   notes: '',
-  patientId: 'current_user',
+  patientId: '',
   createdAt: new Date(),
   updatedAt: new Date()
 });
@@ -134,12 +134,7 @@ class ApiClient {
     // Special handling for healthcare providers
     if (endpoint.includes('/healthcare/providers/')) {
       return this.requestWithFallback<T>(endpoint, { method: 'GET' }, async () => {
-        const providers = this.getLocalStorageData(STORAGE_KEYS.HEALTHCARE_PROVIDERS, [
-          createMockProvider('Dr. Sarah Johnson', 'Cardiologist'),
-          createMockProvider('Dr. Michael Chen', 'Family Medicine'),
-          createMockProvider('Dr. Emily Rodriguez', 'Dermatologist'),
-          createMockProvider('Dr. David Kim', 'Orthopedic Surgery'),
-        ]);
+        const providers = this.getLocalStorageData(STORAGE_KEYS.HEALTHCARE_PROVIDERS, []);
         return { success: true, data: providers } as T;
       });
     }
@@ -148,16 +143,16 @@ class ApiClient {
     if (endpoint === '/patients/profile') {
       return this.requestWithFallback<T>(endpoint, { method: 'GET' }, async () => {
         const profile = this.getLocalStorageData(STORAGE_KEYS.PATIENT_PROFILE, {
-          id: 'current_user',
-          name: 'John Doe',
-          email: 'john.doe@example.com',
-          dateOfBirth: '1990-01-01',
-          phone: '(555) 123-4567',
-          address: '123 Main St, City, State 12345',
+          id: '',
+          name: '',
+          email: '',
+          dateOfBirth: '',
+          phone: '',
+          address: '',
           emergencyContact: {
-            name: 'Jane Doe',
-            phone: '(555) 987-6543',
-            relationship: 'Spouse'
+            name: '',
+            phone: '',
+            relationship: ''
           }
         });
         return { success: true, data: profile } as T;
@@ -184,8 +179,14 @@ class ApiClient {
         body: data ? JSON.stringify(data) : undefined,
       }, async () => {
         const providers: any[] = this.getLocalStorageData(STORAGE_KEYS.HEALTHCARE_PROVIDERS, []);
-        const newProvider = createMockProvider(data.name, data.specialty);
-        Object.assign(newProvider, data);
+        const newProvider = {
+          ...createEmptyProvider(),
+          ...data,
+          id: `provider_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          patientId: 'current_user',
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
         providers.push(newProvider);
         this.setLocalStorageData(STORAGE_KEYS.HEALTHCARE_PROVIDERS, providers);
         return { success: true, data: newProvider } as T;
