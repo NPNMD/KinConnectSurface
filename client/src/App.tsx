@@ -26,29 +26,44 @@ const queryClient = new QueryClient({
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
 
+  console.log('🛡️ ProtectedRoute check:', { isAuthenticated, isLoading });
+
   if (isLoading) {
+    console.log('🔄 ProtectedRoute: Showing loading spinner');
     return <LoadingSpinner />;
   }
 
   if (!isAuthenticated) {
+    console.log('🚫 ProtectedRoute: Not authenticated, redirecting to /');
     return <Navigate to="/" replace />;
   }
 
+  console.log('✅ ProtectedRoute: Authenticated, showing protected content');
   return <>{children}</>;
 }
 
 // Public route component (redirects if authenticated)
 function PublicRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, firebaseUser } = useAuth();
+
+  console.log('🌐 PublicRoute check:', {
+    isAuthenticated,
+    isLoading,
+    hasFirebaseUser: !!firebaseUser,
+    firebaseUserEmail: firebaseUser?.email
+  });
 
   if (isLoading) {
+    console.log('🔄 PublicRoute: Showing loading spinner');
     return <LoadingSpinner />;
   }
 
-  if (isAuthenticated) {
+  if (isAuthenticated && firebaseUser) {
+    console.log('✅ PublicRoute: Authenticated, redirecting to /dashboard');
     return <Navigate to="/dashboard" replace />;
   }
 
+  console.log('👤 PublicRoute: Not authenticated, showing public content');
   return <>{children}</>;
 }
 
@@ -76,8 +91,9 @@ function AppRoutes() {
         </PublicRoute>
       } />
       
-      {/* Development test route - bypasses authentication */}
+      {/* Development test routes - bypass authentication */}
       <Route path="/test-dashboard" element={<Dashboard />} />
+      <Route path="/test-landing" element={<Landing />} />
       
       {/* Protected routes */}
       <Route path="/dashboard" element={

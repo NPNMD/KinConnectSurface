@@ -2,11 +2,15 @@
 export const firebaseConfig = {
   apiKey: "AIzaSyCWSNgfOEVh_Q86YWHdiCA8QaYHVUDK4ZY",
   authDomain: "claritystream-uldp9.firebaseapp.com",
+  databaseURL: "https://claritystream-uldp9-default-rtdb.firebaseio.com/", // Added missing database URL
   projectId: "claritystream-uldp9",
   storageBucket: "claritystream-uldp9.firebasestorage.app",
   messagingSenderId: "64645622155",
   appId: "1:64645622155:web:1f8ecfebe7c881a9c8a78e"
 };
+
+// If using custom database ID, specify it here
+export const FIRESTORE_DATABASE_ID = "(default)"; // Use default database
 
 // Firebase collection names
 export const COLLECTIONS = {

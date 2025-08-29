@@ -12,7 +12,10 @@ if (!admin.apps.length) {
 	admin.initializeApp();
 }
 
+// Use custom database ID for Firestore
 const firestore = admin.firestore();
+// If you're using a custom database ID, you can specify it like this:
+// const firestore = admin.firestore('kinconnect-production');
 
 // Define secrets
 const sendgridApiKey = defineSecret('SENDGRID_API_KEY');
@@ -141,7 +144,16 @@ app.post('/invitations/send', authenticate, async (req, res) => {
 
 		console.log('👤 Sender found:', { senderName: senderData.name, senderEmail: senderData.email });
 
-		// 🔥 DUPLICATE PREVENTION: Check for existing invitations/relationships
+		// 🚫 PREVENT SELF-INVITATION: Check if user is trying to invite themselves
+		if (normalizedEmail === senderData.email?.toLowerCase().trim()) {
+			console.log('🚫 Preventing self-invitation attempt:', normalizedEmail);
+			return res.status(400).json({
+				success: false,
+				error: 'You cannot invite yourself to your own medical calendar'
+			});
+		}
+
+		//  DUPLICATE PREVENTION: Check for existing invitations/relationships
 		console.log('🔍 Checking for existing invitations or relationships...');
 		const existingQuery = await firestore.collection('family_calendar_access')
 			.where('patientId', '==', senderUserId)
@@ -345,6 +357,12 @@ app.get('/family-access', authenticate, async (req, res) => {
 			const access = doc.data();
 			console.log('👥 Processing family member access:', access);
 			
+			// 🚫 PREVENT SELF-REFERENTIAL RELATIONSHIPS: Skip if user is trying to access themselves
+			if (access.patientId === userId) {
+				console.log('🚫 Skipping self-referential relationship - user cannot be family member to themselves:', userId);
+				continue;
+			}
+			
 			// Create unique key for this relationship
 			const relationshipKey = `${access.patientId}_${userId}`;
 			
@@ -383,6 +401,12 @@ app.get('/family-access', authenticate, async (req, res) => {
 			console.log('🏥 Processing patient access:', access);
 			
 			if (access.familyMemberId) {
+				// 🚫 PREVENT SELF-REFERENTIAL RELATIONSHIPS: Skip if family member is the same as patient
+				if (access.familyMemberId === userId) {
+					console.log('🚫 Skipping self-referential relationship - user cannot be their own family member:', userId);
+					continue;
+				}
+				
 				// Create unique key for this relationship
 				const relationshipKey = `${userId}_${access.familyMemberId}`;
 				
@@ -704,6 +728,34 @@ app.post('/invitations/accept/:token', authenticate, async (req, res) => {
 				throw new Error('Active relationship already exists');
 			}
 
+			// 🔥 UPDATE USER TYPE: Tag user as family member when accepting invitation
+			console.log('👤 Updating user type to family_member for caretaker:', userId);
+			const userRef = firestore.collection('users').doc(userId);
+			const userDoc = await transaction.get(userRef);
+			
+			if (userDoc.exists) {
+				// Update existing user's type if they're currently a patient (default)
+				const userData = userDoc.data();
+				if (userData?.userType === 'patient') {
+					console.log('🔄 Converting patient to family_member:', userData.email);
+					transaction.update(userRef, {
+						userType: 'family_member',
+						updatedAt: admin.firestore.Timestamp.now()
+					});
+				}
+			} else {
+				// Create user record with family_member type (edge case if user doesn't exist yet)
+				console.log('📝 Creating new family_member user record:', userId);
+				transaction.set(userRef, {
+					id: userId,
+					email: invitation.familyMemberEmail,
+					name: invitation.familyMemberName || 'Family Member',
+					userType: 'family_member',
+					createdAt: admin.firestore.Timestamp.now(),
+					updatedAt: admin.firestore.Timestamp.now()
+				}, { merge: true });
+			}
+
 			// Update invitation with family member ID and activate
 			transaction.update(invitationDoc.ref, {
 				familyMemberId: userId,
@@ -772,19 +824,38 @@ app.get('/auth/profile', authenticate, async (req, res) => {
 
 		const now = admin.firestore.Timestamp.now();
 
-		if (!userSnap.exists) {
-			const newUser = {
-				id: uid,
-				email: email || '',
-				name: name || 'Unknown User',
-				profilePicture: picture,
-				userType: 'patient',
-				createdAt: now,
-				updatedAt: now,
-			};
-			await userDocRef.set(newUser, { merge: true });
-			return res.json({ success: true, data: { ...newUser, createdAt: new Date(), updatedAt: new Date() } });
+			if (!userSnap.exists) {
+		// 🔥 SMART USER TYPE ASSIGNMENT: Check if user has pending invitations
+		console.log('👤 New user detected, checking for pending invitations:', email);
+		let userType = 'patient'; // Default to patient
+		
+		if (email) {
+			// Check for pending invitations for this email
+			const pendingInvitations = await firestore.collection('family_calendar_access')
+				.where('familyMemberEmail', '==', email.toLowerCase().trim())
+				.where('status', '==', 'pending')
+				.limit(1)
+				.get();
+			
+			if (!pendingInvitations.empty) {
+				userType = 'family_member';
+				console.log('🎯 User has pending invitations, setting type to family_member');
+			}
 		}
+
+		const newUser = {
+			id: uid,
+			email: email || '',
+			name: name || 'Unknown User',
+			profilePicture: picture,
+			userType,
+			createdAt: now,
+			updatedAt: now,
+		};
+		await userDocRef.set(newUser, { merge: true });
+		console.log('✅ Created new user with type:', userType);
+		return res.json({ success: true, data: { ...newUser, createdAt: new Date(), updatedAt: new Date() } });
+	}
 
 		const data = userSnap.data() || {};
 		const merged = {

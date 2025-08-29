@@ -56,11 +56,20 @@ const SENDGRID_FROM_EMAIL = 'mike.nguyen@twfg.com';
 const APP_URL = 'https://claritystream-uldp9.web.app';
 // Create an Express app
 const app = (0, express_1.default)();
-// Security middleware
+// Security middleware - Configure for OAuth compatibility
 app.use((0, helmet_1.default)({
-    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+    crossOriginOpenerPolicy: false, // Disable COOP entirely for OAuth compatibility
     crossOriginEmbedderPolicy: false,
+    contentSecurityPolicy: false,
 }));
+// Add explicit headers for OAuth compatibility
+app.use((req, res, next) => {
+    // Remove any restrictive COOP headers
+    res.removeHeader('Cross-Origin-Opener-Policy');
+    // Set permissive COOP for OAuth popups
+    res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
+    next();
+});
 app.use((0, cors_1.default)({
     origin: true,
     credentials: true,
@@ -137,6 +146,8 @@ app.post('/invitations/send', authenticate, async (req, res) => {
                 error: 'Invalid email format'
             });
         }
+        // Normalize email to lowercase for consistent comparison
+        const normalizedEmail = email.toLowerCase().trim();
         // Get sender's user info
         console.log('👤 Fetching sender information...');
         const senderDoc = await firestore.collection('users').doc(senderUserId).get();
@@ -148,6 +159,44 @@ app.post('/invitations/send', authenticate, async (req, res) => {
             });
         }
         console.log('👤 Sender found:', { senderName: senderData.name, senderEmail: senderData.email });
+        // 🔥 DUPLICATE PREVENTION: Check for existing invitations/relationships
+        console.log('🔍 Checking for existing invitations or relationships...');
+        const existingQuery = await firestore.collection('family_calendar_access')
+            .where('patientId', '==', senderUserId)
+            .where('familyMemberEmail', '==', normalizedEmail)
+            .get();
+        if (!existingQuery.empty) {
+            const existingRecord = existingQuery.docs[0].data();
+            console.log('⚠️ Found existing record:', {
+                status: existingRecord.status,
+                id: existingQuery.docs[0].id
+            });
+            // Handle different existing statuses
+            if (existingRecord.status === 'active') {
+                return res.status(409).json({
+                    success: false,
+                    error: 'This family member already has active access to your medical calendar'
+                });
+            }
+            else if (existingRecord.status === 'pending') {
+                // Check if invitation has expired
+                const expiresAt = existingRecord.invitationExpiresAt?.toDate();
+                if (expiresAt && new Date() < expiresAt) {
+                    return res.status(409).json({
+                        success: false,
+                        error: 'An invitation is already pending for this email address. Please wait for them to accept or let the invitation expire.'
+                    });
+                }
+                else {
+                    // Expired invitation - we'll update it below
+                    console.log('📝 Found expired invitation, will update it');
+                }
+            }
+            else if (existingRecord.status === 'revoked') {
+                // Previously revoked - we can create a new invitation
+                console.log('📝 Found revoked relationship, will create new invitation');
+            }
+        }
         // Define permissions for the invitation
         const permissions = {
             canView: true,
@@ -163,13 +212,16 @@ app.post('/invitations/send', authenticate, async (req, res) => {
         const invitationToken = `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const expiresAt = new Date();
         expiresAt.setDate(expiresAt.getDate() + 7); // Expires in 7 days
-        // Create family access record
-        console.log('💾 Creating family access record...');
+        // 🔥 USE DETERMINISTIC DOCUMENT ID to prevent duplicates
+        // Format: patientId_emailHash (ensures uniqueness per patient-email combination)
+        const emailHash = Buffer.from(normalizedEmail).toString('base64').replace(/[^a-zA-Z0-9]/g, '');
+        const documentId = `${senderUserId}_${emailHash}`;
+        console.log('💾 Creating/updating family access record with ID:', documentId);
         const familyAccessData = {
             patientId: senderUserId,
             familyMemberId: '', // Will be set when invitation is accepted
             familyMemberName: patientName,
-            familyMemberEmail: email,
+            familyMemberEmail: normalizedEmail, // Use normalized email
             permissions,
             accessLevel: 'limited',
             eventTypesAllowed: [],
@@ -182,8 +234,10 @@ app.post('/invitations/send', authenticate, async (req, res) => {
             invitationToken,
             invitationExpiresAt: admin.firestore.Timestamp.fromDate(expiresAt)
         };
-        const familyAccessRef = await firestore.collection('family_calendar_access').add(familyAccessData);
-        console.log('✅ Family access record created:', familyAccessRef.id);
+        // Use set() with merge to handle existing records gracefully
+        const familyAccessRef = firestore.collection('family_calendar_access').doc(documentId);
+        await familyAccessRef.set(familyAccessData, { merge: false }); // Don't merge, replace completely
+        console.log('✅ Family access record created/updated:', documentId);
         // Send invitation email
         try {
             console.log('📨 Initializing SendGrid...');
@@ -198,7 +252,7 @@ app.post('/invitations/send', authenticate, async (req, res) => {
                     success: true,
                     message: 'Invitation created but email delivery failed. Please try again or contact support.',
                     data: {
-                        invitationId: familyAccessRef.id,
+                        invitationId: documentId,
                         emailError: 'SendGrid API key not configured properly'
                     }
                 });
@@ -207,7 +261,7 @@ app.post('/invitations/send', authenticate, async (req, res) => {
             const invitationLink = `${APP_URL}/invitation/${invitationToken}`;
             console.log('🔗 Invitation link:', invitationLink);
             const emailContent = {
-                to: email,
+                to: normalizedEmail, // Use normalized email
                 from: SENDGRID_FROM_EMAIL,
                 subject: `${senderData.name} has invited you to access their medical calendar`,
                 html: `
@@ -233,20 +287,20 @@ app.post('/invitations/send', authenticate, async (req, res) => {
 						</div>
 						
 						<div style="text-align: center; margin: 30px 0;">
-							<a href="${invitationLink}" 
+							<a href="${invitationLink}"
 								 style="background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">
 								Accept Invitation
 							</a>
 						</div>
 						
 						<div style="border-top: 1px solid #e2e8f0; padding-top: 20px; color: #64748b; font-size: 14px;">
-							<p>This invitation was sent to ${email}. If you didn't expect this invitation, you can safely ignore this email.</p>
+							<p>This invitation was sent to ${normalizedEmail}. If you didn't expect this invitation, you can safely ignore this email.</p>
 							<p>The invitation link will expire in 7 days.</p>
 						</div>
 					</div>
 				`
             };
-            console.log('📧 Sending email to:', email);
+            console.log('📧 Sending email to:', normalizedEmail);
             const emailResult = await mail_1.default.send(emailContent);
             console.log('✅ Email sent successfully:', emailResult[0].statusCode);
         }
@@ -259,7 +313,7 @@ app.post('/invitations/send', authenticate, async (req, res) => {
             success: true,
             message: 'Invitation sent successfully',
             data: {
-                invitationId: familyAccessRef.id,
+                invitationId: documentId,
                 expiresAt: expiresAt
             }
         });
@@ -287,16 +341,25 @@ app.get('/family-access', authenticate, async (req, res) => {
             .where('patientId', '==', userId)
             .where('status', '==', 'active')
             .get();
+        // 🔥 DEDUPLICATION: Use Maps to track unique relationships
+        const uniquePatientsMap = new Map();
+        const uniqueFamilyMembersMap = new Map();
         // Process patients the user has access to as a family member
-        const patientsIHaveAccessTo = [];
         for (const doc of familyMemberQuery.docs) {
             const access = doc.data();
             console.log('👥 Processing family member access:', access);
+            // Create unique key for this relationship
+            const relationshipKey = `${access.patientId}_${userId}`;
+            // Skip if we already have this relationship (deduplication)
+            if (uniquePatientsMap.has(relationshipKey)) {
+                console.log('🔄 Skipping duplicate patient relationship:', relationshipKey);
+                continue;
+            }
             // Get patient info using patientId (not createdBy)
             const patientDoc = await firestore.collection('users').doc(access.patientId).get();
             const patientData = patientDoc.data();
             if (patientData) {
-                patientsIHaveAccessTo.push({
+                const patientAccess = {
                     id: doc.id,
                     patientId: access.patientId,
                     patientName: patientData.name,
@@ -306,23 +369,30 @@ app.get('/family-access', authenticate, async (req, res) => {
                     status: access.status,
                     acceptedAt: access.acceptedAt?.toDate(),
                     relationship: 'family_member'
-                });
+                };
+                uniquePatientsMap.set(relationshipKey, patientAccess);
             }
             else {
                 console.warn('⚠️ Patient data not found for patientId:', access.patientId);
             }
         }
         // Process family members who have access to the current user as a patient
-        const familyMembersWithAccessToMe = [];
         for (const doc of patientQuery.docs) {
             const access = doc.data();
             console.log('🏥 Processing patient access:', access);
             if (access.familyMemberId) {
+                // Create unique key for this relationship
+                const relationshipKey = `${userId}_${access.familyMemberId}`;
+                // Skip if we already have this relationship (deduplication)
+                if (uniqueFamilyMembersMap.has(relationshipKey)) {
+                    console.log('🔄 Skipping duplicate family member relationship:', relationshipKey);
+                    continue;
+                }
                 // Get family member info
                 const familyMemberDoc = await firestore.collection('users').doc(access.familyMemberId).get();
                 const familyMemberData = familyMemberDoc.data();
                 if (familyMemberData) {
-                    familyMembersWithAccessToMe.push({
+                    const familyMemberAccess = {
                         id: doc.id,
                         familyMemberId: access.familyMemberId,
                         familyMemberName: familyMemberData.name,
@@ -332,13 +402,17 @@ app.get('/family-access', authenticate, async (req, res) => {
                         status: access.status,
                         acceptedAt: access.acceptedAt?.toDate(),
                         relationship: 'patient'
-                    });
+                    };
+                    uniqueFamilyMembersMap.set(relationshipKey, familyMemberAccess);
                 }
                 else {
                     console.warn('⚠️ Family member data not found for familyMemberId:', access.familyMemberId);
                 }
             }
         }
+        // Convert Maps back to arrays
+        const patientsIHaveAccessTo = Array.from(uniquePatientsMap.values());
+        const familyMembersWithAccessToMe = Array.from(uniqueFamilyMembersMap.values());
         console.log('✅ Family access results:', {
             patientsIHaveAccessTo: patientsIHaveAccessTo.length,
             familyMembersWithAccessToMe: familyMembersWithAccessToMe.length
@@ -512,6 +586,7 @@ app.post('/invitations/accept/:token', authenticate, async (req, res) => {
     try {
         const { token } = req.params;
         const userId = req.user.uid;
+        console.log('🤝 Processing invitation acceptance:', { token, userId });
         // Find invitation by token
         const invitationQuery = await firestore.collection('family_calendar_access')
             .where('invitationToken', '==', token)
@@ -526,6 +601,11 @@ app.post('/invitations/accept/:token', authenticate, async (req, res) => {
         }
         const invitationDoc = invitationQuery.docs[0];
         const invitation = invitationDoc.data();
+        console.log('📋 Found invitation:', {
+            id: invitationDoc.id,
+            patientId: invitation.patientId,
+            familyMemberEmail: invitation.familyMemberEmail
+        });
         // Check if invitation has expired
         if (invitation.invitationExpiresAt && new Date() > invitation.invitationExpiresAt.toDate()) {
             return res.status(400).json({
@@ -533,26 +613,117 @@ app.post('/invitations/accept/:token', authenticate, async (req, res) => {
                 error: 'Invitation has expired'
             });
         }
-        // Update invitation with family member ID and activate
-        await invitationDoc.ref.update({
-            familyMemberId: userId,
-            status: 'active',
-            acceptedAt: admin.firestore.Timestamp.now(),
-            updatedAt: admin.firestore.Timestamp.now(),
-            invitationToken: admin.firestore.FieldValue.delete(),
-            invitationExpiresAt: admin.firestore.FieldValue.delete()
+        // 🔥 RACE CONDITION PREVENTION: Check for existing active relationship
+        console.log('🔍 Checking for existing active relationships...');
+        const existingActiveQuery = await firestore.collection('family_calendar_access')
+            .where('patientId', '==', invitation.patientId)
+            .where('familyMemberId', '==', userId)
+            .where('status', '==', 'active')
+            .get();
+        if (!existingActiveQuery.empty) {
+            console.log('⚠️ User already has active access to this patient');
+            return res.status(409).json({
+                success: false,
+                error: 'You already have active access to this patient\'s medical calendar'
+            });
+        }
+        // 🔥 DUPLICATE PREVENTION: Check if this user already accepted this specific invitation
+        if (invitation.familyMemberId && invitation.familyMemberId === userId && invitation.status === 'active') {
+            console.log('⚠️ Invitation already accepted by this user');
+            return res.status(409).json({
+                success: false,
+                error: 'This invitation has already been accepted'
+            });
+        }
+        // Use transaction to ensure atomicity and prevent race conditions
+        const result = await firestore.runTransaction(async (transaction) => {
+            // Re-check the invitation status within the transaction
+            const currentInvitation = await transaction.get(invitationDoc.ref);
+            if (!currentInvitation.exists) {
+                throw new Error('Invitation no longer exists');
+            }
+            const currentData = currentInvitation.data();
+            if (currentData?.status !== 'pending') {
+                throw new Error('Invitation is no longer pending');
+            }
+            // Check again for existing active relationships within transaction
+            const activeCheck = await firestore.collection('family_calendar_access')
+                .where('patientId', '==', invitation.patientId)
+                .where('familyMemberId', '==', userId)
+                .where('status', '==', 'active')
+                .get();
+            if (!activeCheck.empty) {
+                throw new Error('Active relationship already exists');
+            }
+            // 🔥 UPDATE USER TYPE: Tag user as family member when accepting invitation
+            console.log('👤 Updating user type to family_member for caretaker:', userId);
+            const userRef = firestore.collection('users').doc(userId);
+            const userDoc = await transaction.get(userRef);
+            if (userDoc.exists) {
+                // Update existing user's type if they're currently a patient (default)
+                const userData = userDoc.data();
+                if (userData?.userType === 'patient') {
+                    console.log('🔄 Converting patient to family_member:', userData.email);
+                    transaction.update(userRef, {
+                        userType: 'family_member',
+                        updatedAt: admin.firestore.Timestamp.now()
+                    });
+                }
+            }
+            else {
+                // Create user record with family_member type (edge case if user doesn't exist yet)
+                console.log('📝 Creating new family_member user record:', userId);
+                transaction.set(userRef, {
+                    id: userId,
+                    email: invitation.familyMemberEmail,
+                    name: invitation.familyMemberName || 'Family Member',
+                    userType: 'family_member',
+                    createdAt: admin.firestore.Timestamp.now(),
+                    updatedAt: admin.firestore.Timestamp.now()
+                }, { merge: true });
+            }
+            // Update invitation with family member ID and activate
+            transaction.update(invitationDoc.ref, {
+                familyMemberId: userId,
+                status: 'active',
+                acceptedAt: admin.firestore.Timestamp.now(),
+                updatedAt: admin.firestore.Timestamp.now(),
+                invitationToken: admin.firestore.FieldValue.delete(),
+                invitationExpiresAt: admin.firestore.FieldValue.delete()
+            });
+            return {
+                id: invitationDoc.id,
+                status: 'active'
+            };
         });
+        console.log('✅ Invitation accepted successfully:', result);
         res.json({
             success: true,
             message: 'Invitation accepted successfully',
-            data: {
-                id: invitationDoc.id,
-                status: 'active'
-            }
+            data: result
         });
     }
     catch (error) {
-        console.error('Error accepting invitation:', error);
+        console.error('❌ Error accepting invitation:', error);
+        // Handle specific transaction errors
+        if (error.message === 'Invitation no longer exists') {
+            return res.status(404).json({
+                success: false,
+                error: 'Invitation no longer exists'
+            });
+        }
+        else if (error.message === 'Invitation is no longer pending') {
+            return res.status(409).json({
+                success: false,
+                error: 'This invitation has already been processed'
+            });
+        }
+        else if (error.message === 'Active relationship already exists') {
+            return res.status(409).json({
+                success: false,
+                error: 'You already have active access to this patient\'s medical calendar'
+            });
+        }
         res.status(500).json({
             success: false,
             error: 'Internal server error'
@@ -573,16 +744,32 @@ app.get('/auth/profile', authenticate, async (req, res) => {
         const userSnap = await userDocRef.get();
         const now = admin.firestore.Timestamp.now();
         if (!userSnap.exists) {
+            // 🔥 SMART USER TYPE ASSIGNMENT: Check if user has pending invitations
+            console.log('👤 New user detected, checking for pending invitations:', email);
+            let userType = 'patient'; // Default to patient
+            if (email) {
+                // Check for pending invitations for this email
+                const pendingInvitations = await firestore.collection('family_calendar_access')
+                    .where('familyMemberEmail', '==', email.toLowerCase().trim())
+                    .where('status', '==', 'pending')
+                    .limit(1)
+                    .get();
+                if (!pendingInvitations.empty) {
+                    userType = 'family_member';
+                    console.log('🎯 User has pending invitations, setting type to family_member');
+                }
+            }
             const newUser = {
                 id: uid,
                 email: email || '',
                 name: name || 'Unknown User',
                 profilePicture: picture,
-                userType: 'patient',
+                userType,
                 createdAt: now,
                 updatedAt: now,
             };
             await userDocRef.set(newUser, { merge: true });
+            console.log('✅ Created new user with type:', userType);
             return res.json({ success: true, data: { ...newUser, createdAt: new Date(), updatedAt: new Date() } });
         }
         const data = userSnap.data() || {};
