@@ -32,7 +32,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const token = await firebaseUser.getIdToken();
 
       // Fetch user data from our API
-      const response = await fetch('/api/auth/profile', {
+      const response = await fetch('https://us-central1-claritystream-uldp9.cloudfunctions.net/api/auth/profile', {
         headers: {
           'Authorization': `Bearer ${token}`,
         },

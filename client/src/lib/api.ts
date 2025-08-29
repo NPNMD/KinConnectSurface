@@ -1,7 +1,7 @@
 import { getIdToken } from './firebase';
 
 // Always use the production Firebase Functions URL
-const API_BASE_URL = 'https://us-central1-claritystream-uldp9.cloudfunctions.net/api/api';
+const API_BASE_URL = 'https://us-central1-claritystream-uldp9.cloudfunctions.net/api';
 
 // Local storage keys for development fallback
 const STORAGE_KEYS = {
@@ -92,6 +92,10 @@ class ApiClient {
       ...options,
     };
 
+    // Add diagnostic logging
+    console.log(`🔧 API Request: ${options.method || 'GET'} ${url}`);
+    console.log('🔧 Headers:', headers);
+
     try {
       const response = await fetch(url, config);
       
@@ -118,7 +122,9 @@ class ApiClient {
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error(`API request failed for ${endpoint}:`, error);
+      console.error(`❌ API request failed for ${endpoint}:`, error);
+      console.error(`❌ Full URL: ${url}`);
+      console.error(`❌ Request config:`, config);
       
       // Add more context to network errors
       if (error instanceof TypeError && error.message.includes('fetch')) {
@@ -167,6 +173,46 @@ class ApiClient {
       });
     }
 
+    // Special handling for medication calendar events
+    if (endpoint.includes('/medication-calendar/events')) {
+      return this.requestWithFallback<T>(endpoint, { method: 'GET' }, async () => {
+        console.warn('Medication calendar API unavailable, returning empty events');
+        return { success: true, data: [], message: 'Medication calendar temporarily unavailable' } as T;
+      });
+    }
+
+    // Special handling for medication adherence
+    if (endpoint.includes('/medication-calendar/adherence')) {
+      return this.requestWithFallback<T>(endpoint, { method: 'GET' }, async () => {
+        console.warn('Medication adherence API unavailable, returning empty data');
+        return { success: true, data: [], message: 'Medication adherence data temporarily unavailable' } as T;
+      });
+    }
+
+    // Special handling for family access
+    if (endpoint === '/family-access') {
+      return this.requestWithFallback<T>(endpoint, { method: 'GET' }, async () => {
+        console.warn('Family access API unavailable, returning empty data');
+        return {
+          success: true,
+          data: {
+            patientsIHaveAccessTo: [],
+            familyMembersWithAccessToMe: [],
+            totalConnections: 0
+          },
+          message: 'Family access data temporarily unavailable'
+        } as T;
+      });
+    }
+
+    // Special handling for medical events
+    if (endpoint.includes('/medical-events/')) {
+      return this.requestWithFallback<T>(endpoint, { method: 'GET' }, async () => {
+        console.warn('Medical events API unavailable, returning empty events');
+        return { success: true, data: [], message: 'Medical events temporarily unavailable' } as T;
+      });
+    }
+
     return this.request<T>(endpoint, { method: 'GET' });
   }
 
@@ -190,6 +236,39 @@ class ApiClient {
         providers.push(newProvider);
         this.setLocalStorageData(STORAGE_KEYS.HEALTHCARE_PROVIDERS, providers);
         return { success: true, data: newProvider } as T;
+      });
+    }
+
+    // Special handling for medical events creation
+    if (endpoint === '/medical-events') {
+      return this.requestWithFallback<T>(endpoint, {
+        method: 'POST',
+        body: data ? JSON.stringify(data) : undefined,
+      }, async () => {
+        console.warn('Medical events creation API unavailable, storing locally');
+        // Store in localStorage as fallback
+        const events: any[] = this.getLocalStorageData('kinconnect_medical_events', []);
+        const newEvent = {
+          ...data,
+          id: `event_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          _isLocalOnly: true // Flag to indicate this is stored locally
+        };
+        events.push(newEvent);
+        this.setLocalStorageData('kinconnect_medical_events', events);
+        return { success: true, data: newEvent, message: 'Event saved locally - will sync when connection is restored' } as T;
+      });
+    }
+
+    // Special handling for family invitations
+    if (endpoint === '/invitations/send') {
+      return this.requestWithFallback<T>(endpoint, {
+        method: 'POST',
+        body: data ? JSON.stringify(data) : undefined,
+      }, async () => {
+        console.warn('Family invitation API unavailable');
+        throw new Error('Unable to send invitation at this time. Please try again later.');
       });
     }
 
@@ -286,6 +365,7 @@ export const API_ENDPOINTS = {
   
   // Family Access
   FAMILY_ACCESS: '/family-access',
+  REMOVE_FAMILY_MEMBER: '/family-access',
   SEND_INVITATION: '/invitations/send',
   PENDING_INVITATIONS: '/invitations/pending',
   ACCEPT_INVITATION: (token: string) => `/invitations/accept/${token}`,

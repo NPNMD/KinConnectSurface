@@ -53,6 +53,9 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
   const [events, setEvents] = useState<MedicalEvent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [savedProviders, setSavedProviders] = useState<any[]>([]);
+  const [savedFacilities, setSavedFacilities] = useState<any[]>([]);
+  const [loadingProviders, setLoadingProviders] = useState(false);
   const [showAddEvent, setShowAddEvent] = useState(false);
   const [editingEvent, setEditingEvent] = useState<MedicalEvent | null>(null);
   const [selectedEventTypes, setSelectedEventTypes] = useState<MedicalEventType[]>(MEDICAL_EVENT_TYPES_ARRAY.slice());
@@ -105,6 +108,37 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
     tags: [] as string[]
   });
 
+  // Load saved providers and facilities
+  const loadSavedProviders = async () => {
+    try {
+      setLoadingProviders(true);
+      
+      // Load healthcare providers
+      const providersResponse = await apiClient.get<{ success: boolean; data: any[] }>(
+        API_ENDPOINTS.HEALTHCARE_PROVIDERS(patientId)
+      );
+      
+      if (providersResponse.success && providersResponse.data) {
+        setSavedProviders(providersResponse.data);
+        console.log('✅ Loaded saved healthcare providers:', providersResponse.data.length);
+      }
+      
+      // Load medical facilities
+      const facilitiesResponse = await apiClient.get<{ success: boolean; data: any[] }>(
+        API_ENDPOINTS.MEDICAL_FACILITIES(patientId)
+      );
+      
+      if (facilitiesResponse.success && facilitiesResponse.data) {
+        setSavedFacilities(facilitiesResponse.data);
+        console.log('✅ Loaded saved medical facilities:', facilitiesResponse.data.length);
+      }
+    } catch (error) {
+      console.error('❌ Error loading saved providers/facilities:', error);
+    } finally {
+      setLoadingProviders(false);
+    }
+  };
+
   // Initialize Google Calendar API and load events
   useEffect(() => {
     const initializeGoogleCalendar = async () => {
@@ -144,9 +178,10 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
 
     initializeGoogleCalendar();
     
-    // Load calendar events when component mounts
+    // Load calendar events and saved providers when component mounts
     if (patientId) {
       loadCalendarEvents();
+      loadSavedProviders();
     }
   }, [patientId]);
 
@@ -331,10 +366,16 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
     try {
       setIsLoading(true);
       
+      console.log('🔧 CalendarIntegration: Loading calendar events...');
+      console.log('🔧 CalendarIntegration: Patient ID:', patientId);
+      console.log('🔧 CalendarIntegration: Using endpoint:', API_ENDPOINTS.MEDICAL_EVENTS(patientId));
+      
       // Fetch events from the API
-      const response = await apiClient.get<{ success: boolean; data: MedicalEvent[] }>(
+      const response = await apiClient.get<{ success: boolean; data: MedicalEvent[]; message?: string }>(
         API_ENDPOINTS.MEDICAL_EVENTS(patientId)
       );
+      
+      console.log('🔧 CalendarIntegration: Medical events response:', response);
       
       if (response.success && response.data) {
         // Convert date strings back to Date objects
@@ -346,14 +387,39 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
           updatedAt: new Date(event.updatedAt)
         }));
         setEvents(events);
+        console.log('✅ CalendarIntegration: Medical events loaded successfully:', events.length, 'events');
+        
+        // Show message if API returned a fallback message
+        if (response.message) {
+          console.warn('⚠️ CalendarIntegration:', response.message);
+        }
       } else {
-        console.warn('Failed to load events:', response);
+        console.error('❌ CalendarIntegration: Failed to load events:', response);
         setEvents([]);
       }
     } catch (error) {
-      console.error('Error loading calendar events:', error);
-      // Set empty array on error to show empty state
-      setEvents([]);
+      console.error('❌ CalendarIntegration: Error loading calendar events:', error);
+      
+      // Try to load from localStorage as final fallback
+      try {
+        const localEvents = localStorage.getItem('kinconnect_medical_events');
+        if (localEvents) {
+          const parsedEvents = JSON.parse(localEvents).map((event: any) => ({
+            ...event,
+            startDateTime: new Date(event.startDateTime),
+            endDateTime: new Date(event.endDateTime),
+            createdAt: new Date(event.createdAt),
+            updatedAt: new Date(event.updatedAt)
+          }));
+          setEvents(parsedEvents);
+          console.log('📱 CalendarIntegration: Loaded events from localStorage:', parsedEvents.length, 'events');
+        } else {
+          setEvents([]);
+        }
+      } catch (localError) {
+        console.error('❌ CalendarIntegration: Error loading from localStorage:', localError);
+        setEvents([]);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -480,12 +546,30 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
         setShowAddEvent(false);
         
         console.log('Medical event saved successfully:', savedEvent);
+        
+        // Show success message if event was saved locally
+        if (response.message && response.message.includes('locally')) {
+          alert('Appointment saved locally. It will sync when connection is restored.');
+        }
       } else {
         throw new Error('Failed to save event');
       }
     } catch (error) {
       console.error('Error adding medical event:', error);
-      alert('Failed to save appointment. Please try again.');
+      
+      // Provide more specific error messages
+      let errorMessage = 'Failed to save appointment. Please try again.';
+      if (error instanceof Error) {
+        if (error.message.includes('Network error')) {
+          errorMessage = 'Network error. Please check your internet connection and try again.';
+        } else if (error.message.includes('Authentication')) {
+          errorMessage = 'Please sign in again to save appointments.';
+        } else if (error.message.includes('Access denied')) {
+          errorMessage = 'You do not have permission to create appointments for this patient.';
+        }
+      }
+      
+      alert(errorMessage);
     }
   };
 
@@ -957,10 +1041,10 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
       {/* Calendar Navigation and Controls */}
       <div className="bg-white border border-gray-200 rounded-lg p-4">
         <div className="flex flex-col space-y-4">
-          {/* Top Row: Navigation and View Controls */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-4 sm:space-y-0">
-            {/* Calendar Navigation */}
-            <div className="flex items-center space-x-4">
+          {/* Mobile-First Navigation */}
+          <div className="flex flex-col space-y-4">
+            {/* Calendar Navigation - Always on top */}
+            <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => navigateCalendar('prev')}
@@ -968,7 +1052,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
                 >
                   <ChevronLeft className="w-5 h-5" />
                 </button>
-                <h2 className="text-lg font-semibold text-gray-900 min-w-[200px] text-center">
+                <h2 className="text-base sm:text-lg font-semibold text-gray-900 text-center flex-1 min-w-0">
                   {getViewTitle()}
                 </h2>
                 <button
@@ -980,70 +1064,20 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
               </div>
               <button
                 onClick={() => setCurrentDate(new Date())}
-                className="px-3 py-1 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors"
+                className="px-3 py-1 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors ml-2"
               >
                 Today
               </button>
             </div>
 
-            {/* View Controls and Actions */}
-            <div className="flex items-center space-x-3">
-              {/* Search */}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input
-                  type="text"
-                  placeholder="Search events..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 pr-4 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-
-              {/* Filter Toggle */}
-              <button
-                onClick={() => setShowFilters(!showFilters)}
-                className={`p-2 rounded-md transition-colors ${
-                  showFilters ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                }`}
-              >
-                <Filter className="w-5 h-5" />
-              </button>
-
-              {/* Templates */}
-              <button
-                onClick={() => setShowTemplates(true)}
-                className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
-                title="Appointment Templates"
-              >
-                <FileText className="w-5 h-5" />
-              </button>
-
-              {/* Analytics */}
-              <button
-                onClick={() => setShowAnalytics(true)}
-                className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
-                title="View Analytics"
-              >
-                <BarChart3 className="w-5 h-5" />
-              </button>
-
-              {/* Export */}
-              <button
-                onClick={() => exportCalendar('csv')}
-                className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
-                title="Export Calendar"
-              >
-                <Download className="w-5 h-5" />
-              </button>
-
-              {/* View Selector */}
-              <div className="flex rounded-md border border-gray-200">
+            {/* View Selector - Prominent on mobile */}
+            <div className="flex justify-center">
+              <div className="flex rounded-md border border-gray-200 w-full max-w-sm">
                 {(['month', 'week', 'day', 'list'] as const).map(view => (
                   <button
                     key={view}
                     onClick={() => setSelectedView(view)}
-                    className={`px-3 py-2 text-sm font-medium transition-colors first:rounded-l-md last:rounded-r-md ${
+                    className={`flex-1 px-2 py-2 text-sm font-medium transition-colors first:rounded-l-md last:rounded-r-md ${
                       selectedView === view
                         ? 'bg-blue-600 text-white'
                         : 'bg-white text-gray-600 hover:bg-gray-50'
@@ -1052,6 +1086,62 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
                     {view.charAt(0).toUpperCase() + view.slice(1)}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* Search and Controls */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Search - Full width on mobile */}
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <input
+                  type="text"
+                  placeholder="Search events..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              {/* Action Buttons - Horizontal scroll on mobile */}
+              <div className="flex items-center space-x-2 overflow-x-auto pb-1">
+                {/* Filter Toggle */}
+                <button
+                  onClick={() => setShowFilters(!showFilters)}
+                  className={`flex-shrink-0 p-2 rounded-md transition-colors ${
+                    showFilters ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                  }`}
+                  title="Filters"
+                >
+                  <Filter className="w-5 h-5" />
+                </button>
+
+                {/* Templates */}
+                <button
+                  onClick={() => setShowTemplates(true)}
+                  className="flex-shrink-0 p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+                  title="Templates"
+                >
+                  <FileText className="w-5 h-5" />
+                </button>
+
+                {/* Analytics */}
+                <button
+                  onClick={() => setShowAnalytics(true)}
+                  className="flex-shrink-0 p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+                  title="Analytics"
+                >
+                  <BarChart3 className="w-5 h-5" />
+                </button>
+
+                {/* Export */}
+                <button
+                  onClick={() => exportCalendar('csv')}
+                  className="flex-shrink-0 p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+                  title="Export"
+                >
+                  <Download className="w-5 h-5" />
+                </button>
               </div>
             </div>
           </div>
@@ -1110,13 +1200,14 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
       {selectedView !== 'list' && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
           {selectedView === 'month' && (
-            <div className="p-4">
-              {/* Month View */}
-              <div className="grid grid-cols-7 gap-px bg-gray-200">
+            <div className="p-2 sm:p-4">
+              {/* Month View - Mobile Optimized */}
+              <div className="grid grid-cols-7 gap-px bg-gray-200 text-xs sm:text-sm">
                 {/* Day Headers */}
-                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                  <div key={day} className="bg-gray-50 p-2 text-center text-sm font-medium text-gray-700">
-                    {day}
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => (
+                  <div key={day} className="bg-gray-50 p-1 sm:p-2 text-center font-medium text-gray-700">
+                    <span className="hidden sm:inline">{day}</span>
+                    <span className="sm:hidden">{day.charAt(0)}</span>
                   </div>
                 ))}
                 
@@ -1129,27 +1220,29 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
                   return (
                     <div
                       key={index}
-                      className={`bg-white p-2 min-h-[100px] border-r border-b border-gray-200 ${
+                      className={`bg-white p-1 sm:p-2 min-h-[60px] sm:min-h-[100px] border-r border-b border-gray-200 ${
                         !isCurrentMonth ? 'text-gray-400 bg-gray-50' : ''
                       } ${isToday ? 'bg-blue-50' : ''}`}
                     >
-                      <div className={`text-sm font-medium mb-1 ${isToday ? 'text-blue-600' : ''}`}>
+                      <div className={`text-xs sm:text-sm font-medium mb-1 ${isToday ? 'text-blue-600' : ''}`}>
                         {date.getDate()}
                       </div>
                       <div className="space-y-1">
-                        {dayEvents.slice(0, 3).map(event => (
+                        {dayEvents.slice(0, window.innerWidth < 640 ? 1 : 3).map(event => (
                           <div
                             key={event.id}
-                            className={`text-xs p-1 rounded truncate cursor-pointer hover:opacity-80 ${getEventTypeColor(event.eventType)}`}
+                            className={`text-xs p-0.5 sm:p-1 rounded truncate cursor-pointer hover:opacity-80 ${getEventTypeColor(event.eventType)}`}
                             onClick={() => handleEditEvent(event)}
                             title={`${event.title} - ${formatEventTime(event.startDateTime, event.endDateTime)}`}
                           >
-                            {event.title}
+                            <span className="hidden sm:inline">{event.title}</span>
+                            <span className="sm:hidden">•</span>
                           </div>
                         ))}
-                        {dayEvents.length > 3 && (
+                        {dayEvents.length > (window.innerWidth < 640 ? 1 : 3) && (
                           <div className="text-xs text-gray-500">
-                            +{dayEvents.length - 3} more
+                            <span className="hidden sm:inline">+{dayEvents.length - 3} more</span>
+                            <span className="sm:hidden">+{dayEvents.length - 1}</span>
                           </div>
                         )}
                       </div>
@@ -1161,123 +1254,207 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
           )}
 
           {selectedView === 'week' && (
-            <div className="p-4">
-              {/* Week View */}
-              <div className="grid grid-cols-8 gap-px bg-gray-200">
-                {/* Time Column Header */}
-                <div className="bg-gray-50 p-2"></div>
-                
-                {/* Day Headers */}
-                {getCalendarDays(currentDate, 'week').map((date, index) => {
-                  const isToday = date.toDateString() === new Date().toDateString();
-                  return (
-                    <div key={index} className={`bg-gray-50 p-2 text-center ${isToday ? 'bg-blue-50' : ''}`}>
-                      <div className="text-sm font-medium text-gray-700">
-                        {date.toLocaleDateString('en-US', { weekday: 'short' })}
-                      </div>
-                      <div className={`text-lg font-bold ${isToday ? 'text-blue-600' : 'text-gray-900'}`}>
-                        {date.getDate()}
-                      </div>
-                    </div>
-                  );
-                })}
-                
-                {/* Time Slots */}
-                {Array.from({ length: 24 }, (_, hour) => (
-                  <React.Fragment key={hour}>
-                    {/* Time Label */}
-                    <div className="bg-white p-2 text-right text-sm text-gray-500 border-r border-b border-gray-200">
-                      {hour === 0 ? '12 AM' : hour < 12 ? `${hour} AM` : hour === 12 ? '12 PM' : `${hour - 12} PM`}
-                    </div>
+            <div className="p-2 sm:p-4">
+              {/* Week View - Mobile: Show as list, Desktop: Show as grid */}
+              <div className="block sm:hidden">
+                {/* Mobile Week View - List Format */}
+                <div className="space-y-4">
+                  {getCalendarDays(currentDate, 'week').map((date, index) => {
+                    const dayEvents = getEventsForDay(date);
+                    const isToday = date.toDateString() === new Date().toDateString();
                     
-                    {/* Day Columns */}
-                    {getCalendarDays(currentDate, 'week').map((date, dayIndex) => {
-                      const dayEvents = getEventsForDay(date).filter(event => {
-                        const eventHour = new Date(event.startDateTime).getHours();
-                        return eventHour === hour;
-                      });
-                      
-                      return (
-                        <div key={dayIndex} className="bg-white p-1 min-h-[60px] border-r border-b border-gray-200 relative">
-                          {dayEvents.map(event => (
-                            <div
-                              key={event.id}
-                              className={`text-xs p-1 rounded mb-1 cursor-pointer hover:opacity-80 ${getEventTypeColor(event.eventType)}`}
-                              onClick={() => handleEditEvent(event)}
-                              title={`${event.title} - ${formatEventTime(event.startDateTime, event.endDateTime)}`}
-                            >
-                              <div className="font-medium truncate">{event.title}</div>
-                              <div className="truncate">{formatEventTime(event.startDateTime, event.endDateTime)}</div>
-                            </div>
-                          ))}
+                    return (
+                      <div key={index} className={`border rounded-lg p-3 ${isToday ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-200'}`}>
+                        <div className={`font-medium mb-2 ${isToday ? 'text-blue-600' : 'text-gray-900'}`}>
+                          {date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
                         </div>
-                      );
-                    })}
-                  </React.Fragment>
-                ))}
+                        {dayEvents.length > 0 ? (
+                          <div className="space-y-2">
+                            {dayEvents.map(event => (
+                              <div
+                                key={event.id}
+                                className={`text-sm p-2 rounded cursor-pointer hover:opacity-80 ${getEventTypeColor(event.eventType)}`}
+                                onClick={() => handleEditEvent(event)}
+                              >
+                                <div className="font-medium">{event.title}</div>
+                                <div className="text-xs">{formatEventTime(event.startDateTime, event.endDateTime)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-gray-500">No events</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              
+              {/* Desktop Week View - Grid Format */}
+              <div className="hidden sm:block">
+                <div className="grid grid-cols-8 gap-px bg-gray-200">
+                  {/* Time Column Header */}
+                  <div className="bg-gray-50 p-2"></div>
+                  
+                  {/* Day Headers */}
+                  {getCalendarDays(currentDate, 'week').map((date, index) => {
+                    const isToday = date.toDateString() === new Date().toDateString();
+                    return (
+                      <div key={index} className={`bg-gray-50 p-2 text-center ${isToday ? 'bg-blue-50' : ''}`}>
+                        <div className="text-sm font-medium text-gray-700">
+                          {date.toLocaleDateString('en-US', { weekday: 'short' })}
+                        </div>
+                        <div className={`text-lg font-bold ${isToday ? 'text-blue-600' : 'text-gray-900'}`}>
+                          {date.getDate()}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  
+                  {/* Time Slots */}
+                  {Array.from({ length: 24 }, (_, hour) => (
+                    <React.Fragment key={hour}>
+                      {/* Time Label */}
+                      <div className="bg-white p-2 text-right text-sm text-gray-500 border-r border-b border-gray-200">
+                        {hour === 0 ? '12 AM' : hour < 12 ? `${hour} AM` : hour === 12 ? '12 PM' : `${hour - 12} PM`}
+                      </div>
+                      
+                      {/* Day Columns */}
+                      {getCalendarDays(currentDate, 'week').map((date, dayIndex) => {
+                        const dayEvents = getEventsForDay(date).filter(event => {
+                          const eventHour = new Date(event.startDateTime).getHours();
+                          return eventHour === hour;
+                        });
+                        
+                        return (
+                          <div key={dayIndex} className="bg-white p-1 min-h-[60px] border-r border-b border-gray-200 relative">
+                            {dayEvents.map(event => (
+                              <div
+                                key={event.id}
+                                className={`text-xs p-1 rounded mb-1 cursor-pointer hover:opacity-80 ${getEventTypeColor(event.eventType)}`}
+                                onClick={() => handleEditEvent(event)}
+                                title={`${event.title} - ${formatEventTime(event.startDateTime, event.endDateTime)}`}
+                              >
+                                <div className="font-medium truncate">{event.title}</div>
+                                <div className="truncate">{formatEventTime(event.startDateTime, event.endDateTime)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </React.Fragment>
+                  ))}
+                </div>
               </div>
             </div>
           )}
 
           {selectedView === 'day' && (
-            <div className="p-4">
-              {/* Day View */}
-              <div className="grid grid-cols-2 gap-px bg-gray-200">
-                {/* Time Column */}
-                <div className="bg-gray-50 p-2 text-center font-medium text-gray-700">
-                  Time
-                </div>
-                <div className="bg-gray-50 p-2 text-center font-medium text-gray-700">
-                  {currentDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
-                </div>
-                
-                {/* Time Slots */}
-                {Array.from({ length: 24 }, (_, hour) => (
-                  <React.Fragment key={hour}>
-                    <div className="bg-white p-2 text-right text-sm text-gray-500 border-r border-b border-gray-200">
-                      {hour === 0 ? '12 AM' : hour < 12 ? `${hour} AM` : hour === 12 ? '12 PM' : `${hour - 12} PM`}
+            <div className="p-2 sm:p-4">
+              {/* Day View - Mobile Optimized */}
+              <div className="block sm:hidden">
+                {/* Mobile Day View - List Format */}
+                <div className="space-y-3">
+                  <div className="text-center font-medium text-gray-900 py-2 border-b">
+                    {currentDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                  </div>
+                  {Array.from({ length: 24 }, (_, hour) => {
+                    const hourEvents = getEventsForDay(currentDate).filter(event =>
+                      new Date(event.startDateTime).getHours() === hour
+                    );
+                    
+                    if (hourEvents.length === 0) return null;
+                    
+                    return (
+                      <div key={hour} className="border-l-4 border-blue-200 pl-3">
+                        <div className="text-sm font-medium text-gray-600 mb-2">
+                          {hour === 0 ? '12 AM' : hour < 12 ? `${hour} AM` : hour === 12 ? '12 PM' : `${hour - 12} PM`}
+                        </div>
+                        <div className="space-y-2">
+                          {hourEvents.map(event => (
+                            <div
+                              key={event.id}
+                              className={`text-sm p-3 rounded cursor-pointer hover:opacity-80 ${getEventTypeColor(event.eventType)}`}
+                              onClick={() => handleEditEvent(event)}
+                            >
+                              <div className="font-medium">{event.title}</div>
+                              <div className="text-xs mt-1">{formatEventTime(event.startDateTime, event.endDateTime)}</div>
+                              {event.providerName && (
+                                <div className="text-xs mt-1">{event.providerName}</div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {getEventsForDay(currentDate).length === 0 && (
+                    <div className="text-center text-gray-500 py-8">
+                      No events scheduled for this day
                     </div>
-                    <div className="bg-white p-2 min-h-[60px] border-r border-b border-gray-200">
-                      {getEventsForDay(currentDate)
-                        .filter(event => new Date(event.startDateTime).getHours() === hour)
-                        .map(event => (
-                          <div
-                            key={event.id}
-                            className={`text-sm p-2 rounded mb-2 cursor-pointer hover:opacity-80 ${getEventTypeColor(event.eventType)}`}
-                            onClick={() => handleEditEvent(event)}
-                          >
-                            <div className="font-medium">{event.title}</div>
-                            <div className="text-xs">{formatEventTime(event.startDateTime, event.endDateTime)}</div>
-                            {event.providerName && (
-                              <div className="text-xs mt-1">{event.providerName}</div>
-                            )}
-                          </div>
-                        ))}
-                    </div>
-                  </React.Fragment>
-                ))}
+                  )}
+                </div>
+              </div>
+              
+              {/* Desktop Day View - Grid Format */}
+              <div className="hidden sm:block">
+                <div className="grid grid-cols-2 gap-px bg-gray-200">
+                  {/* Time Column */}
+                  <div className="bg-gray-50 p-2 text-center font-medium text-gray-700">
+                    Time
+                  </div>
+                  <div className="bg-gray-50 p-2 text-center font-medium text-gray-700">
+                    {currentDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                  </div>
+                  
+                  {/* Time Slots */}
+                  {Array.from({ length: 24 }, (_, hour) => (
+                    <React.Fragment key={hour}>
+                      <div className="bg-white p-2 text-right text-sm text-gray-500 border-r border-b border-gray-200">
+                        {hour === 0 ? '12 AM' : hour < 12 ? `${hour} AM` : hour === 12 ? '12 PM' : `${hour - 12} PM`}
+                      </div>
+                      <div className="bg-white p-2 min-h-[60px] border-r border-b border-gray-200">
+                        {getEventsForDay(currentDate)
+                          .filter(event => new Date(event.startDateTime).getHours() === hour)
+                          .map(event => (
+                            <div
+                              key={event.id}
+                              className={`text-sm p-2 rounded mb-2 cursor-pointer hover:opacity-80 ${getEventTypeColor(event.eventType)}`}
+                              onClick={() => handleEditEvent(event)}
+                            >
+                              <div className="font-medium">{event.title}</div>
+                              <div className="text-xs">{formatEventTime(event.startDateTime, event.endDateTime)}</div>
+                              {event.providerName && (
+                                <div className="text-xs mt-1">{event.providerName}</div>
+                              )}
+                            </div>
+                          ))}
+                      </div>
+                    </React.Fragment>
+                  ))}
+                </div>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* Add Event Form */}
+      {/* Add Event Form - Mobile Optimized */}
       {showAddEvent && (
-        <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
+        <div className="bg-gray-50 rounded-lg p-4 sm:p-6 border border-gray-200">
           <div className="flex items-center justify-between mb-4">
-            <h4 className="text-md font-medium text-gray-900">
+            <h4 className="text-base sm:text-lg font-medium text-gray-900">
               {editingEvent ? 'Edit Medical Event' : 'Schedule New Appointment'}
             </h4>
             <button
               onClick={editingEvent ? handleCancelEdit : () => setShowAddEvent(false)}
-              className="text-gray-400 hover:text-gray-600"
+              className="text-gray-400 hover:text-gray-600 text-xl sm:text-2xl"
             >
               ×
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
               <label className="label">Appointment Title *</label>
               <input
@@ -1358,31 +1535,92 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
             <div>
               <label className="label">Healthcare Provider</label>
               <div className="space-y-2">
-                <div className="flex space-x-2">
-                  <input
-                    type="text"
-                    value={newEvent.providerName}
-                    onChange={(e) => setNewEvent(prev => ({ ...prev, providerName: e.target.value }))}
-                    className="input flex-1"
-                    placeholder="Dr. Smith, Cardiologist"
-                    readOnly={!!newEvent.providerId}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowProviderSearch(!showProviderSearch)}
-                    className="btn-secondary px-3 py-2 text-sm"
-                  >
-                    {showProviderSearch ? 'Cancel' : 'Search'}
-                  </button>
+                {/* Saved Providers Dropdown */}
+                {savedProviders.length > 0 && (
+                  <div>
+                    <label className="text-sm text-gray-600 mb-1 block">Select from your saved providers:</label>
+                    <select
+                      value={newEvent.providerId}
+                      onChange={(e) => {
+                        const selectedId = e.target.value;
+                        if (selectedId) {
+                          const provider = savedProviders.find(p => p.id === selectedId);
+                          if (provider) {
+                            setNewEvent(prev => ({
+                              ...prev,
+                              providerId: provider.id,
+                              providerName: provider.name,
+                              providerSpecialty: provider.specialty,
+                              providerPhone: provider.phoneNumber || '',
+                              providerEmail: provider.email || '',
+                              location: provider.address || '',
+                              address: provider.address || ''
+                            }));
+                          }
+                        } else {
+                          // Clear provider selection
+                          setNewEvent(prev => ({
+                            ...prev,
+                            providerId: '',
+                            providerName: '',
+                            providerSpecialty: '',
+                            providerPhone: '',
+                            providerEmail: '',
+                            location: prev.facilityId ? prev.location : '',
+                            address: prev.facilityId ? prev.address : ''
+                          }));
+                        }
+                      }}
+                      className="input mb-2"
+                      disabled={loadingProviders}
+                    >
+                      <option value="">Select a saved provider</option>
+                      {savedProviders.map(provider => (
+                        <option key={provider.id} value={provider.id}>
+                          {provider.name} - {provider.specialty}
+                          {provider.isPrimary && ' (Primary)'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Manual Provider Entry */}
+                <div>
+                  <label className="text-sm text-gray-600 mb-1 block">
+                    {savedProviders.length > 0 ? 'Or enter manually:' : 'Enter provider details:'}
+                  </label>
+                  <div className="flex space-x-2">
+                    <input
+                      type="text"
+                      value={newEvent.providerName}
+                      onChange={(e) => setNewEvent(prev => ({ ...prev, providerName: e.target.value }))}
+                      className="input flex-1"
+                      placeholder="Dr. Smith, Cardiologist"
+                      readOnly={!!newEvent.providerId && savedProviders.some(p => p.id === newEvent.providerId)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowProviderSearch(!showProviderSearch)}
+                      className="btn-secondary px-3 py-2 text-sm"
+                    >
+                      {showProviderSearch ? 'Cancel' : 'Search New'}
+                    </button>
+                  </div>
                 </div>
                 
                 {newEvent.providerId && (
-                  <div className="text-sm text-gray-600 space-y-1">
+                  <div className="text-sm text-gray-600 space-y-1 bg-blue-50 p-3 rounded-md">
+                    <div className="font-medium text-blue-900">Selected Provider:</div>
+                    <div><strong>Name:</strong> {newEvent.providerName}</div>
                     {newEvent.providerSpecialty && (
-                      <div>Specialty: {newEvent.providerSpecialty}</div>
+                      <div><strong>Specialty:</strong> {newEvent.providerSpecialty}</div>
                     )}
                     {newEvent.providerPhone && (
-                      <div>Phone: {newEvent.providerPhone}</div>
+                      <div><strong>Phone:</strong> {newEvent.providerPhone}</div>
+                    )}
+                    {newEvent.location && (
+                      <div><strong>Address:</strong> {newEvent.location}</div>
                     )}
                     <button
                       type="button"
@@ -1392,9 +1630,11 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
                         providerName: '',
                         providerSpecialty: '',
                         providerPhone: '',
-                        providerEmail: ''
+                        providerEmail: '',
+                        location: prev.facilityId ? prev.location : '',
+                        address: prev.facilityId ? prev.address : ''
                       }))}
-                      className="text-red-600 hover:text-red-700 text-sm"
+                      className="text-red-600 hover:text-red-700 text-sm font-medium"
                     >
                       Clear Provider
                     </button>
@@ -1406,8 +1646,15 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
                     <HealthcareProviderSearch
                       onSelect={handleProviderSelect}
                       searchType="doctor"
-                      placeholder="Search for healthcare providers..."
+                      placeholder="Search for new healthcare providers..."
                     />
+                  </div>
+                )}
+
+                {loadingProviders && (
+                  <div className="text-sm text-gray-500 flex items-center space-x-2">
+                    <div className="w-4 h-4 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin"></div>
+                    <span>Loading your saved providers...</span>
                   </div>
                 )}
               </div>
@@ -1416,40 +1663,96 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
             <div>
               <label className="label">Medical Facility</label>
               <div className="space-y-2">
-                <select
-                  value={newEvent.facilityId}
-                  onChange={(e) => {
-                    const selectedId = e.target.value;
-                    // In a real app, this would fetch facility details from the ID
-                    const facilityData = {
-                      'facility1': { name: 'City General Hospital', address: '123 Main St, City, State 12345' },
-                      'facility2': { name: 'Regional Medical Center', address: '456 Health Ave, City, State 12345' },
-                      'facility3': { name: 'Specialty Care Clinic', address: '789 Care Blvd, City, State 12345' },
-                      'facility4': { name: 'Emergency Care Center', address: '321 Emergency Dr, City, State 12345' }
-                    };
-                    
-                    const facility = facilityData[selectedId as keyof typeof facilityData];
-                    setNewEvent(prev => ({
-                      ...prev,
-                      facilityId: selectedId,
-                      facilityName: facility?.name || '',
-                      // Only update location if not already set by provider
-                      location: prev.providerId ? prev.location : (facility?.address || ''),
-                      address: prev.providerId ? prev.address : (facility?.address || '')
-                    }));
-                  }}
-                  className="input"
-                >
-                  <option value="">Select facility (optional)</option>
-                  <option value="facility1">City General Hospital</option>
-                  <option value="facility2">Regional Medical Center</option>
-                  <option value="facility3">Specialty Care Clinic</option>
-                  <option value="facility4">Emergency Care Center</option>
-                </select>
+                {/* Saved Facilities Dropdown */}
+                {savedFacilities.length > 0 && (
+                  <div>
+                    <label className="text-sm text-gray-600 mb-1 block">Select from your saved facilities:</label>
+                    <select
+                      value={newEvent.facilityId}
+                      onChange={(e) => {
+                        const selectedId = e.target.value;
+                        if (selectedId) {
+                          const facility = savedFacilities.find(f => f.id === selectedId);
+                          if (facility) {
+                            setNewEvent(prev => ({
+                              ...prev,
+                              facilityId: facility.id,
+                              facilityName: facility.name,
+                              // Only update location if not already set by provider
+                              location: prev.providerId ? prev.location : (facility.address || ''),
+                              address: prev.providerId ? prev.address : (facility.address || '')
+                            }));
+                          }
+                        } else {
+                          // Clear facility selection
+                          setNewEvent(prev => ({
+                            ...prev,
+                            facilityId: '',
+                            facilityName: '',
+                            // Only clear location if it wasn't set by provider
+                            location: prev.providerId ? prev.location : '',
+                            address: prev.providerId ? prev.address : ''
+                          }));
+                        }
+                      }}
+                      className="input"
+                      disabled={loadingProviders}
+                    >
+                      <option value="">Select a saved facility</option>
+                      {savedFacilities.map(facility => (
+                        <option key={facility.id} value={facility.id}>
+                          {facility.name} - {facility.facilityType.replace('_', ' ')}
+                          {facility.isPreferred && ' (Preferred)'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Manual Facility Entry */}
+                {savedFacilities.length === 0 && (
+                  <div>
+                    <label className="text-sm text-gray-600 mb-1 block">No saved facilities found</label>
+                    <select
+                      value={newEvent.facilityId}
+                      onChange={(e) => {
+                        const selectedId = e.target.value;
+                        // Fallback hardcoded facilities for demo
+                        const facilityData = {
+                          'facility1': { name: 'City General Hospital', address: '123 Main St, City, State 12345' },
+                          'facility2': { name: 'Regional Medical Center', address: '456 Health Ave, City, State 12345' },
+                          'facility3': { name: 'Specialty Care Clinic', address: '789 Care Blvd, City, State 12345' },
+                          'facility4': { name: 'Emergency Care Center', address: '321 Emergency Dr, City, State 12345' }
+                        };
+                        
+                        const facility = facilityData[selectedId as keyof typeof facilityData];
+                        setNewEvent(prev => ({
+                          ...prev,
+                          facilityId: selectedId,
+                          facilityName: facility?.name || '',
+                          // Only update location if not already set by provider
+                          location: prev.providerId ? prev.location : (facility?.address || ''),
+                          address: prev.providerId ? prev.address : (facility?.address || '')
+                        }));
+                      }}
+                      className="input"
+                    >
+                      <option value="">Select facility (optional)</option>
+                      <option value="facility1">City General Hospital</option>
+                      <option value="facility2">Regional Medical Center</option>
+                      <option value="facility3">Specialty Care Clinic</option>
+                      <option value="facility4">Emergency Care Center</option>
+                    </select>
+                  </div>
+                )}
                 
                 {newEvent.facilityId && (
-                  <div className="text-sm text-gray-600 space-y-1">
-                    <div>Facility: {newEvent.facilityName}</div>
+                  <div className="text-sm text-gray-600 space-y-1 bg-green-50 p-3 rounded-md">
+                    <div className="font-medium text-green-900">Selected Facility:</div>
+                    <div><strong>Name:</strong> {newEvent.facilityName}</div>
+                    {newEvent.location && !newEvent.providerId && (
+                      <div><strong>Address:</strong> {newEvent.location}</div>
+                    )}
                     <button
                       type="button"
                       onClick={() => setNewEvent(prev => ({
@@ -1460,10 +1763,17 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
                         location: prev.providerId ? prev.location : '',
                         address: prev.providerId ? prev.address : ''
                       }))}
-                      className="text-red-600 hover:text-red-700 text-sm"
+                      className="text-red-600 hover:text-red-700 text-sm font-medium"
                     >
                       Clear Facility
                     </button>
+                  </div>
+                )}
+
+                {loadingProviders && (
+                  <div className="text-sm text-gray-500 flex items-center space-x-2">
+                    <div className="w-4 h-4 border-2 border-gray-300 border-t-green-600 rounded-full animate-spin"></div>
+                    <span>Loading your saved facilities...</span>
                   </div>
                 )}
               </div>
@@ -1688,16 +1998,16 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
             </div>
           </div>
 
-          <div className="flex justify-end space-x-3 mt-6">
+          <div className="flex flex-col sm:flex-row justify-end space-y-3 sm:space-y-0 sm:space-x-3 mt-6">
             <button
               onClick={editingEvent ? handleCancelEdit : () => setShowAddEvent(false)}
-              className="btn-secondary"
+              className="btn-secondary w-full sm:w-auto"
             >
               Cancel
             </button>
             <button
               onClick={editingEvent ? handleUpdateEvent : handleAddEvent}
-              className="btn-primary"
+              className="btn-primary w-full sm:w-auto"
             >
               {editingEvent ? 'Update Event' : 'Schedule Appointment'}
             </button>

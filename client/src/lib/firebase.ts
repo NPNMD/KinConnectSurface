@@ -21,21 +21,10 @@ googleProvider.setCustomParameters({
 // Authentication functions
 export const signInWithGoogle = async () => {
   try {
-    // Try popup first, fallback to redirect if needed
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      return { success: true, user: result.user };
-    } catch (popupError: any) {
-      // Check if it's a popup blocked error or CORS error
-      if (popupError.code === 'auth/popup-blocked' ||
-          popupError.code === 'auth/popup-closed-by-user' ||
-          popupError.message?.includes('Cross-Origin-Opener-Policy')) {
-        // Fallback to redirect if popup fails
-        await signInWithRedirect(auth, googleProvider);
-        return { success: true, user: null }; // User will be available after redirect
-      }
-      throw popupError;
-    }
+    // Use redirect flow directly to avoid COOP issues
+    console.log('🔐 Starting Google sign-in with redirect flow...');
+    await signInWithRedirect(auth, googleProvider);
+    return { success: true, user: null }; // User will be available after redirect
   } catch (error: any) {
     console.error('Google sign-in failed:', error);
     return { success: false, error };

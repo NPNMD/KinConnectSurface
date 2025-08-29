@@ -17,19 +17,19 @@ class GooglePlacesApiService {
     }
 
     try {
-      // Load Google Maps API if not already loaded
+      // Load Google Maps API with the new Places library
       if (!window.google?.maps?.places) {
         const { Loader } = await import('@googlemaps/js-api-loader');
         const loader = new Loader({
           apiKey: this.apiKey,
           version: 'weekly',
-          libraries: ['places']
+          libraries: ['places', 'marker'] // Include marker library for new Places API
         });
         await loader.load();
       }
       
       this.isLoaded = true;
-      console.log('🏥 Google Places API initialized successfully');
+      console.log('🏥 Google Places API (New) initialized successfully');
       return true;
     } catch (error) {
       console.error('Error initializing Google Places API:', error);
@@ -42,10 +42,8 @@ class GooglePlacesApiService {
       throw new Error('Google Places API not available');
     }
 
-    return new Promise((resolve, reject) => {
-      const service = new google.maps.places.PlacesService(document.createElement('div'));
-      
-      // Build search query with healthcare-specific terms
+    try {
+      // Use the new Places API (Text Search)
       let query = request.query;
       if (request.type === 'doctor') {
         query += ' doctor physician medical clinic';
@@ -57,29 +55,68 @@ class GooglePlacesApiService {
         query += ' medical health clinic';
       }
 
-      const searchRequest: google.maps.places.TextSearchRequest = {
-        query: query,
-        type: 'health' as any, // Force health-related results
+      // Build the request for the new Places API
+      const searchRequest = {
+        textQuery: query,
+        fields: [
+          'places.id',
+          'places.displayName',
+          'places.formattedAddress',
+          'places.nationalPhoneNumber',
+          'places.websiteUri',
+          'places.rating',
+          'places.userRatingCount',
+          'places.businessStatus',
+          'places.types',
+          'places.location',
+          'places.addressComponents',
+          'places.currentOpeningHours'
+        ],
+        maxResultCount: 20,
         ...(request.location && {
-          location: new google.maps.LatLng(request.location.lat, request.location.lng),
-          radius: request.radius || 25000 // 25km default radius
+          locationBias: {
+            circle: {
+              center: {
+                latitude: request.location.lat,
+                longitude: request.location.lng
+              },
+              radius: request.radius || 25000
+            }
+          }
         })
       };
 
-      service.textSearch(searchRequest, (results, status) => {
-        if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-          const formattedResults: GooglePlaceResult[] = results
-            .filter(place => this.isHealthcareRelated(place))
-            .map(place => this.formatPlaceResult(place))
-            .slice(0, 20); // Limit to 20 results
-          
-          resolve(formattedResults);
-        } else {
-          console.error('Places search failed:', status);
-          reject(new Error(`Places search failed: ${status}`));
-        }
+      // Use fetch API to call the new Places API
+      const response = await fetch(`https://places.googleapis.com/v1/places:searchText`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': this.apiKey!,
+          'X-Goog-FieldMask': searchRequest.fields.join(',')
+        },
+        body: JSON.stringify(searchRequest)
       });
-    });
+
+      if (!response.ok) {
+        throw new Error(`Places API request failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (!data.places) {
+        return [];
+      }
+
+      const formattedResults: GooglePlaceResult[] = data.places
+        .filter((place: any) => this.isHealthcareRelatedNew(place))
+        .map((place: any) => this.formatPlaceResultNew(place))
+        .slice(0, 20);
+      
+      return formattedResults;
+    } catch (error) {
+      console.error('Places search failed:', error);
+      throw new Error(`Places search failed: ${error}`);
+    }
   }
 
   async getPlaceDetails(placeId: string): Promise<GooglePlaceResult | null> {
@@ -87,36 +124,40 @@ class GooglePlacesApiService {
       throw new Error('Google Places API not available');
     }
 
-    return new Promise((resolve, reject) => {
-      const service = new google.maps.places.PlacesService(document.createElement('div'));
-      
-      const request: google.maps.places.PlaceDetailsRequest = {
-        placeId: placeId,
-        fields: [
-          'place_id',
-          'name',
-          'formatted_address',
-          'formatted_phone_number',
-          'website',
-          'rating',
-          'user_ratings_total',
-          'business_status',
-          'types',
-          'geometry',
-          'address_components',
-          'opening_hours'
-        ]
-      };
-
-      service.getDetails(request, (place, status) => {
-        if (status === google.maps.places.PlacesServiceStatus.OK && place) {
-          resolve(this.formatPlaceResult(place));
-        } else {
-          console.error('Place details request failed:', status);
-          resolve(null);
+    try {
+      // Use the new Places API for place details
+      const response = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
+        method: 'GET',
+        headers: {
+          'X-Goog-Api-Key': this.apiKey!,
+          'X-Goog-FieldMask': [
+            'id',
+            'displayName',
+            'formattedAddress',
+            'nationalPhoneNumber',
+            'websiteUri',
+            'rating',
+            'userRatingCount',
+            'businessStatus',
+            'types',
+            'location',
+            'addressComponents',
+            'currentOpeningHours'
+          ].join(',')
         }
       });
-    });
+
+      if (!response.ok) {
+        console.error('Place details request failed:', response.status);
+        return null;
+      }
+
+      const place = await response.json();
+      return this.formatPlaceResultNew(place);
+    } catch (error) {
+      console.error('Place details request failed:', error);
+      return null;
+    }
   }
 
   async searchNearbyHealthcare(
@@ -128,32 +169,70 @@ class GooglePlacesApiService {
       throw new Error('Google Places API not available');
     }
 
-    return new Promise((resolve, reject) => {
-      const service = new google.maps.places.PlacesService(document.createElement('div'));
-      
-      const request: google.maps.places.PlaceSearchRequest = {
-        location: new google.maps.LatLng(location.lat, location.lng),
-        radius: radius,
-        type: 'health' as any,
-        keyword: type === 'doctor' ? 'doctor physician clinic' : 
-                type === 'hospital' ? 'hospital medical center' : 
-                'pharmacy drugstore'
+    try {
+      // Use the new Places API for nearby search
+      const keyword = type === 'doctor' ? 'doctor physician clinic' :
+                     type === 'hospital' ? 'hospital medical center' :
+                     'pharmacy drugstore';
+
+      const searchRequest = {
+        textQuery: keyword,
+        fields: [
+          'places.id',
+          'places.displayName',
+          'places.formattedAddress',
+          'places.nationalPhoneNumber',
+          'places.websiteUri',
+          'places.rating',
+          'places.userRatingCount',
+          'places.businessStatus',
+          'places.types',
+          'places.location',
+          'places.addressComponents',
+          'places.currentOpeningHours'
+        ],
+        maxResultCount: 15,
+        locationBias: {
+          circle: {
+            center: {
+              latitude: location.lat,
+              longitude: location.lng
+            },
+            radius: radius
+          }
+        }
       };
 
-      service.nearbySearch(request, (results, status) => {
-        if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-          const formattedResults: GooglePlaceResult[] = results
-            .filter(place => this.isHealthcareRelated(place))
-            .map(place => this.formatPlaceResult(place))
-            .slice(0, 15);
-          
-          resolve(formattedResults);
-        } else {
-          console.error('Nearby search failed:', status);
-          reject(new Error(`Nearby search failed: ${status}`));
-        }
+      const response = await fetch(`https://places.googleapis.com/v1/places:searchText`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': this.apiKey!,
+          'X-Goog-FieldMask': searchRequest.fields.join(',')
+        },
+        body: JSON.stringify(searchRequest)
       });
-    });
+
+      if (!response.ok) {
+        throw new Error(`Places API request failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (!data.places) {
+        return [];
+      }
+
+      const formattedResults: GooglePlaceResult[] = data.places
+        .filter((place: any) => this.isHealthcareRelatedNew(place))
+        .map((place: any) => this.formatPlaceResultNew(place))
+        .slice(0, 15);
+      
+      return formattedResults;
+    } catch (error) {
+      console.error('Nearby search failed:', error);
+      throw new Error(`Nearby search failed: ${error}`);
+    }
   }
 
   private isHealthcareRelated(place: google.maps.places.PlaceResult): boolean {
@@ -181,13 +260,51 @@ class GooglePlacesApiService {
     ];
 
     // Check if place types include healthcare-related types
-    const hasHealthcareType = place.types?.some(type => 
+    const hasHealthcareType = place.types?.some(type =>
       healthcareTypes.includes(type)
     );
 
     // Check if place name includes healthcare keywords
     const hasHealthcareKeyword = healthcareKeywords.some(keyword =>
       place.name?.toLowerCase().includes(keyword)
+    );
+
+    return hasHealthcareType || hasHealthcareKeyword;
+  }
+
+  // New method for the new Places API format
+  private isHealthcareRelatedNew(place: any): boolean {
+    const healthcareTypes = [
+      'doctor',
+      'hospital',
+      'pharmacy',
+      'health',
+      'dentist',
+      'physiotherapist',
+      'veterinary_care'
+    ];
+
+    const healthcareKeywords = [
+      'medical',
+      'clinic',
+      'hospital',
+      'doctor',
+      'physician',
+      'pharmacy',
+      'health',
+      'dental',
+      'therapy',
+      'care'
+    ];
+
+    // Check if place types include healthcare-related types
+    const hasHealthcareType = place.types?.some((type: string) =>
+      healthcareTypes.includes(type.toLowerCase())
+    );
+
+    // Check if place name includes healthcare keywords
+    const hasHealthcareKeyword = healthcareKeywords.some(keyword =>
+      place.displayName?.text?.toLowerCase().includes(keyword)
     );
 
     return hasHealthcareType || hasHealthcareKeyword;
@@ -218,6 +335,36 @@ class GooglePlacesApiService {
       opening_hours: place.opening_hours ? {
         open_now: place.opening_hours.open_now || false,
         weekday_text: place.opening_hours.weekday_text || []
+      } : undefined
+    };
+  }
+
+  // New method for the new Places API format
+  private formatPlaceResultNew(place: any): GooglePlaceResult {
+    return {
+      place_id: place.id,
+      name: place.displayName?.text || '',
+      formatted_address: place.formattedAddress || '',
+      formatted_phone_number: place.nationalPhoneNumber,
+      website: place.websiteUri,
+      rating: place.rating,
+      user_ratings_total: place.userRatingCount,
+      business_status: place.businessStatus,
+      types: place.types || [],
+      geometry: {
+        location: {
+          lat: place.location?.latitude || 0,
+          lng: place.location?.longitude || 0
+        }
+      },
+      address_components: place.addressComponents?.map((component: any) => ({
+        long_name: component.longText,
+        short_name: component.shortText,
+        types: component.types
+      })) || [],
+      opening_hours: place.currentOpeningHours ? {
+        open_now: place.currentOpeningHours.openNow || false,
+        weekday_text: place.currentOpeningHours.weekdayDescriptions || []
       } : undefined
     };
   }
@@ -294,6 +441,65 @@ class GooglePlacesApiService {
     }
 
     return 'Other';
+  }
+
+  // Add fallback method for backward compatibility and error handling
+  async searchHealthcareProvidersWithFallback(request: GooglePlaceSearchRequest): Promise<GooglePlaceResult[]> {
+    try {
+      // Try the new Places API first
+      return await this.searchHealthcareProviders(request);
+    } catch (error) {
+      console.warn('New Places API failed, falling back to legacy API:', error);
+      
+      // Fallback to legacy PlacesService if new API fails
+      return this.searchHealthcareProvidersLegacy(request);
+    }
+  }
+
+  // Legacy method as fallback
+  private async searchHealthcareProvidersLegacy(request: GooglePlaceSearchRequest): Promise<GooglePlaceResult[]> {
+    if (!await this.initialize()) {
+      throw new Error('Google Places API not available');
+    }
+
+    return new Promise((resolve, reject) => {
+      const service = new google.maps.places.PlacesService(document.createElement('div'));
+      
+      // Build search query with healthcare-specific terms
+      let query = request.query;
+      if (request.type === 'doctor') {
+        query += ' doctor physician medical clinic';
+      } else if (request.type === 'hospital') {
+        query += ' hospital medical center';
+      } else if (request.type === 'pharmacy') {
+        query += ' pharmacy drugstore';
+      } else if (request.type === 'health') {
+        query += ' medical health clinic';
+      }
+
+      const searchRequest: google.maps.places.TextSearchRequest = {
+        query: query,
+        type: 'health' as any, // Force health-related results
+        ...(request.location && {
+          location: new google.maps.LatLng(request.location.lat, request.location.lng),
+          radius: request.radius || 25000 // 25km default radius
+        })
+      };
+
+      service.textSearch(searchRequest, (results, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+          const formattedResults: GooglePlaceResult[] = results
+            .filter(place => this.isHealthcareRelated(place))
+            .map(place => this.formatPlaceResult(place))
+            .slice(0, 20); // Limit to 20 results
+          
+          resolve(formattedResults);
+        } else {
+          console.error('Places search failed:', status);
+          reject(new Error(`Places search failed: ${status}`));
+        }
+      });
+    });
   }
 }
 

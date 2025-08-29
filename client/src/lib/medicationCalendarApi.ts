@@ -7,7 +7,10 @@ import type {
 } from '@shared/types';
 import { getIdToken } from './firebase';
 
-const API_BASE = 'https://claritystream-uldp9.web.app/api/medication-calendar';
+const API_BASE = 'https://us-central1-claritystream-uldp9.cloudfunctions.net/api';
+
+// Add diagnostic logging
+console.log('🔧 MedicationCalendarApi: Using API base URL:', API_BASE);
 
 // Helper function to get authenticated headers
 async function getAuthHeaders(): Promise<HeadersInit> {
@@ -30,7 +33,7 @@ class MedicationCalendarApi {
   async getMedicationSchedules(): Promise<ApiResponse<MedicationSchedule[]>> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/schedules`, {
+      const response = await fetch(`${API_BASE}/medication-calendar/schedules`, {
         method: 'GET',
         headers,
         credentials: 'include',
@@ -50,7 +53,7 @@ class MedicationCalendarApi {
   async getMedicationSchedulesByMedicationId(medicationId: string): Promise<ApiResponse<MedicationSchedule[]>> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/schedules/medication/${medicationId}`, {
+      const response = await fetch(`${API_BASE}/medication-calendar/schedules/medication/${medicationId}`, {
         method: 'GET',
         headers,
         credentials: 'include',
@@ -70,7 +73,7 @@ class MedicationCalendarApi {
   async createMedicationSchedule(scheduleData: NewMedicationSchedule): Promise<ApiResponse<MedicationSchedule>> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/schedules`, {
+      const response = await fetch(`${API_BASE}/medication-calendar/schedules`, {
         method: 'POST',
         headers,
         credentials: 'include',
@@ -94,7 +97,7 @@ class MedicationCalendarApi {
   ): Promise<ApiResponse<MedicationSchedule>> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/schedules/${scheduleId}`, {
+      const response = await fetch(`${API_BASE}/medication-calendar/schedules/${scheduleId}`, {
         method: 'PUT',
         headers,
         credentials: 'include',
@@ -115,7 +118,7 @@ class MedicationCalendarApi {
   async pauseMedicationSchedule(scheduleId: string, pausedUntil?: Date): Promise<ApiResponse<MedicationSchedule>> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/schedules/${scheduleId}/pause`, {
+      const response = await fetch(`${API_BASE}/medication-calendar/schedules/${scheduleId}/pause`, {
         method: 'POST',
         headers,
         credentials: 'include',
@@ -136,7 +139,7 @@ class MedicationCalendarApi {
   async resumeMedicationSchedule(scheduleId: string): Promise<ApiResponse<MedicationSchedule>> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/schedules/${scheduleId}/resume`, {
+      const response = await fetch(`${API_BASE}/medication-calendar/schedules/${scheduleId}/resume`, {
         method: 'POST',
         headers,
         credentials: 'include',
@@ -178,7 +181,7 @@ class MedicationCalendarApi {
       }
 
       const queryString = params.toString();
-      const url = `${API_BASE}/events${queryString ? `?${queryString}` : ''}`;
+      const url = `${API_BASE}/medication-calendar/events${queryString ? `?${queryString}` : ''}`;
 
       const headers = await getAuthHeaders();
       const response = await fetch(url, {
@@ -205,7 +208,7 @@ class MedicationCalendarApi {
   ): Promise<ApiResponse<MedicationCalendarEvent>> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/events/${eventId}/taken`, {
+      const response = await fetch(`${API_BASE}/medication-calendar/events/${eventId}/taken`, {
         method: 'POST',
         headers,
         credentials: 'include',
@@ -247,7 +250,7 @@ class MedicationCalendarApi {
       }
 
       const queryString = params.toString();
-      const url = `${API_BASE}/adherence${queryString ? `?${queryString}` : ''}`;
+      const url = `${API_BASE}/medication-calendar/adherence${queryString ? `?${queryString}` : ''}`;
 
       const headers = await getAuthHeaders();
       const response = await fetch(url, {
@@ -285,7 +288,7 @@ class MedicationCalendarApi {
   }>> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/adherence/summary`, {
+      const response = await fetch(`${API_BASE}/medication-calendar/adherence/summary`, {
         method: 'GET',
         headers,
         credentials: 'include',

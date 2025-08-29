@@ -23,18 +23,46 @@ const APP_URL = 'https://claritystream-uldp9.web.app';
 // Create an Express app
 const app = express();
 
-// Security middleware
+// Security middleware - Configure for OAuth compatibility
 app.use(helmet({
-    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+    crossOriginOpenerPolicy: false, // Disable COOP entirely for OAuth compatibility
     crossOriginEmbedderPolicy: false,
+    contentSecurityPolicy: false,
 }));
-app.use(cors({ origin: true }));
+
+// Add explicit headers for OAuth compatibility
+app.use((req, res, next) => {
+    // Remove any restrictive COOP headers
+    res.removeHeader('Cross-Origin-Opener-Policy');
+    // Set permissive COOP for OAuth popups
+    res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
+    next();
+});
+app.use(cors({
+  origin: true,
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Rate limiting
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
-app.use('/api/', limiter);
+// Rate limiting - configured for Firebase Functions
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => {
+        // Use a simple key for Firebase Functions to avoid proxy issues
+        return req.headers['x-forwarded-for'] as string || req.ip || 'unknown';
+    },
+    skip: (req) => {
+        // Skip rate limiting for health checks
+        return req.path === '/api/health';
+    }
+});
+app.use(limiter); // Apply to all routes, not just /api/
 
 // Simple auth middleware for functions
 async function authenticate(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -54,19 +82,24 @@ async function authenticate(req: express.Request, res: express.Response, next: e
 }
 
 // Health endpoint
-app.get('/api/health', (req, res) => {
+app.get('/health', (req, res) => {
 	res.json({ success: true, message: 'Functions API healthy', timestamp: new Date().toISOString() });
 });
 
 // Test endpoint to verify deployment
-app.get('/api/test-deployment', (req, res) => {
+app.get('/test-deployment', (req, res) => {
 	res.json({ success: true, message: 'Deployment working!', timestamp: new Date().toISOString() });
+});
+
+// Test remove endpoint
+app.post('/test-remove/:id', (req, res) => {
+	res.json({ success: true, message: 'Test remove endpoint working!', id: req.params.id });
 });
 
 // ===== INVITATION ROUTES =====
 
 // Send family invitation
-app.post('/api/invitations/send', authenticate, async (req, res) => {
+app.post('/invitations/send', authenticate, async (req, res) => {
 	try {
 		console.log('🚀 Starting invitation send process...');
 		const { email, patientName } = req.body;
@@ -91,6 +124,9 @@ app.post('/api/invitations/send', authenticate, async (req, res) => {
 			});
 		}
 
+		// Normalize email to lowercase for consistent comparison
+		const normalizedEmail = email.toLowerCase().trim();
+
 		// Get sender's user info
 		console.log('👤 Fetching sender information...');
 		const senderDoc = await firestore.collection('users').doc(senderUserId).get();
@@ -104,6 +140,44 @@ app.post('/api/invitations/send', authenticate, async (req, res) => {
 		}
 
 		console.log('👤 Sender found:', { senderName: senderData.name, senderEmail: senderData.email });
+
+		// 🔥 DUPLICATE PREVENTION: Check for existing invitations/relationships
+		console.log('🔍 Checking for existing invitations or relationships...');
+		const existingQuery = await firestore.collection('family_calendar_access')
+			.where('patientId', '==', senderUserId)
+			.where('familyMemberEmail', '==', normalizedEmail)
+			.get();
+
+		if (!existingQuery.empty) {
+			const existingRecord = existingQuery.docs[0].data();
+			console.log('⚠️ Found existing record:', {
+				status: existingRecord.status,
+				id: existingQuery.docs[0].id
+			});
+
+			// Handle different existing statuses
+			if (existingRecord.status === 'active') {
+				return res.status(409).json({
+					success: false,
+					error: 'This family member already has active access to your medical calendar'
+				});
+			} else if (existingRecord.status === 'pending') {
+				// Check if invitation has expired
+				const expiresAt = existingRecord.invitationExpiresAt?.toDate();
+				if (expiresAt && new Date() < expiresAt) {
+					return res.status(409).json({
+						success: false,
+						error: 'An invitation is already pending for this email address. Please wait for them to accept or let the invitation expire.'
+					});
+				} else {
+					// Expired invitation - we'll update it below
+					console.log('📝 Found expired invitation, will update it');
+				}
+			} else if (existingRecord.status === 'revoked') {
+				// Previously revoked - we can create a new invitation
+				console.log('📝 Found revoked relationship, will create new invitation');
+			}
+		}
 
 		// Define permissions for the invitation
 		const permissions = {
@@ -122,13 +196,17 @@ app.post('/api/invitations/send', authenticate, async (req, res) => {
 		const expiresAt = new Date();
 		expiresAt.setDate(expiresAt.getDate() + 7); // Expires in 7 days
 
-		// Create family access record
-		console.log('💾 Creating family access record...');
+		// 🔥 USE DETERMINISTIC DOCUMENT ID to prevent duplicates
+		// Format: patientId_emailHash (ensures uniqueness per patient-email combination)
+		const emailHash = Buffer.from(normalizedEmail).toString('base64').replace(/[^a-zA-Z0-9]/g, '');
+		const documentId = `${senderUserId}_${emailHash}`;
+
+		console.log('💾 Creating/updating family access record with ID:', documentId);
 		const familyAccessData = {
 			patientId: senderUserId,
 			familyMemberId: '', // Will be set when invitation is accepted
 			familyMemberName: patientName,
-			familyMemberEmail: email,
+			familyMemberEmail: normalizedEmail, // Use normalized email
 			permissions,
 			accessLevel: 'limited',
 			eventTypesAllowed: [],
@@ -142,8 +220,10 @@ app.post('/api/invitations/send', authenticate, async (req, res) => {
 			invitationExpiresAt: admin.firestore.Timestamp.fromDate(expiresAt)
 		};
 
-		const familyAccessRef = await firestore.collection('family_calendar_access').add(familyAccessData);
-		console.log('✅ Family access record created:', familyAccessRef.id);
+		// Use set() with merge to handle existing records gracefully
+		const familyAccessRef = firestore.collection('family_calendar_access').doc(documentId);
+		await familyAccessRef.set(familyAccessData, { merge: false }); // Don't merge, replace completely
+		console.log('✅ Family access record created/updated:', documentId);
 
 		// Send invitation email
 		try {
@@ -160,7 +240,7 @@ app.post('/api/invitations/send', authenticate, async (req, res) => {
 					success: true,
 					message: 'Invitation created but email delivery failed. Please try again or contact support.',
 					data: {
-						invitationId: familyAccessRef.id,
+						invitationId: documentId,
 						emailError: 'SendGrid API key not configured properly'
 					}
 				});
@@ -171,7 +251,7 @@ app.post('/api/invitations/send', authenticate, async (req, res) => {
 			console.log('🔗 Invitation link:', invitationLink);
 			
 			const emailContent = {
-				to: email,
+				to: normalizedEmail, // Use normalized email
 				from: SENDGRID_FROM_EMAIL,
 				subject: `${senderData.name} has invited you to access their medical calendar`,
 				html: `
@@ -197,21 +277,21 @@ app.post('/api/invitations/send', authenticate, async (req, res) => {
 						</div>
 						
 						<div style="text-align: center; margin: 30px 0;">
-							<a href="${invitationLink}" 
+							<a href="${invitationLink}"
 								 style="background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">
 								Accept Invitation
 							</a>
 						</div>
 						
 						<div style="border-top: 1px solid #e2e8f0; padding-top: 20px; color: #64748b; font-size: 14px;">
-							<p>This invitation was sent to ${email}. If you didn't expect this invitation, you can safely ignore this email.</p>
+							<p>This invitation was sent to ${normalizedEmail}. If you didn't expect this invitation, you can safely ignore this email.</p>
 							<p>The invitation link will expire in 7 days.</p>
 						</div>
 					</div>
 				`
 			};
 
-			console.log('📧 Sending email to:', email);
+			console.log('📧 Sending email to:', normalizedEmail);
 			const emailResult = await sgMail.send(emailContent);
 			console.log('✅ Email sent successfully:', emailResult[0].statusCode);
 		} catch (emailError: any) {
@@ -224,7 +304,7 @@ app.post('/api/invitations/send', authenticate, async (req, res) => {
 			success: true,
 			message: 'Invitation sent successfully',
 			data: {
-				invitationId: familyAccessRef.id,
+				invitationId: documentId,
 				expiresAt: expiresAt
 			}
 		});
@@ -239,7 +319,7 @@ app.post('/api/invitations/send', authenticate, async (req, res) => {
 });
 
 // Get family access for current user (both as patient and family member)
-app.get('/api/family-access', authenticate, async (req, res) => {
+app.get('/family-access', authenticate, async (req, res) => {
 	try {
 		console.log('🔍 Fetching family access for user:', (req as any).user.uid);
 		const userId = (req as any).user.uid;
@@ -250,21 +330,36 @@ app.get('/api/family-access', authenticate, async (req, res) => {
 			.where('status', '==', 'active')
 			.get();
 		
-		// Get family access where user is the patient (created by them)
+		// Get family access where user is the patient (patientId matches userId)
 		const patientQuery = await firestore.collection('family_calendar_access')
-			.where('createdBy', '==', userId)
+			.where('patientId', '==', userId)
+			.where('status', '==', 'active')
 			.get();
 
+		// 🔥 DEDUPLICATION: Use Maps to track unique relationships
+		const uniquePatientsMap = new Map();
+		const uniqueFamilyMembersMap = new Map();
+
 		// Process patients the user has access to as a family member
-		const patientsIHaveAccessTo = [];
 		for (const doc of familyMemberQuery.docs) {
 			const access = doc.data();
-			// Get patient info
-			const patientDoc = await firestore.collection('users').doc(access.createdBy).get();
+			console.log('👥 Processing family member access:', access);
+			
+			// Create unique key for this relationship
+			const relationshipKey = `${access.patientId}_${userId}`;
+			
+			// Skip if we already have this relationship (deduplication)
+			if (uniquePatientsMap.has(relationshipKey)) {
+				console.log('🔄 Skipping duplicate patient relationship:', relationshipKey);
+				continue;
+			}
+			
+			// Get patient info using patientId (not createdBy)
+			const patientDoc = await firestore.collection('users').doc(access.patientId).get();
 			const patientData = patientDoc.data();
 			
 			if (patientData) {
-				patientsIHaveAccessTo.push({
+				const patientAccess = {
 					id: doc.id,
 					patientId: access.patientId,
 					patientName: patientData.name,
@@ -274,21 +369,35 @@ app.get('/api/family-access', authenticate, async (req, res) => {
 					status: access.status,
 					acceptedAt: access.acceptedAt?.toDate(),
 					relationship: 'family_member'
-				});
+				};
+				
+				uniquePatientsMap.set(relationshipKey, patientAccess);
+			} else {
+				console.warn('⚠️ Patient data not found for patientId:', access.patientId);
 			}
 		}
 
 		// Process family members who have access to the current user as a patient
-		const familyMembersWithAccessToMe = [];
 		for (const doc of patientQuery.docs) {
 			const access = doc.data();
-			if (access.status === 'active' && access.familyMemberId) {
+			console.log('🏥 Processing patient access:', access);
+			
+			if (access.familyMemberId) {
+				// Create unique key for this relationship
+				const relationshipKey = `${userId}_${access.familyMemberId}`;
+				
+				// Skip if we already have this relationship (deduplication)
+				if (uniqueFamilyMembersMap.has(relationshipKey)) {
+					console.log('🔄 Skipping duplicate family member relationship:', relationshipKey);
+					continue;
+				}
+				
 				// Get family member info
 				const familyMemberDoc = await firestore.collection('users').doc(access.familyMemberId).get();
 				const familyMemberData = familyMemberDoc.data();
 				
 				if (familyMemberData) {
-					familyMembersWithAccessToMe.push({
+					const familyMemberAccess = {
 						id: doc.id,
 						familyMemberId: access.familyMemberId,
 						familyMemberName: familyMemberData.name,
@@ -298,10 +407,23 @@ app.get('/api/family-access', authenticate, async (req, res) => {
 						status: access.status,
 						acceptedAt: access.acceptedAt?.toDate(),
 						relationship: 'patient'
-					});
+					};
+					
+					uniqueFamilyMembersMap.set(relationshipKey, familyMemberAccess);
+				} else {
+					console.warn('⚠️ Family member data not found for familyMemberId:', access.familyMemberId);
 				}
 			}
 		}
+
+		// Convert Maps back to arrays
+		const patientsIHaveAccessTo = Array.from(uniquePatientsMap.values());
+		const familyMembersWithAccessToMe = Array.from(uniqueFamilyMembersMap.values());
+
+		console.log('✅ Family access results:', {
+			patientsIHaveAccessTo: patientsIHaveAccessTo.length,
+			familyMembersWithAccessToMe: familyMembersWithAccessToMe.length
+		});
 
 		res.json({
 			success: true,
@@ -321,8 +443,121 @@ app.get('/api/family-access', authenticate, async (req, res) => {
 	}
 });
 
+// Remove family member access via POST to family-access
+app.post('/family-access', authenticate, async (req, res) => {
+	try {
+		const { action, accessId } = req.body;
+		const userId = (req as any).user.uid;
+
+		if (action !== 'remove' || !accessId) {
+			return res.status(400).json({
+				success: false,
+				error: 'Invalid request. Expected action: "remove" and accessId'
+			});
+		}
+
+		console.log('🗑️ Removing family access:', { accessId, userId, timestamp: new Date().toISOString() });
+
+		// Get the family access record
+		const accessDoc = await firestore.collection('family_calendar_access').doc(accessId).get();
+		
+		if (!accessDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Family access record not found'
+			});
+		}
+
+		const accessData = accessDoc.data();
+		
+		// Check if the current user is the patient (owner) of this access record
+		if (accessData?.patientId !== userId) {
+			return res.status(403).json({
+				success: false,
+				error: 'Access denied - you can only remove family members from your own care network'
+			});
+		}
+
+		// Update the status to 'revoked' instead of deleting (for audit trail)
+		await accessDoc.ref.update({
+			status: 'revoked',
+			revokedAt: admin.firestore.Timestamp.now(),
+			revokedBy: userId,
+			revocationReason: 'Removed by patient',
+			updatedAt: admin.firestore.Timestamp.now()
+		});
+
+		console.log('✅ Family access revoked successfully');
+
+		res.json({
+			success: true,
+			message: 'Family member access removed successfully'
+		});
+
+	} catch (error) {
+		console.error('❌ Error removing family access:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Remove family member access
+app.post('/family-access/remove/:accessId', authenticate, async (req, res) => {
+	try {
+		const { accessId } = req.params;
+		const userId = (req as any).user.uid;
+
+		console.log('🗑️ Removing family access:', { accessId, userId, timestamp: new Date().toISOString() });
+
+		// Get the family access record
+		const accessDoc = await firestore.collection('family_calendar_access').doc(accessId).get();
+		
+		if (!accessDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Family access record not found'
+			});
+		}
+
+		const accessData = accessDoc.data();
+		
+		// Check if the current user is the patient (owner) of this access record
+		if (accessData?.patientId !== userId) {
+			return res.status(403).json({
+				success: false,
+				error: 'Access denied - you can only remove family members from your own care network'
+			});
+		}
+
+		// Update the status to 'revoked' instead of deleting (for audit trail)
+		await accessDoc.ref.update({
+			status: 'revoked',
+			revokedAt: admin.firestore.Timestamp.now(),
+			revokedBy: userId,
+			revocationReason: 'Removed by patient',
+			updatedAt: admin.firestore.Timestamp.now()
+		});
+
+		console.log('✅ Family access revoked successfully');
+
+		res.json({
+		    success: true,
+		    message: 'Family member access removed successfully'
+		});
+
+	} catch (error) {
+		console.error('❌ Error removing family access:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
 // Get invitation details by token
-app.get('/api/invitations/:token', async (req, res) => {
+app.get('/invitations/:token', async (req, res) => {
 	try {
 		const { token } = req.params;
 
@@ -355,15 +590,17 @@ app.get('/api/invitations/:token', async (req, res) => {
 		const senderDoc = await firestore.collection('users').doc(invitation.createdBy).get();
 		const senderData = senderDoc.data();
 
+		// For family invitations, the sender is the patient, and the invitation is for a family member
+		// So both inviterName and patientName should be the same (the patient who sent the invitation)
 		res.json({
 			success: true,
 			data: {
 				id: invitationDoc.id,
 				inviterName: senderData?.name || 'Unknown',
 				inviterEmail: senderData?.email || 'Unknown',
-				patientName: senderData?.name || 'Unknown',
+				patientName: senderData?.name || 'Unknown', // This is correct - patient is the one who sent invitation
 				patientEmail: senderData?.email || 'Unknown',
-				message: '',
+				message: invitation.message || '',
 				status: invitation.status,
 				createdAt: invitation.invitedAt.toDate(),
 				expiresAt: invitation.invitationExpiresAt.toDate()
@@ -379,10 +616,12 @@ app.get('/api/invitations/:token', async (req, res) => {
 });
 
 // Accept invitation
-app.post('/api/invitations/accept/:token', authenticate, async (req, res) => {
+app.post('/invitations/accept/:token', authenticate, async (req, res) => {
 	try {
 		const { token } = req.params;
 		const userId = (req as any).user.uid;
+
+		console.log('🤝 Processing invitation acceptance:', { token, userId });
 
 		// Find invitation by token
 		const invitationQuery = await firestore.collection('family_calendar_access')
@@ -401,6 +640,12 @@ app.post('/api/invitations/accept/:token', authenticate, async (req, res) => {
 		const invitationDoc = invitationQuery.docs[0];
 		const invitation = invitationDoc.data();
 
+		console.log('📋 Found invitation:', {
+			id: invitationDoc.id,
+			patientId: invitation.patientId,
+			familyMemberEmail: invitation.familyMemberEmail
+		});
+
 		// Check if invitation has expired
 		if (invitation.invitationExpiresAt && new Date() > invitation.invitationExpiresAt.toDate()) {
 			return res.status(400).json({
@@ -409,26 +654,100 @@ app.post('/api/invitations/accept/:token', authenticate, async (req, res) => {
 			});
 		}
 
-		// Update invitation with family member ID and activate
-		await invitationDoc.ref.update({
-			familyMemberId: userId,
-			status: 'active',
-			acceptedAt: admin.firestore.Timestamp.now(),
-			updatedAt: admin.firestore.Timestamp.now(),
-			invitationToken: admin.firestore.FieldValue.delete(),
-			invitationExpiresAt: admin.firestore.FieldValue.delete()
+		// 🔥 RACE CONDITION PREVENTION: Check for existing active relationship
+		console.log('🔍 Checking for existing active relationships...');
+		const existingActiveQuery = await firestore.collection('family_calendar_access')
+			.where('patientId', '==', invitation.patientId)
+			.where('familyMemberId', '==', userId)
+			.where('status', '==', 'active')
+			.get();
+
+		if (!existingActiveQuery.empty) {
+			console.log('⚠️ User already has active access to this patient');
+			return res.status(409).json({
+				success: false,
+				error: 'You already have active access to this patient\'s medical calendar'
+			});
+		}
+
+		// 🔥 DUPLICATE PREVENTION: Check if this user already accepted this specific invitation
+		if (invitation.familyMemberId && invitation.familyMemberId === userId && invitation.status === 'active') {
+			console.log('⚠️ Invitation already accepted by this user');
+			return res.status(409).json({
+				success: false,
+				error: 'This invitation has already been accepted'
+			});
+		}
+
+		// Use transaction to ensure atomicity and prevent race conditions
+		const result = await firestore.runTransaction(async (transaction) => {
+			// Re-check the invitation status within the transaction
+			const currentInvitation = await transaction.get(invitationDoc.ref);
+			
+			if (!currentInvitation.exists) {
+				throw new Error('Invitation no longer exists');
+			}
+
+			const currentData = currentInvitation.data();
+			if (currentData?.status !== 'pending') {
+				throw new Error('Invitation is no longer pending');
+			}
+
+			// Check again for existing active relationships within transaction
+			const activeCheck = await firestore.collection('family_calendar_access')
+				.where('patientId', '==', invitation.patientId)
+				.where('familyMemberId', '==', userId)
+				.where('status', '==', 'active')
+				.get();
+
+			if (!activeCheck.empty) {
+				throw new Error('Active relationship already exists');
+			}
+
+			// Update invitation with family member ID and activate
+			transaction.update(invitationDoc.ref, {
+				familyMemberId: userId,
+				status: 'active',
+				acceptedAt: admin.firestore.Timestamp.now(),
+				updatedAt: admin.firestore.Timestamp.now(),
+				invitationToken: admin.firestore.FieldValue.delete(),
+				invitationExpiresAt: admin.firestore.FieldValue.delete()
+			});
+
+			return {
+				id: invitationDoc.id,
+				status: 'active'
+			};
 		});
+
+		console.log('✅ Invitation accepted successfully:', result);
 
 		res.json({
 			success: true,
 			message: 'Invitation accepted successfully',
-			data: {
-				id: invitationDoc.id,
-				status: 'active'
-			}
+			data: result
 		});
-	} catch (error) {
-		console.error('Error accepting invitation:', error);
+	} catch (error: any) {
+		console.error('❌ Error accepting invitation:', error);
+		
+		// Handle specific transaction errors
+		if (error.message === 'Invitation no longer exists') {
+			return res.status(404).json({
+				success: false,
+				error: 'Invitation no longer exists'
+			});
+		} else if (error.message === 'Invitation is no longer pending') {
+			return res.status(409).json({
+				success: false,
+				error: 'This invitation has already been processed'
+			});
+		} else if (error.message === 'Active relationship already exists') {
+			return res.status(409).json({
+				success: false,
+				error: 'You already have active access to this patient\'s medical calendar'
+			});
+		}
+
 		res.status(500).json({
 			success: false,
 			error: 'Internal server error'
@@ -439,7 +758,7 @@ app.post('/api/invitations/accept/:token', authenticate, async (req, res) => {
 // ===== EXISTING ROUTES (keeping the working ones) =====
 
 // Auth: profile
-app.get('/api/auth/profile', authenticate, async (req, res) => {
+app.get('/auth/profile', authenticate, async (req, res) => {
 	try {
 		const decoded: any = (req as any).user;
 		const uid: string = decoded.uid;
@@ -484,15 +803,50 @@ app.get('/api/auth/profile', authenticate, async (req, res) => {
 	}
 });
 
-// Medication calendar events endpoint (simplified)
-app.get('/api/medication-calendar/events', authenticate, async (req, res) => {
+
+// ===== MEDICATION CALENDAR ROUTES =====
+
+// Get medication calendar events
+app.get('/medication-calendar/events', authenticate, async (req, res) => {
 	try {
 		const patientId = (req as any).user.uid;
+		const { startDate, endDate, medicationId, status } = req.query;
 		
-		// Return empty array for now to prevent 500 errors
+		// Build query for medication calendar events
+		let query = firestore.collection('medication_calendar_events')
+			.where('patientId', '==', patientId);
+		
+		// Add filters if provided
+		if (startDate) {
+			query = query.where('scheduledDateTime', '>=', admin.firestore.Timestamp.fromDate(new Date(startDate as string)));
+		}
+		if (endDate) {
+			query = query.where('scheduledDateTime', '<=', admin.firestore.Timestamp.fromDate(new Date(endDate as string)));
+		}
+		if (medicationId) {
+			query = query.where('medicationId', '==', medicationId);
+		}
+		if (status) {
+			query = query.where('status', '==', status);
+		}
+		
+		const eventsSnapshot = await query.orderBy('scheduledDateTime').get();
+		
+		const events = eventsSnapshot.docs.map(doc => {
+			const data = doc.data();
+			return {
+				id: doc.id,
+				...data,
+				scheduledDateTime: data.scheduledDateTime?.toDate(),
+				actualTakenDateTime: data.actualTakenDateTime?.toDate(),
+				createdAt: data.createdAt?.toDate(),
+				updatedAt: data.updatedAt?.toDate()
+			};
+		});
+		
 		res.json({
 			success: true,
-			data: [],
+			data: events,
 			message: 'Medication calendar events retrieved successfully'
 		});
 	} catch (error) {
@@ -504,15 +858,59 @@ app.get('/api/medication-calendar/events', authenticate, async (req, res) => {
 	}
 });
 
-// Medication adherence endpoint (simplified)
-app.get('/api/medication-calendar/adherence', authenticate, async (req, res) => {
+// Get medication adherence data
+app.get('/medication-calendar/adherence', authenticate, async (req, res) => {
 	try {
 		const patientId = (req as any).user.uid;
+		const { startDate, endDate, medicationId } = req.query;
 		
-		// Return empty array for now to prevent 500 errors
+		// Set default date range if not provided (last 30 days)
+		const defaultEndDate = new Date();
+		const defaultStartDate = new Date();
+		defaultStartDate.setDate(defaultStartDate.getDate() - 30);
+		
+		const queryStartDate = startDate ? new Date(startDate as string) : defaultStartDate;
+		const queryEndDate = endDate ? new Date(endDate as string) : defaultEndDate;
+		
+		// Build query for medication calendar events in date range
+		let query = firestore.collection('medication_calendar_events')
+			.where('patientId', '==', patientId)
+			.where('scheduledDateTime', '>=', admin.firestore.Timestamp.fromDate(queryStartDate))
+			.where('scheduledDateTime', '<=', admin.firestore.Timestamp.fromDate(queryEndDate));
+		
+		if (medicationId) {
+			query = query.where('medicationId', '==', medicationId);
+		}
+		
+		const eventsSnapshot = await query.get();
+		
+		// Calculate adherence metrics
+		const events = eventsSnapshot.docs.map(doc => doc.data());
+		const totalScheduled = events.length;
+		const takenEvents = events.filter(e => e.status === 'taken');
+		const missedEvents = events.filter(e => e.status === 'missed');
+		const skippedEvents = events.filter(e => e.status === 'skipped');
+		const lateEvents = events.filter(e => e.status === 'late');
+		
+		const adherenceData = {
+			totalScheduledDoses: totalScheduled,
+			takenDoses: takenEvents.length,
+			missedDoses: missedEvents.length,
+			skippedDoses: skippedEvents.length,
+			lateDoses: lateEvents.length,
+			adherenceRate: totalScheduled > 0 ? ((takenEvents.length + lateEvents.length) / totalScheduled) * 100 : 0,
+			onTimeRate: totalScheduled > 0 ? (takenEvents.length / totalScheduled) * 100 : 0,
+			missedRate: totalScheduled > 0 ? (missedEvents.length / totalScheduled) * 100 : 0,
+			period: {
+				startDate: queryStartDate,
+				endDate: queryEndDate,
+				days: Math.ceil((queryEndDate.getTime() - queryStartDate.getTime()) / (1000 * 60 * 60 * 24))
+			}
+		};
+		
 		res.json({
 			success: true,
-			data: [],
+			data: [adherenceData], // Return as array to match expected format
 			message: 'Medication adherence calculated successfully'
 		});
 	} catch (error) {
@@ -524,10 +922,95 @@ app.get('/api/medication-calendar/adherence', authenticate, async (req, res) => 
 	}
 });
 
+// Mark medication as taken
+app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req, res) => {
+	try {
+		const { eventId } = req.params;
+		const userId = (req as any).user.uid;
+		const { takenAt, notes } = req.body;
+		
+		const eventDoc = await firestore.collection('medication_calendar_events').doc(eventId).get();
+		
+		if (!eventDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication event not found'
+			});
+		}
+		
+		const eventData = eventDoc.data();
+		
+		// Check if user has access to this event
+		if (eventData?.patientId !== userId) {
+			// Check family access
+			const familyAccess = await firestore.collection('family_calendar_access')
+				.where('familyMemberId', '==', userId)
+				.where('patientId', '==', eventData?.patientId)
+				.where('status', '==', 'active')
+				.get();
+			
+			if (familyAccess.empty) {
+				return res.status(403).json({
+					success: false,
+					error: 'Access denied'
+				});
+			}
+		}
+		
+		// Update the event
+		const updateData = {
+			status: 'taken',
+			actualTakenDateTime: takenAt ? admin.firestore.Timestamp.fromDate(new Date(takenAt)) : admin.firestore.Timestamp.now(),
+			takenBy: userId,
+			notes: notes || undefined,
+			isOnTime: true, // Calculate based on scheduled time vs actual time
+			updatedAt: admin.firestore.Timestamp.now()
+		};
+		
+		// Calculate if taken on time (within 30 minutes of scheduled time)
+		if (eventData?.scheduledDateTime) {
+			const scheduledTime = eventData.scheduledDateTime.toDate();
+			const takenTime = updateData.actualTakenDateTime.toDate();
+			const timeDiffMinutes = Math.abs((takenTime.getTime() - scheduledTime.getTime()) / (1000 * 60));
+			updateData.isOnTime = timeDiffMinutes <= 30;
+			
+			if (timeDiffMinutes > 30) {
+				updateData.status = 'late';
+				(updateData as any).minutesLate = Math.round(timeDiffMinutes);
+			}
+		}
+		
+		await eventDoc.ref.update(updateData);
+		
+		// Get updated event
+		const updatedDoc = await eventDoc.ref.get();
+		const updatedData = updatedDoc.data();
+		
+		res.json({
+			success: true,
+			data: {
+				id: eventId,
+				...updatedData,
+				scheduledDateTime: updatedData?.scheduledDateTime?.toDate(),
+				actualTakenDateTime: updatedData?.actualTakenDateTime?.toDate(),
+				createdAt: updatedData?.createdAt?.toDate(),
+				updatedAt: updatedData?.updatedAt?.toDate()
+			},
+			message: 'Medication marked as taken successfully'
+		});
+	} catch (error) {
+		console.error('Error marking medication as taken:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
 // ===== HEALTHCARE PROVIDER ROUTES =====
 
 // Get healthcare providers for a user
-app.get('/api/healthcare/providers/:userId', authenticate, async (req, res) => {
+app.get('/healthcare/providers/:userId', authenticate, async (req, res) => {
 	try {
 		const { userId } = req.params;
 		const currentUserId = (req as any).user.uid;
@@ -576,7 +1059,7 @@ app.get('/api/healthcare/providers/:userId', authenticate, async (req, res) => {
 });
 
 // Add healthcare provider
-app.post('/api/healthcare/providers', authenticate, async (req, res) => {
+app.post('/healthcare/providers', authenticate, async (req, res) => {
 	try {
 		const userId = (req as any).user.uid;
 		const { name, specialty, phone, email, address, notes } = req.body;
@@ -623,7 +1106,7 @@ app.post('/api/healthcare/providers', authenticate, async (req, res) => {
 // ===== HEALTHCARE FACILITIES ROUTES =====
 
 // Get healthcare facilities for a user
-app.get('/api/healthcare/facilities/:userId', authenticate, async (req, res) => {
+app.get('/healthcare/facilities/:userId', authenticate, async (req, res) => {
 	try {
 		const { userId } = req.params;
 		const currentUserId = (req as any).user.uid;
@@ -674,7 +1157,7 @@ app.get('/api/healthcare/facilities/:userId', authenticate, async (req, res) => 
 // ===== PATIENT PROFILE ROUTES =====
 
 // Get patient profile
-app.get('/api/patients/profile', authenticate, async (req, res) => {
+app.get('/patients/profile', authenticate, async (req, res) => {
 	try {
 		const userId = (req as any).user.uid;
 		
@@ -706,7 +1189,7 @@ app.get('/api/patients/profile', authenticate, async (req, res) => {
 });
 
 // Update patient profile
-app.put('/api/patients/profile', authenticate, async (req, res) => {
+app.put('/patients/profile', authenticate, async (req, res) => {
 	try {
 		const userId = (req as any).user.uid;
 		const updateData = req.body;
@@ -744,7 +1227,7 @@ app.put('/api/patients/profile', authenticate, async (req, res) => {
 // ===== MEDICATIONS ROUTES =====
 
 // Get medications for a user
-app.get('/api/medications', authenticate, async (req, res) => {
+app.get('/medications', authenticate, async (req, res) => {
 	try {
 		const userId = (req as any).user.uid;
 		
@@ -775,7 +1258,7 @@ app.get('/api/medications', authenticate, async (req, res) => {
 });
 
 // Add medication
-app.post('/api/medications', authenticate, async (req, res) => {
+app.post('/medications', authenticate, async (req, res) => {
 	try {
 		const userId = (req as any).user.uid;
 		const medicationData = req.body;
@@ -817,7 +1300,7 @@ app.post('/api/medications', authenticate, async (req, res) => {
 // ===== MEDICAL EVENTS/CALENDAR ROUTES =====
 
 // Get medical events for a patient
-app.get('/api/medical-events/:patientId', authenticate, async (req, res) => {
+app.get('/medical-events/:patientId', authenticate, async (req, res) => {
 	try {
 		const { patientId } = req.params;
 		const currentUserId = (req as any).user.uid;
@@ -871,7 +1354,7 @@ app.get('/api/medical-events/:patientId', authenticate, async (req, res) => {
 });
 
 // Create a new medical event
-app.post('/api/medical-events', authenticate, async (req, res) => {
+app.post('/medical-events', authenticate, async (req, res) => {
 	try {
 		const userId = (req as any).user.uid;
 		const eventData = req.body;
@@ -942,7 +1425,7 @@ app.post('/api/medical-events', authenticate, async (req, res) => {
 });
 
 // Update a medical event
-app.put('/api/medical-events/:eventId', authenticate, async (req, res) => {
+app.put('/medical-events/:eventId', authenticate, async (req, res) => {
 	try {
 		const { eventId } = req.params;
 		const userId = (req as any).user.uid;
@@ -1034,7 +1517,7 @@ app.put('/api/medical-events/:eventId', authenticate, async (req, res) => {
 });
 
 // Delete a medical event
-app.delete('/api/medical-events/:eventId', authenticate, async (req, res) => {
+app.delete('/medical-events/:eventId', authenticate, async (req, res) => {
 	try {
 		const { eventId } = req.params;
 		const userId = (req as any).user.uid;
