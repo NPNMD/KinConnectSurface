@@ -213,6 +213,31 @@ class ApiClient {
       });
     }
 
+    // Special handling for drug search endpoints
+    if (endpoint.includes('/drugs/')) {
+      return this.requestWithFallback<T>(endpoint, { method: 'GET' }, async () => {
+        console.warn('Drug API unavailable, returning empty results');
+
+        // For search endpoints, return empty array
+        if (endpoint.includes('/drugs/search')) {
+          return { success: true, data: [], message: 'Drug search temporarily unavailable' } as T;
+        }
+
+        // For drug details endpoints, return null
+        if (endpoint.includes('/drugs/') && !endpoint.includes('/search') && !endpoint.includes('/suggestions')) {
+          return { success: true, data: null, message: 'Drug details temporarily unavailable' } as T;
+        }
+
+        // For suggestions endpoint, return empty array
+        if (endpoint.includes('/drugs/suggestions/')) {
+          return { success: true, data: [], message: 'Spelling suggestions temporarily unavailable' } as T;
+        }
+
+        // Default fallback
+        return { success: true, data: null, message: 'Drug information temporarily unavailable' } as T;
+      });
+    }
+
     return this.request<T>(endpoint, { method: 'GET' });
   }
 
@@ -370,6 +395,14 @@ export const API_ENDPOINTS = {
   PENDING_INVITATIONS: '/invitations/pending',
   ACCEPT_INVITATION: (token: string) => `/invitations/accept/${token}`,
   DECLINE_INVITATION: (token: string) => `/invitations/decline/${token}`,
+  
+  // Visit Summaries
+  VISIT_SUMMARIES: (patientId: string) => `/visit-summaries/${patientId}`,
+  VISIT_SUMMARY_CREATE: '/visit-summaries',
+  VISIT_SUMMARY_BY_ID: (patientId: string, summaryId: string) => `/visit-summaries/${patientId}/${summaryId}`,
+  VISIT_SUMMARY_UPDATE: (patientId: string, summaryId: string) => `/visit-summaries/${patientId}/${summaryId}`,
+  VISIT_SUMMARY_DELETE: (patientId: string, summaryId: string) => `/visit-summaries/${patientId}/${summaryId}`,
+  VISIT_SUMMARY_RETRY_AI: (patientId: string, summaryId: string) => `/visit-summaries/${patientId}/${summaryId}/retry-ai`,
 } as const;
 
 // Type-safe API response

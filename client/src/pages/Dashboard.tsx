@@ -15,13 +15,16 @@ import {
   Shield,
   Mail,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  AlertCircle
 } from 'lucide-react';
 import MedicationReminders from '@/components/MedicationReminders';
 import MedicationAdherenceDashboard from '@/components/MedicationAdherenceDashboard';
 import CalendarIntegration from '@/components/CalendarIntegration';
+import VisitSummaryCard from '@/components/VisitSummaryCard';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import type { VisitSummary } from '@shared/types';
 
 interface FamilyConnection {
   id: string;
@@ -51,6 +54,8 @@ export default function Dashboard() {
   const [familyError, setFamilyError] = useState<string | null>(null);
   const [removingMember, setRemovingMember] = useState<string | null>(null);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState<string | null>(null);
+  const [recentVisitSummaries, setRecentVisitSummaries] = useState<VisitSummary[]>([]);
+  const [loadingVisitSummaries, setLoadingVisitSummaries] = useState(false);
 
   const handleSignOut = async () => {
     try {
@@ -114,9 +119,34 @@ export default function Dashboard() {
     }
   };
 
+  const fetchRecentVisitSummaries = async () => {
+    try {
+      setLoadingVisitSummaries(true);
+      const userId = firebaseUser?.uid;
+      if (!userId) return;
+
+      console.log('🔍 Fetching recent visit summaries for user:', userId);
+      
+      const response = await apiClient.get<{ success: boolean; data: VisitSummary[] }>(
+        `${API_ENDPOINTS.VISIT_SUMMARIES(userId)}?limit=3&offset=0`
+      );
+      
+      if (response.success && response.data) {
+        setRecentVisitSummaries(response.data);
+        console.log('✅ Recent visit summaries loaded:', response.data.length);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching recent visit summaries:', error);
+      // Don't show error to user for this non-critical feature
+    } finally {
+      setLoadingVisitSummaries(false);
+    }
+  };
+
   useEffect(() => {
     if (firebaseUser) {
       fetchFamilyAccess();
+      fetchRecentVisitSummaries();
     }
   }, [firebaseUser]);
 
@@ -251,6 +281,28 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* Recent Visit Summaries Widget */}
+        {recentVisitSummaries.length > 0 && (
+          <div className="mb-6 sm:mb-8">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Recent Visit Summaries</h2>
+              <button className="text-sm text-primary-600 hover:text-primary-700 font-medium">
+                View All →
+              </button>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+              {recentVisitSummaries.map((summary) => (
+                <VisitSummaryCard
+                  key={summary.id}
+                  summary={summary}
+                  showFamilyView={false}
+                  isFamily={false}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Dashboard Grid - Mobile Optimized */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
           {/* Medication Reminders */}
@@ -277,6 +329,10 @@ export default function Dashboard() {
                   <span className="font-semibold text-gray-400">0</span>
                 </div>
                 <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Recent Visits</span>
+                  <span className="font-semibold text-blue-600">{recentVisitSummaries.length}</span>
+                </div>
+                <div className="flex justify-between items-center">
                   <span className="text-gray-600">Pending Tasks</span>
                   <span className="font-semibold text-gray-400">0</span>
                 </div>
@@ -290,6 +346,31 @@ export default function Dashboard() {
                 </Link>
               </div>
             </div>
+
+            {/* Visit Summary Quick Actions */}
+            {recentVisitSummaries.length > 0 && (
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Latest Visit Actions</h3>
+                <div className="space-y-3">
+                  {recentVisitSummaries[0]?.aiProcessedSummary?.actionItems?.slice(0, 3).map((item, index) => (
+                    <div key={index} className="flex items-start space-x-3">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
+                      <span className="text-sm text-gray-700">{item}</span>
+                    </div>
+                  )) || (
+                    <div className="text-sm text-gray-500">No action items available</div>
+                  )}
+                </div>
+                {recentVisitSummaries[0]?.aiProcessedSummary?.followUpRequired && (
+                  <div className="mt-4 pt-4 border-t border-gray-100">
+                    <div className="flex items-center space-x-2 text-sm text-orange-600">
+                      <AlertCircle className="w-4 h-4" />
+                      <span>Follow-up appointment required</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
               <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Family Connections</h3>

@@ -66,6 +66,8 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
   const [showResponsibilityDashboard, setShowResponsibilityDashboard] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [showVisitSummaryForm, setShowVisitSummaryForm] = useState(false);
+  const [selectedEventForSummary, setSelectedEventForSummary] = useState<MedicalEvent | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [conflictWarnings, setConflictWarnings] = useState<string[]>([]);
@@ -947,6 +949,24 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
       tags: template.tags || []
     });
     setShowAddEvent(true);
+  };
+
+  // Handle recording visit summary
+  const handleRecordVisitSummary = (event: MedicalEvent) => {
+    setSelectedEventForSummary(event);
+    setShowVisitSummaryForm(true);
+  };
+
+  const handleVisitSummarySubmit = (summary: any) => {
+    console.log('Visit summary created:', summary);
+    setShowVisitSummaryForm(false);
+    setSelectedEventForSummary(null);
+    // Optionally refresh events or show success message
+  };
+
+  const handleVisitSummaryCancel = () => {
+    setShowVisitSummaryForm(false);
+    setSelectedEventForSummary(null);
   };
 
   // Export calendar data
@@ -2083,6 +2103,17 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
                 </div>
                 
                 <div className="flex items-center space-x-2">
+                  {/* Record Visit Summary Button for completed appointments */}
+                  {event.status === 'completed' && (
+                    <button
+                      onClick={() => handleRecordVisitSummary(event)}
+                      className="text-green-600 hover:text-green-700 p-1"
+                      title="Record visit summary"
+                    >
+                      <FileText className="w-4 h-4" />
+                    </button>
+                  )}
+                  
                   <button
                     onClick={() => handleEditEvent(event)}
                     className="text-blue-600 hover:text-blue-700 p-1"
@@ -2200,6 +2231,68 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
                 onUseTemplate={handleUseTemplate}
                 onClose={() => setShowTemplates(false)}
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Visit Summary Form Modal */}
+      {showVisitSummaryForm && selectedEventForSummary && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">Record Visit Summary</h3>
+                <button
+                  onClick={handleVisitSummaryCancel}
+                  className="text-gray-400 hover:text-gray-600 text-xl"
+                >
+                  ×
+                </button>
+              </div>
+              
+              {/* Import VisitSummaryForm component when ready */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center space-x-3">
+                  <FileText className="w-5 h-5 text-blue-600" />
+                  <div>
+                    <h4 className="text-sm font-medium text-blue-900">Visit Summary Form</h4>
+                    <p className="text-sm text-blue-700 mt-1">
+                      Record details about your visit with {selectedEventForSummary.providerName || 'your healthcare provider'}
+                      on {selectedEventForSummary.startDateTime.toLocaleDateString()}.
+                    </p>
+                    <div className="mt-3 space-y-2">
+                      <div className="text-xs text-blue-600">
+                        <strong>Event:</strong> {selectedEventForSummary.title}
+                      </div>
+                      {selectedEventForSummary.location && (
+                        <div className="text-xs text-blue-600">
+                          <strong>Location:</strong> {selectedEventForSummary.location}
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="mt-4 flex space-x-3">
+                      <button
+                        onClick={handleVisitSummaryCancel}
+                        className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors text-sm"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => {
+                          // TODO: Replace with actual form submission
+                          console.log('Would create visit summary for event:', selectedEventForSummary.id);
+                          handleVisitSummarySubmit({ eventId: selectedEventForSummary.id });
+                        }}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm"
+                      >
+                        Create Summary (Demo)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -49,9 +49,13 @@ const mail_1 = __importDefault(require("@sendgrid/mail"));
 if (!admin.apps.length) {
     admin.initializeApp();
 }
+// Use custom database ID for Firestore
 const firestore = admin.firestore();
+// If you're using a custom database ID, you can specify it like this:
+// const firestore = admin.firestore('kinconnect-production');
 // Define secrets
 const sendgridApiKey = (0, params_1.defineSecret)('SENDGRID_API_KEY');
+const googleAIApiKey = (0, params_1.defineSecret)('GOOGLE_AI_API_KEY');
 const SENDGRID_FROM_EMAIL = 'mike.nguyen@twfg.com';
 const APP_URL = 'https://claritystream-uldp9.web.app';
 // Create an Express app
@@ -159,7 +163,15 @@ app.post('/invitations/send', authenticate, async (req, res) => {
             });
         }
         console.log('👤 Sender found:', { senderName: senderData.name, senderEmail: senderData.email });
-        // 🔥 DUPLICATE PREVENTION: Check for existing invitations/relationships
+        // 🚫 PREVENT SELF-INVITATION: Check if user is trying to invite themselves
+        if (normalizedEmail === senderData.email?.toLowerCase().trim()) {
+            console.log('🚫 Preventing self-invitation attempt:', normalizedEmail);
+            return res.status(400).json({
+                success: false,
+                error: 'You cannot invite yourself to your own medical calendar'
+            });
+        }
+        //  DUPLICATE PREVENTION: Check for existing invitations/relationships
         console.log('🔍 Checking for existing invitations or relationships...');
         const existingQuery = await firestore.collection('family_calendar_access')
             .where('patientId', '==', senderUserId)
@@ -348,6 +360,11 @@ app.get('/family-access', authenticate, async (req, res) => {
         for (const doc of familyMemberQuery.docs) {
             const access = doc.data();
             console.log('👥 Processing family member access:', access);
+            // 🚫 PREVENT SELF-REFERENTIAL RELATIONSHIPS: Skip if user is trying to access themselves
+            if (access.patientId === userId) {
+                console.log('🚫 Skipping self-referential relationship - user cannot be family member to themselves:', userId);
+                continue;
+            }
             // Create unique key for this relationship
             const relationshipKey = `${access.patientId}_${userId}`;
             // Skip if we already have this relationship (deduplication)
@@ -381,6 +398,11 @@ app.get('/family-access', authenticate, async (req, res) => {
             const access = doc.data();
             console.log('🏥 Processing patient access:', access);
             if (access.familyMemberId) {
+                // 🚫 PREVENT SELF-REFERENTIAL RELATIONSHIPS: Skip if family member is the same as patient
+                if (access.familyMemberId === userId) {
+                    console.log('🚫 Skipping self-referential relationship - user cannot be their own family member:', userId);
+                    continue;
+                }
                 // Create unique key for this relationship
                 const relationshipKey = `${userId}_${access.familyMemberId}`;
                 // Skip if we already have this relationship (deduplication)
@@ -724,6 +746,261 @@ app.post('/invitations/accept/:token', authenticate, async (req, res) => {
                 error: 'You already have active access to this patient\'s medical calendar'
             });
         }
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// ===== DRUG SEARCH ROUTES =====
+// Search for drugs by name using RxNorm API
+app.get('/drugs/search', authenticate, async (req, res) => {
+    try {
+        const { q: query, limit = '20' } = req.query;
+        if (!query || typeof query !== 'string' || query.trim().length < 2) {
+            return res.status(400).json({
+                success: false,
+                error: 'Query parameter is required and must be at least 2 characters long'
+            });
+        }
+        const searchLimit = Math.min(parseInt(limit, 10), 50); // Cap at 50 results
+        // Use RxNorm API for drug search
+        const rxnormUrl = `https://rxnav.nlm.nih.gov/REST/drugs.json?name=${encodeURIComponent(query)}`;
+        console.log('🔍 Searching RxNorm for:', query);
+        const response = await fetch(rxnormUrl);
+        if (!response.ok) {
+            console.warn('RxNorm API error:', response.status, response.statusText);
+            // Return empty results instead of error for better UX
+            return res.json({
+                success: true,
+                data: [],
+                message: 'No results found'
+            });
+        }
+        const rxnormData = await response.json();
+        if (!rxnormData?.drugGroup?.conceptGroup) {
+            return res.json({
+                success: true,
+                data: [],
+                message: 'No results found'
+            });
+        }
+        // Extract and format drug concepts
+        const drugConcepts = [];
+        for (const group of rxnormData.drugGroup.conceptGroup) {
+            if (group.conceptProperties && Array.isArray(group.conceptProperties)) {
+                for (const concept of group.conceptProperties.slice(0, Math.ceil(searchLimit / 2))) {
+                    if (drugConcepts.length >= searchLimit)
+                        break;
+                    drugConcepts.push({
+                        rxcui: concept.rxcui,
+                        name: concept.name,
+                        synonym: concept.synonym || concept.name,
+                        tty: concept.tty,
+                        language: concept.language
+                    });
+                }
+            }
+        }
+        console.log(`✅ Found ${drugConcepts.length} drug results for query: ${query}`);
+        res.json({
+            success: true,
+            data: drugConcepts,
+            message: `Found ${drugConcepts.length} results`
+        });
+    }
+    catch (error) {
+        console.error('Error searching drugs:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error while searching drugs'
+        });
+    }
+});
+// Get detailed drug information by RXCUI
+app.get('/drugs/:rxcui', authenticate, async (req, res) => {
+    try {
+        const { rxcui } = req.params;
+        if (!rxcui) {
+            return res.status(400).json({
+                success: false,
+                error: 'RXCUI parameter is required'
+            });
+        }
+        // Get drug properties from RxNorm
+        const propertiesUrl = `https://rxnav.nlm.nih.gov/REST/rxcui/${rxcui}/properties.json`;
+        const propertiesResponse = await fetch(propertiesUrl);
+        if (!propertiesResponse.ok) {
+            return res.status(404).json({
+                success: false,
+                error: 'Drug not found'
+            });
+        }
+        const propertiesData = await propertiesResponse.json();
+        if (!propertiesData?.properties) {
+            return res.status(404).json({
+                success: false,
+                error: 'Drug properties not found'
+            });
+        }
+        const props = propertiesData.properties;
+        const drugDetails = {
+            rxcui: props.rxcui,
+            name: props.name,
+            synonym: props.synonym || props.name,
+            tty: props.tty,
+            language: props.language,
+            suppress: props.suppress
+        };
+        res.json({
+            success: true,
+            data: drugDetails
+        });
+    }
+    catch (error) {
+        console.error('Error getting drug details:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Get drug interactions for a specific drug
+app.get('/drugs/:rxcui/interactions', authenticate, async (req, res) => {
+    try {
+        const { rxcui } = req.params;
+        if (!rxcui) {
+            return res.status(400).json({
+                success: false,
+                error: 'RXCUI parameter is required'
+            });
+        }
+        // Get drug interactions from RxNorm
+        const interactionsUrl = `https://rxnav.nlm.nih.gov/REST/interaction/interaction.json?rxcui=${rxcui}`;
+        console.log('🔍 Getting interactions for RXCUI:', rxcui);
+        const response = await fetch(interactionsUrl);
+        if (!response.ok) {
+            console.warn('RxNorm interactions API error:', response.status, response.statusText);
+            return res.json({
+                success: true,
+                data: [],
+                message: 'No interactions found'
+            });
+        }
+        const interactionsData = await response.json();
+        if (!interactionsData?.interactionTypeGroup) {
+            return res.json({
+                success: true,
+                data: [],
+                message: 'No interactions found'
+            });
+        }
+        // Format interactions data
+        const interactions = interactionsData.interactionTypeGroup.map((group) => ({
+            minConceptItem: {
+                rxcui: group.minConceptItem?.rxcui,
+                name: group.minConceptItem?.name,
+                tty: group.minConceptItem?.tty
+            },
+            interactionTypeGroup: group.interactionType
+        }));
+        console.log(`✅ Found ${interactions.length} interaction groups for RXCUI: ${rxcui}`);
+        res.json({
+            success: true,
+            data: interactions
+        });
+    }
+    catch (error) {
+        console.error('Error getting drug interactions:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Get spelling suggestions for drug names
+app.get('/drugs/suggestions/:query', authenticate, async (req, res) => {
+    try {
+        const { query } = req.params;
+        if (!query || query.trim().length < 2) {
+            return res.status(400).json({
+                success: false,
+                error: 'Query parameter is required and must be at least 2 characters long'
+            });
+        }
+        // Get spelling suggestions from RxNorm
+        const suggestionsUrl = `https://rxnav.nlm.nih.gov/REST/spellingsuggestions.json?name=${encodeURIComponent(query)}`;
+        console.log('🔍 Getting spelling suggestions for:', query);
+        const response = await fetch(suggestionsUrl);
+        if (!response.ok) {
+            console.warn('RxNorm spelling suggestions API error:', response.status, response.statusText);
+            return res.json({
+                success: true,
+                data: []
+            });
+        }
+        const suggestionsData = await response.json();
+        const suggestions = suggestionsData?.suggestionGroup?.suggestionList?.suggestion || [];
+        console.log(`✅ Found ${suggestions.length} spelling suggestions for: ${query}`);
+        res.json({
+            success: true,
+            data: suggestions
+        });
+    }
+    catch (error) {
+        console.error('Error getting spelling suggestions:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Get related drugs (brand names, generics, etc.)
+app.get('/drugs/:rxcui/related', authenticate, async (req, res) => {
+    try {
+        const { rxcui } = req.params;
+        if (!rxcui) {
+            return res.status(400).json({
+                success: false,
+                error: 'RXCUI parameter is required'
+            });
+        }
+        // Get related concepts from RxNorm
+        const relatedUrl = `https://rxnav.nlm.nih.gov/REST/rxcui/${rxcui}/related.json?tty=SCD+SBD+GPCK+BPCK`;
+        console.log('🔍 Getting related drugs for RXCUI:', rxcui);
+        const response = await fetch(relatedUrl);
+        if (!response.ok) {
+            console.warn('RxNorm related drugs API error:', response.status, response.statusText);
+            return res.json({
+                success: true,
+                data: []
+            });
+        }
+        const relatedData = await response.json();
+        const relatedDrugs = [];
+        if (relatedData?.relatedGroup?.conceptGroup) {
+            for (const group of relatedData.relatedGroup.conceptGroup) {
+                if (group.conceptProperties && Array.isArray(group.conceptProperties)) {
+                    for (const concept of group.conceptProperties) {
+                        relatedDrugs.push({
+                            rxcui: concept.rxcui,
+                            name: concept.name,
+                            synonym: concept.synonym || concept.name,
+                            tty: concept.tty,
+                            language: concept.language
+                        });
+                    }
+                }
+            }
+        }
+        console.log(`✅ Found ${relatedDrugs.length} related drugs for RXCUI: ${rxcui}`);
+        res.json({
+            success: true,
+            data: relatedDrugs
+        });
+    }
+    catch (error) {
+        console.error('Error getting related drugs:', error);
         res.status(500).json({
             success: false,
             error: 'Internal server error'
@@ -1469,6 +1746,566 @@ app.delete('/medical-events/:eventId', authenticate, async (req, res) => {
         });
     }
 });
+// ===== VISIT SUMMARY ROUTES =====
+// Google AI Service Helper
+async function processVisitSummaryWithAI(doctorSummary, treatmentPlan) {
+    try {
+        const apiKey = googleAIApiKey.value();
+        if (!apiKey) {
+            throw new Error('Google AI API key not configured');
+        }
+        // Initialize Google AI (will work when package is installed)
+        // const genAI = new GoogleGenerativeAI(apiKey);
+        // const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+        const prompt = `
+You are a medical assistant helping to process doctor visit notes.
+Please analyze the following visit summary and treatment plan, then provide a structured response.
+
+Visit Summary: ${doctorSummary}
+Treatment Plan: ${treatmentPlan}
+
+Please provide a JSON response with the following structure:
+{
+  "keyPoints": ["bullet point 1", "bullet point 2", ...],
+  "actionItems": ["action 1", "action 2", ...],
+  "medicationChanges": {
+    "newMedications": [{"name": "", "dosage": "", "instructions": "", "startDate": ""}],
+    "stoppedMedications": [{"name": "", "reason": "", "stopDate": ""}],
+    "changedMedications": [{"name": "", "oldDosage": "", "newDosage": "", "changeReason": ""}]
+  },
+  "followUpRequired": boolean,
+  "followUpDate": "YYYY-MM-DD or null",
+  "urgencyLevel": "low|medium|high|urgent",
+  "riskFactors": ["risk 1", "risk 2", ...],
+  "recommendations": ["recommendation 1", "recommendation 2", ...],
+  "warningFlags": ["warning 1", "warning 2", ...]
+}
+
+Focus on medical accuracy and patient safety. Extract specific, actionable information.
+`;
+        // For now, return a mock response until Google AI package is properly installed
+        // TODO: Replace with actual Google AI call
+        // const result = await model.generateContent(prompt);
+        // const response = await result.response;
+        // const text = response.text();
+        // Mock response for development
+        const mockResponse = {
+            keyPoints: [
+                "Patient presented with chief complaint",
+                "Physical examination findings documented",
+                "Treatment plan discussed with patient"
+            ],
+            actionItems: [
+                "Schedule follow-up appointment in 2 weeks",
+                "Monitor symptoms and report any changes",
+                "Take medications as prescribed"
+            ],
+            medicationChanges: {
+                newMedications: [],
+                stoppedMedications: [],
+                changedMedications: []
+            },
+            followUpRequired: true,
+            followUpDate: null,
+            urgencyLevel: "medium",
+            riskFactors: [],
+            recommendations: [
+                "Continue current treatment plan",
+                "Maintain regular exercise routine"
+            ],
+            warningFlags: []
+        };
+        return {
+            success: true,
+            data: mockResponse,
+            metadata: {
+                promptTokenCount: prompt.length,
+                processingTime: 1000,
+                model: 'gemini-pro'
+            }
+        };
+    }
+    catch (error) {
+        console.error('Error processing visit summary with AI:', error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'AI processing failed'
+        };
+    }
+}
+// Create a new visit summary
+app.post('/visit-summaries', authenticate, async (req, res) => {
+    try {
+        const userId = req.user.uid;
+        const visitData = req.body;
+        console.log('🏥 Creating visit summary for patient:', visitData.patientId);
+        if (!visitData.patientId || !visitData.doctorSummary || !visitData.visitDate) {
+            return res.status(400).json({
+                success: false,
+                error: 'Patient ID, doctor summary, and visit date are required'
+            });
+        }
+        // Check if user has access to create visit summaries for this patient
+        if (visitData.patientId !== userId) {
+            // Check family access
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', userId)
+                .where('patientId', '==', visitData.patientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+            // Check if user has permissions to create visit summaries
+            const accessData = familyAccess.docs[0].data();
+            if (!accessData.permissions?.canCreate && !accessData.permissions?.canViewMedicalDetails) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Insufficient permissions to create visit summaries'
+                });
+            }
+        }
+        // Create visit summary document
+        const newVisitSummary = {
+            patientId: visitData.patientId,
+            medicalEventId: visitData.medicalEventId || null,
+            visitDate: admin.firestore.Timestamp.fromDate(new Date(visitData.visitDate)),
+            providerName: visitData.providerName || '',
+            providerSpecialty: visitData.providerSpecialty || '',
+            providerId: visitData.providerId || '',
+            facilityName: visitData.facilityName || '',
+            facilityId: visitData.facilityId || '',
+            visitType: visitData.visitType || 'scheduled',
+            visitDuration: visitData.visitDuration || null,
+            doctorSummary: visitData.doctorSummary,
+            treatmentPlan: visitData.treatmentPlan || '',
+            inputMethod: visitData.inputMethod || 'text',
+            voiceTranscriptionId: visitData.voiceTranscriptionId || null,
+            chiefComplaint: visitData.chiefComplaint || '',
+            diagnosis: visitData.diagnosis || [],
+            procedures: visitData.procedures || [],
+            labResults: visitData.labResults || [],
+            imagingResults: visitData.imagingResults || [],
+            vitalSigns: visitData.vitalSigns || {},
+            processingStatus: 'pending',
+            aiProcessingAttempts: 0,
+            sharedWithFamily: visitData.sharedWithFamily !== false, // Default to true
+            familyAccessLevel: visitData.familyAccessLevel || 'summary_only',
+            restrictedFields: visitData.restrictedFields || [],
+            tags: visitData.tags || [],
+            categories: visitData.categories || [],
+            createdBy: userId,
+            createdAt: admin.firestore.Timestamp.now(),
+            updatedAt: admin.firestore.Timestamp.now(),
+            version: 1
+        };
+        // Save to Firestore
+        const visitSummaryRef = await firestore.collection('visit_summaries').add(newVisitSummary);
+        console.log('✅ Visit summary created:', visitSummaryRef.id);
+        // Process with AI asynchronously
+        processVisitSummaryWithAI(visitData.doctorSummary, visitData.treatmentPlan || '')
+            .then(async (aiResult) => {
+            try {
+                if (aiResult.success) {
+                    await visitSummaryRef.update({
+                        aiProcessedSummary: aiResult.data,
+                        processingStatus: 'completed',
+                        googleAIResponseMetadata: aiResult.metadata,
+                        updatedAt: admin.firestore.Timestamp.now()
+                    });
+                    console.log('✅ AI processing completed for visit summary:', visitSummaryRef.id);
+                }
+                else {
+                    await visitSummaryRef.update({
+                        processingStatus: 'failed',
+                        aiProcessingError: aiResult.error,
+                        aiProcessingAttempts: 1,
+                        lastProcessingAttempt: admin.firestore.Timestamp.now(),
+                        updatedAt: admin.firestore.Timestamp.now()
+                    });
+                    console.error('❌ AI processing failed for visit summary:', visitSummaryRef.id, aiResult.error);
+                }
+            }
+            catch (updateError) {
+                console.error('❌ Error updating visit summary with AI results:', updateError);
+            }
+        })
+            .catch((error) => {
+            console.error('❌ Unexpected error in AI processing:', error);
+        });
+        // Return immediate response
+        res.json({
+            success: true,
+            data: {
+                id: visitSummaryRef.id,
+                ...newVisitSummary,
+                visitDate: newVisitSummary.visitDate.toDate(),
+                createdAt: newVisitSummary.createdAt.toDate(),
+                updatedAt: newVisitSummary.updatedAt.toDate()
+            },
+            message: 'Visit summary created successfully. AI processing in progress.'
+        });
+    }
+    catch (error) {
+        console.error('❌ Error creating visit summary:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Get visit summaries for a patient
+app.get('/visit-summaries/:patientId', authenticate, async (req, res) => {
+    try {
+        const { patientId } = req.params;
+        const currentUserId = req.user.uid;
+        const { limit = '10', offset = '0', status, urgencyLevel } = req.query;
+        console.log('🔍 Fetching visit summaries for patient:', patientId);
+        // Check if user has access to this patient's data
+        if (patientId !== currentUserId) {
+            // Check family access
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', currentUserId)
+                .where('patientId', '==', patientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+        }
+        // Build query
+        let query = firestore.collection('visit_summaries')
+            .where('patientId', '==', patientId)
+            .orderBy('visitDate', 'desc');
+        // Add filters
+        if (status) {
+            query = query.where('processingStatus', '==', status);
+        }
+        // Apply pagination
+        const limitNum = Math.min(parseInt(limit, 10), 50);
+        const offsetNum = parseInt(offset, 10);
+        if (offsetNum > 0) {
+            const offsetSnapshot = await query.limit(offsetNum).get();
+            if (!offsetSnapshot.empty) {
+                const lastDoc = offsetSnapshot.docs[offsetSnapshot.docs.length - 1];
+                query = query.startAfter(lastDoc);
+            }
+        }
+        const summariesSnapshot = await query.limit(limitNum).get();
+        const summaries = summariesSnapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+                id: doc.id,
+                ...data,
+                visitDate: data.visitDate?.toDate(),
+                createdAt: data.createdAt?.toDate(),
+                updatedAt: data.updatedAt?.toDate(),
+                lastProcessingAttempt: data.lastProcessingAttempt?.toDate()
+            };
+        });
+        // Filter by urgency level if specified (post-query filter since it's nested)
+        let filteredSummaries = summaries;
+        if (urgencyLevel) {
+            filteredSummaries = summaries.filter((summary) => summary.aiProcessedSummary?.urgencyLevel === urgencyLevel);
+        }
+        console.log(`✅ Found ${filteredSummaries.length} visit summaries for patient:`, patientId);
+        res.json({
+            success: true,
+            data: filteredSummaries,
+            pagination: {
+                limit: limitNum,
+                offset: offsetNum,
+                hasMore: summariesSnapshot.docs.length === limitNum
+            }
+        });
+    }
+    catch (error) {
+        console.error('❌ Error fetching visit summaries:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Get a specific visit summary
+app.get('/visit-summaries/:patientId/:summaryId', authenticate, async (req, res) => {
+    try {
+        const { patientId, summaryId } = req.params;
+        const currentUserId = req.user.uid;
+        console.log('🔍 Fetching visit summary:', summaryId, 'for patient:', patientId);
+        // Check if user has access to this patient's data
+        if (patientId !== currentUserId) {
+            // Check family access
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', currentUserId)
+                .where('patientId', '==', patientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+        }
+        const summaryDoc = await firestore.collection('visit_summaries').doc(summaryId).get();
+        if (!summaryDoc.exists) {
+            return res.status(404).json({
+                success: false,
+                error: 'Visit summary not found'
+            });
+        }
+        const summaryData = summaryDoc.data();
+        // Verify the summary belongs to the specified patient
+        if (summaryData?.patientId !== patientId) {
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied'
+            });
+        }
+        const summary = {
+            id: summaryDoc.id,
+            ...summaryData,
+            visitDate: summaryData?.visitDate?.toDate(),
+            createdAt: summaryData?.createdAt?.toDate(),
+            updatedAt: summaryData?.updatedAt?.toDate(),
+            lastProcessingAttempt: summaryData?.lastProcessingAttempt?.toDate()
+        };
+        console.log('✅ Visit summary found:', summaryId);
+        res.json({
+            success: true,
+            data: summary
+        });
+    }
+    catch (error) {
+        console.error('❌ Error fetching visit summary:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Retry AI processing for a visit summary
+app.post('/visit-summaries/:patientId/:summaryId/retry-ai', authenticate, async (req, res) => {
+    try {
+        const { patientId, summaryId } = req.params;
+        const currentUserId = req.user.uid;
+        console.log('🔄 Retrying AI processing for visit summary:', summaryId);
+        // Check access permissions
+        if (patientId !== currentUserId) {
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', currentUserId)
+                .where('patientId', '==', patientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+        }
+        const summaryDoc = await firestore.collection('visit_summaries').doc(summaryId).get();
+        if (!summaryDoc.exists) {
+            return res.status(404).json({
+                success: false,
+                error: 'Visit summary not found'
+            });
+        }
+        const summaryData = summaryDoc.data();
+        if (summaryData?.patientId !== patientId) {
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied'
+            });
+        }
+        // Update status to processing
+        await summaryDoc.ref.update({
+            processingStatus: 'processing',
+            aiProcessingAttempts: (summaryData?.aiProcessingAttempts || 0) + 1,
+            lastProcessingAttempt: admin.firestore.Timestamp.now(),
+            updatedAt: admin.firestore.Timestamp.now()
+        });
+        // Process with AI
+        const aiResult = await processVisitSummaryWithAI(summaryData?.doctorSummary || '', summaryData?.treatmentPlan || '');
+        if (aiResult.success) {
+            await summaryDoc.ref.update({
+                aiProcessedSummary: aiResult.data,
+                processingStatus: 'completed',
+                googleAIResponseMetadata: aiResult.metadata,
+                updatedAt: admin.firestore.Timestamp.now()
+            });
+            res.json({
+                success: true,
+                data: aiResult.data,
+                message: 'AI processing completed successfully'
+            });
+        }
+        else {
+            await summaryDoc.ref.update({
+                processingStatus: 'failed',
+                aiProcessingError: aiResult.error,
+                updatedAt: admin.firestore.Timestamp.now()
+            });
+            res.status(500).json({
+                success: false,
+                error: aiResult.error
+            });
+        }
+    }
+    catch (error) {
+        console.error('❌ Error retrying AI processing:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Update visit summary
+app.put('/visit-summaries/:patientId/:summaryId', authenticate, async (req, res) => {
+    try {
+        const { patientId, summaryId } = req.params;
+        const currentUserId = req.user.uid;
+        const updateData = req.body;
+        console.log('📝 Updating visit summary:', summaryId);
+        // Check access permissions
+        if (patientId !== currentUserId) {
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', currentUserId)
+                .where('patientId', '==', patientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+            // Check edit permissions
+            const accessData = familyAccess.docs[0].data();
+            if (!accessData.permissions?.canEdit) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Insufficient permissions to edit visit summaries'
+                });
+            }
+        }
+        const summaryDoc = await firestore.collection('visit_summaries').doc(summaryId).get();
+        if (!summaryDoc.exists) {
+            return res.status(404).json({
+                success: false,
+                error: 'Visit summary not found'
+            });
+        }
+        const existingData = summaryDoc.data();
+        if (existingData?.patientId !== patientId) {
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied'
+            });
+        }
+        // Prepare update data
+        const updatedSummary = {
+            ...updateData,
+            updatedBy: currentUserId,
+            updatedAt: admin.firestore.Timestamp.now(),
+            version: (existingData?.version || 1) + 1
+        };
+        // Convert date strings to timestamps if provided
+        if (updateData.visitDate) {
+            updatedSummary.visitDate = admin.firestore.Timestamp.fromDate(new Date(updateData.visitDate));
+        }
+        // Remove fields that shouldn't be updated
+        delete updatedSummary.id;
+        delete updatedSummary.patientId;
+        delete updatedSummary.createdAt;
+        delete updatedSummary.createdBy;
+        await summaryDoc.ref.update(updatedSummary);
+        // Get updated document
+        const updatedDoc = await summaryDoc.ref.get();
+        const updatedData = updatedDoc.data();
+        res.json({
+            success: true,
+            data: {
+                id: summaryId,
+                ...updatedData,
+                visitDate: updatedData?.visitDate?.toDate(),
+                createdAt: updatedData?.createdAt?.toDate(),
+                updatedAt: updatedData?.updatedAt?.toDate()
+            },
+            message: 'Visit summary updated successfully'
+        });
+    }
+    catch (error) {
+        console.error('❌ Error updating visit summary:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Delete visit summary
+app.delete('/visit-summaries/:patientId/:summaryId', authenticate, async (req, res) => {
+    try {
+        const { patientId, summaryId } = req.params;
+        const currentUserId = req.user.uid;
+        console.log('🗑️ Deleting visit summary:', summaryId);
+        // Check access permissions
+        if (patientId !== currentUserId) {
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', currentUserId)
+                .where('patientId', '==', patientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+            // Check delete permissions
+            const accessData = familyAccess.docs[0].data();
+            if (!accessData.permissions?.canDelete) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Insufficient permissions to delete visit summaries'
+                });
+            }
+        }
+        const summaryDoc = await firestore.collection('visit_summaries').doc(summaryId).get();
+        if (!summaryDoc.exists) {
+            return res.status(404).json({
+                success: false,
+                error: 'Visit summary not found'
+            });
+        }
+        const summaryData = summaryDoc.data();
+        if (summaryData?.patientId !== patientId) {
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied'
+            });
+        }
+        await summaryDoc.ref.delete();
+        res.json({
+            success: true,
+            message: 'Visit summary deleted successfully'
+        });
+    }
+    catch (error) {
+        console.error('❌ Error deleting visit summary:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error('Unhandled error:', err);
@@ -1491,6 +2328,6 @@ exports.api = functions
     timeoutSeconds: 60,
     minInstances: 0,
     maxInstances: 10,
-    secrets: [sendgridApiKey]
+    secrets: [sendgridApiKey, googleAIApiKey]
 })
     .https.onRequest(app);

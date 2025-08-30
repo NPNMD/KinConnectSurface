@@ -1177,3 +1177,370 @@ export interface NewGoogleCalendarSyncSettings {
   customEventTitleTemplate?: string;
   conflictResolution: 'google_wins' | 'app_wins' | 'manual_review';
 }
+
+// ===== VISIT SUMMARY TYPES =====
+
+// Visit Summary Input Methods
+export const VISIT_INPUT_METHODS = [
+  'text',
+  'voice',
+  'dictation'
+] as const;
+
+export type VisitInputMethod = typeof VISIT_INPUT_METHODS[number];
+
+// Visit Types
+export const VISIT_TYPES = [
+  'scheduled',
+  'walk_in',
+  'emergency',
+  'follow_up',
+  'consultation',
+  'telemedicine'
+] as const;
+
+export type VisitType = typeof VISIT_TYPES[number];
+
+// AI Processing Status
+export const AI_PROCESSING_STATUSES = [
+  'pending',
+  'processing',
+  'completed',
+  'failed',
+  'retry_needed'
+] as const;
+
+export type AIProcessingStatus = typeof AI_PROCESSING_STATUSES[number];
+
+// Urgency Levels for AI-generated content
+export const URGENCY_LEVELS = [
+  'low',
+  'medium',
+  'high',
+  'urgent'
+] as const;
+
+export type UrgencyLevel = typeof URGENCY_LEVELS[number];
+
+// Family Access Levels for Visit Summaries
+export const VISIT_FAMILY_ACCESS_LEVELS = [
+  'full',
+  'summary_only',
+  'restricted',
+  'none'
+] as const;
+
+export type VisitFamilyAccessLevel = typeof VISIT_FAMILY_ACCESS_LEVELS[number];
+
+// Medication Change Types
+export interface MedicationChange {
+  name: string;
+  dosage?: string;
+  instructions?: string;
+  startDate?: Date;
+  endDate?: Date;
+  reason?: string;
+}
+
+export interface NewMedicationChange extends MedicationChange {
+  changeType: 'new';
+}
+
+export interface StoppedMedicationChange extends MedicationChange {
+  changeType: 'stopped';
+  stopDate: Date;
+}
+
+export interface ModifiedMedicationChange extends MedicationChange {
+  changeType: 'modified';
+  oldDosage?: string;
+  newDosage?: string;
+  changeReason?: string;
+}
+
+export type AnyMedicationChange = NewMedicationChange | StoppedMedicationChange | ModifiedMedicationChange;
+
+// AI-Generated Visit Summary Content
+export interface AIProcessedSummary {
+  // Key highlights from the visit
+  keyPoints: string[];
+  
+  // Actionable items for patient/family
+  actionItems: string[];
+  
+  // Medication changes detected by AI
+  medicationChanges: {
+    newMedications: NewMedicationChange[];
+    stoppedMedications: StoppedMedicationChange[];
+    changedMedications: ModifiedMedicationChange[];
+  };
+  
+  // Follow-up requirements
+  followUpRequired: boolean;
+  followUpDate?: Date;
+  followUpInstructions?: string;
+  
+  // AI-assessed urgency level
+  urgencyLevel: UrgencyLevel;
+  
+  // Additional AI insights
+  riskFactors?: string[];
+  recommendations?: string[];
+  warningFlags?: string[];
+  
+  // AI confidence scores (0-1)
+  confidenceScores?: {
+    overall: number;
+    medicationChanges: number;
+    urgencyAssessment: number;
+    actionItems: number;
+  };
+}
+
+// Google AI Configuration
+export interface GoogleAIConfig {
+  model: 'gemini-pro' | 'gemini-pro-vision';
+  temperature: number;
+  topK: number;
+  topP: number;
+  maxOutputTokens: number;
+  safetySettings?: Array<{
+    category: string;
+    threshold: string;
+  }>;
+}
+
+// Visit Summary Main Interface
+export interface VisitSummary {
+  id: string;
+  patientId: string;
+  medicalEventId?: string; // Link to calendar event if exists
+  
+  // Visit Details
+  visitDate: Date;
+  providerName: string;
+  providerSpecialty?: string;
+  providerId?: string; // Reference to HealthcareProvider
+  facilityName?: string;
+  facilityId?: string; // Reference to MedicalFacility
+  visitType: VisitType;
+  visitDuration?: number; // in minutes
+  
+  // Input Data
+  doctorSummary: string; // Raw doctor input
+  treatmentPlan: string; // Raw treatment plan input
+  inputMethod: VisitInputMethod;
+  voiceTranscriptionId?: string; // If voice input was used
+  
+  // Additional Visit Context
+  chiefComplaint?: string;
+  diagnosis?: string[];
+  procedures?: string[];
+  labResults?: string[];
+  imagingResults?: string[];
+  vitalSigns?: {
+    bloodPressure?: string;
+    heartRate?: number;
+    temperature?: number;
+    weight?: number;
+    height?: number;
+    oxygenSaturation?: number;
+  };
+  
+  // AI-Generated Content
+  aiProcessedSummary?: AIProcessedSummary;
+  
+  // Processing Status
+  processingStatus: AIProcessingStatus;
+  aiProcessingError?: string;
+  aiProcessingAttempts: number;
+  lastProcessingAttempt?: Date;
+  
+  // Google AI Metadata
+  googleAIConfig?: GoogleAIConfig;
+  googleAIRequestId?: string;
+  googleAIResponseMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    totalTokenCount?: number;
+    processingTime?: number;
+  };
+  
+  // Family Access Control
+  sharedWithFamily: boolean;
+  familyAccessLevel: VisitFamilyAccessLevel;
+  familyNotificationsSent?: Date[];
+  restrictedFields?: string[]; // Fields hidden from family
+  
+  // Integration with Medical Events
+  linkedMedicalEvents?: string[]; // IDs of related medical events
+  generatedFollowUpEvents?: string[]; // IDs of follow-up events created from this summary
+  
+  // Attachments and Documents
+  attachments?: Array<{
+    id: string;
+    name: string;
+    type: 'image' | 'pdf' | 'document' | 'audio' | 'other';
+    url: string;
+    size: number;
+    uploadedAt: Date;
+    uploadedBy: string;
+  }>;
+  
+  // Tags and Categories
+  tags?: string[];
+  categories?: string[];
+  
+  // Audit Trail
+  createdBy: string;
+  createdAt: Date;
+  updatedBy?: string;
+  updatedAt: Date;
+  version: number;
+  
+  // Review and Approval
+  reviewedBy?: string;
+  reviewedAt?: Date;
+  approvalStatus?: 'pending' | 'approved' | 'rejected' | 'needs_revision';
+  reviewNotes?: string;
+}
+
+// New Visit Summary Interface
+export interface NewVisitSummary {
+  patientId: string;
+  medicalEventId?: string;
+  visitDate: Date;
+  providerName: string;
+  providerSpecialty?: string;
+  providerId?: string;
+  facilityName?: string;
+  facilityId?: string;
+  visitType: VisitType;
+  visitDuration?: number;
+  doctorSummary: string;
+  treatmentPlan: string;
+  inputMethod: VisitInputMethod;
+  voiceTranscriptionId?: string;
+  chiefComplaint?: string;
+  diagnosis?: string[];
+  procedures?: string[];
+  labResults?: string[];
+  imagingResults?: string[];
+  vitalSigns?: {
+    bloodPressure?: string;
+    heartRate?: number;
+    temperature?: number;
+    weight?: number;
+    height?: number;
+    oxygenSaturation?: number;
+  };
+  sharedWithFamily: boolean;
+  familyAccessLevel: VisitFamilyAccessLevel;
+  restrictedFields?: string[];
+  tags?: string[];
+  categories?: string[];
+  createdBy: string;
+}
+
+// Visit Summary Search and Filter Types
+export interface VisitSummaryFilters {
+  patientId?: string;
+  providerName?: string;
+  providerId?: string;
+  facilityId?: string;
+  visitType?: VisitType[];
+  dateRange?: {
+    startDate: Date;
+    endDate: Date;
+  };
+  processingStatus?: AIProcessingStatus[];
+  urgencyLevel?: UrgencyLevel[];
+  tags?: string[];
+  categories?: string[];
+  hasFollowUp?: boolean;
+  hasMedicationChanges?: boolean;
+}
+
+// Visit Summary Analytics
+export interface VisitSummaryAnalytics {
+  patientId: string;
+  timeRange: {
+    startDate: Date;
+    endDate: Date;
+  };
+  
+  // Visit Statistics
+  totalVisits: number;
+  visitsByType: Record<VisitType, number>;
+  visitsByProvider: Record<string, number>;
+  visitsByMonth: Record<string, number>;
+  
+  // AI Processing Statistics
+  aiProcessingSuccessRate: number;
+  averageProcessingTime: number;
+  commonProcessingErrors: string[];
+  
+  // Medical Insights
+  commonDiagnoses: Array<{
+    diagnosis: string;
+    count: number;
+    percentage: number;
+  }>;
+  medicationChangeFrequency: {
+    newMedications: number;
+    stoppedMedications: number;
+    changedMedications: number;
+  };
+  urgencyDistribution: Record<UrgencyLevel, number>;
+  
+  // Follow-up Compliance
+  followUpRequired: number;
+  followUpCompleted: number;
+  followUpComplianceRate: number;
+  
+  // Family Engagement
+  summariesSharedWithFamily: number;
+  familyAccessLevelDistribution: Record<VisitFamilyAccessLevel, number>;
+  
+  calculatedAt: Date;
+}
+
+// Google AI Prompt Templates
+export interface GoogleAIPromptTemplate {
+  id: string;
+  name: string;
+  description: string;
+  template: string;
+  variables: string[];
+  category: 'visit_summary' | 'medication_analysis' | 'follow_up_planning' | 'risk_assessment';
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Voice Transcription Types
+export interface VoiceTranscription {
+  id: string;
+  patientId: string;
+  visitSummaryId?: string;
+  audioFileUrl: string;
+  transcriptionText: string;
+  confidence: number;
+  language: string;
+  duration: number; // in seconds
+  transcriptionService: 'google_speech' | 'azure_speech' | 'aws_transcribe';
+  processingStatus: 'pending' | 'processing' | 'completed' | 'failed';
+  processingError?: string;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface NewVoiceTranscription {
+  patientId: string;
+  visitSummaryId?: string;
+  audioFileUrl: string;
+  language: string;
+  transcriptionService: 'google_speech' | 'azure_speech' | 'aws_transcribe';
+  createdBy: string;
+}
