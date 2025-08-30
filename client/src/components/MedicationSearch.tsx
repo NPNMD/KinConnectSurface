@@ -131,13 +131,17 @@ export default function MedicationSearch({
 
   const getMedicationDisplayInfo = (medication: DrugConcept) => {
     const name = formatDrugName(medication);
-    const dosage = extractDosageFromName(name);
+    const dosage = medication.extractedDosage || extractDosageFromName(name);
     
     return {
       name: name,
       dosage: dosage,
       type: medication.tty || 'Unknown',
-      rxcui: medication.rxcui
+      rxcui: medication.rxcui,
+      source: medication.source || 'Unknown',
+      dosageForm: medication.dosageForm || 'Unknown',
+      route: medication.route || 'Unknown',
+      hasStandardDosing: !!medication.standardDosing
     };
   };
 
@@ -233,13 +237,34 @@ export default function MedicationSearch({
                     </div>
                     
                     <div className="flex items-center justify-between mt-1">
-                      <span className="text-xs text-gray-500">
-                        {getTypeDisplayName(info.type)}
-                      </span>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-xs text-gray-500">
+                          {getTypeDisplayName(info.type)}
+                        </span>
+                        {info.source && (
+                          <span className="text-xs text-blue-500 bg-blue-50 px-1 rounded">
+                            {info.source}
+                          </span>
+                        )}
+                        {info.hasStandardDosing && (
+                          <span className="text-xs text-green-600 bg-green-50 px-1 rounded">
+                            Auto-fill
+                          </span>
+                        )}
+                      </div>
                       <span className="text-xs text-gray-400">
-                        RXCUI: {info.rxcui}
+                        {info.dosageForm} • {info.route}
                       </span>
                     </div>
+                    
+                    {medication.standardDosing && (
+                      <div className="mt-2 text-xs text-gray-600">
+                        <p className="font-medium">Common doses:</p>
+                        <p className="text-gray-500">
+                          {medication.standardDosing.commonDoses.slice(0, 3).join(', ')}
+                        </p>
+                      </div>
+                    )}
                   </div>
                   
                   <div className="flex-shrink-0">

@@ -129,8 +129,8 @@ export interface Medication {
   dosageForm?: string; // tablet, capsule, liquid, etc.
   frequency: string;
   route?: string; // oral, topical, injection, etc.
-  instructions: string;
-  prescribedBy: string;
+  instructions?: string; // Now optional
+  prescribedBy?: string; // Now optional
   prescribedDate: Date;
   startDate?: Date;
   endDate?: Date;
@@ -158,8 +158,8 @@ export interface NewMedication {
   dosageForm?: string;
   frequency: string;
   route?: string;
-  instructions: string;
-  prescribedBy: string;
+  instructions?: string; // Now optional
+  prescribedBy?: string; // Now optional
   prescribedDate: Date;
   startDate?: Date;
   endDate?: Date;

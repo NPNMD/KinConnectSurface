@@ -1,9 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Calendar, Pill, Save, X, AlertTriangle, CheckCircle, Info, Clock } from 'lucide-react';
+import { Plus, Edit, Trash2, Calendar, Pill, Save, X, AlertTriangle, CheckCircle, Info, Clock, Bell } from 'lucide-react';
 import { Medication, NewMedication } from '@shared/types';
 import { DrugConcept, drugApiService } from '@/lib/drugApi';
 import MedicationSearch from './MedicationSearch';
 import MedicationScheduleManager from './MedicationScheduleManager';
+
+// API constants
+const API_BASE = 'https://us-central1-claritystream-uldp9.cloudfunctions.net/api';
+
+// Helper function to get authenticated headers
+async function getAuthHeaders(): Promise<HeadersInit> {
+  const { getIdToken } = await import('@/lib/firebase');
+  const token = await getIdToken();
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  return headers;
+}
 
 interface MedicationManagerProps {
   patientId: string;
@@ -20,7 +38,6 @@ interface MedicationFormData {
   brandName: string;
   rxcui: string;
   dosage: string;
-  strength: string;
   dosageForm: string;
   frequency: string;
   route: string;
@@ -43,7 +60,6 @@ const initialFormData: MedicationFormData = {
   brandName: '',
   rxcui: '',
   dosage: '',
-  strength: '',
   dosageForm: '',
   frequency: '',
   route: 'oral',
@@ -93,11 +109,15 @@ export default function MedicationManager({
   const [formData, setFormData] = useState<MedicationFormData>(initialFormData);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
-  const [drugInteractions, setDrugInteractions] = useState<any[]>([]);
-  const [isCheckingInteractions, setIsCheckingInteractions] = useState(false);
-  const [relatedDrugs, setRelatedDrugs] = useState<DrugConcept[]>([]);
+  // Removed RxNorm-based state variables for OpenFDA-only implementation
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [showScheduleFor, setShowScheduleFor] = useState<string | null>(null);
+  const [showReminderPrompt, setShowReminderPrompt] = useState(false);
+  const [reminderSettings, setReminderSettings] = useState({
+    enableReminders: false,
+    reminderTimes: ['15'], // minutes before dose
+    notificationMethods: ['browser'] as ('browser' | 'email' | 'sms')[]
+  });
 
   const handleDrugSelect = async (drug: DrugConcept) => {
     console.log('🔍 Selected drug:', drug);
@@ -116,58 +136,62 @@ export default function MedicationManager({
       setDuplicateWarning(`This medication (${drug.name}) is already in the patient's medication list.`);
     }
     
-    // Extract dosage information from drug name
+    // Extract complete dosage from drug name or use API data
     const dosageMatch = drug.name.match(/(\d+(?:\.\d+)?)\s*(mg|mcg|g|ml|units?|iu)/i);
-    const strengthInfo = dosageMatch ? `${dosageMatch[1]} ${dosageMatch[2].toLowerCase()}` : '';
+    const completeDosage = drug.extractedDosage || (dosageMatch ? `${dosageMatch[1]}${dosageMatch[2].toLowerCase()}` : '');
     
-    // Determine dosage form from drug name
-    let dosageForm = '';
-    const formMatches = drug.name.toLowerCase();
-    if (formMatches.includes('tablet')) dosageForm = 'tablet';
-    else if (formMatches.includes('capsule')) dosageForm = 'capsule';
-    else if (formMatches.includes('liquid') || formMatches.includes('solution')) dosageForm = 'liquid';
-    else if (formMatches.includes('cream')) dosageForm = 'cream';
-    else if (formMatches.includes('injection')) dosageForm = 'injection';
+    // Use API dosage form or determine from drug name
+    let dosageForm = drug.dosageForm || '';
+    if (!dosageForm || dosageForm === 'Unknown') {
+      const formMatches = drug.name.toLowerCase();
+      if (formMatches.includes('tablet')) dosageForm = 'tablet';
+      else if (formMatches.includes('capsule')) dosageForm = 'capsule';
+      else if (formMatches.includes('liquid') || formMatches.includes('solution')) dosageForm = 'liquid';
+      else if (formMatches.includes('cream')) dosageForm = 'cream';
+      else if (formMatches.includes('injection')) dosageForm = 'injection';
+      else dosageForm = 'tablet'; // Default to tablet if unknown
+    }
+    
+    // Auto-fill with standard dosing if available
+    let autoFillData: Partial<MedicationFormData> = {
+      dosage: completeDosage || '500mg', // Complete dosage with unit
+    };
+    
+    if (drug.standardDosing) {
+      // Use the first common dose directly (already includes unit)
+      const firstCommonDose = drug.standardDosing.commonDoses?.[0] || '';
+      
+      autoFillData = {
+        dosage: firstCommonDose || completeDosage || '500mg', // Complete dosage (e.g., "500mg", "200mg")
+        frequency: drug.standardDosing.frequency?.[0] || '',
+        instructions: drug.standardDosing.notes || '',
+        maxDailyDose: drug.standardDosing.maxDailyDose || ''
+      };
+    }
     
     setFormData(prev => ({
       ...prev,
       name: drug.name,
       rxcui: drug.rxcui,
-      strength: strengthInfo || prev.strength,
-      dosageForm: dosageForm || prev.dosageForm,
+      dosage: autoFillData.dosage || completeDosage || prev.dosage, // Complete dosage with unit
+      dosageForm: dosageForm || prev.dosageForm, // This is the form (e.g., "tablet")
+      route: drug.route || prev.route,
       // Try to extract generic/brand info from the drug name and type
-      genericName: drug.tty === 'SCD' ? drug.name : prev.genericName,
+      genericName: drug.tty === 'SCD' ? drug.name : (drug.synonym || prev.genericName),
       brandName: drug.tty === 'SBD' ? drug.name : prev.brandName,
+      // Auto-fill other standard dosing data
+      frequency: autoFillData.frequency || prev.frequency,
+      instructions: autoFillData.instructions || prev.instructions,
+      maxDailyDose: autoFillData.maxDailyDose || prev.maxDailyDose
     }));
     
-    // Get related drugs and check interactions
-    if (drug.rxcui) {
-      try {
-        const [related, interactions] = await Promise.all([
-          drugApiService.getRelatedDrugs(drug.rxcui),
-          checkDrugInteractions(drug.rxcui)
-        ]);
-        
-        setRelatedDrugs(related);
-      } catch (error) {
-        console.error('Error fetching drug details:', error);
-      }
-    }
+    // Note: Removed RxNorm API calls for pure OpenFDA implementation
+    // All dosing info is now handled through the OpenFDA data above
+    console.log('✅ Drug selection completed with OpenFDA data');
   };
   
-  const checkDrugInteractions = async (rxcui: string) => {
-    if (!rxcui || medications.length === 0) return;
-    
-    setIsCheckingInteractions(true);
-    try {
-      const interactions = await drugApiService.getDrugInteractions(rxcui);
-      setDrugInteractions(interactions);
-    } catch (error) {
-      console.error('Error checking drug interactions:', error);
-    } finally {
-      setIsCheckingInteractions(false);
-    }
-  };
+  // Note: Drug interactions removed for OpenFDA-only implementation
+  // Can be re-implemented with OpenFDA data if needed
 
   const handleInputChange = (field: keyof MedicationFormData, value: string | boolean | number) => {
     setFormData(prev => ({
@@ -194,19 +218,10 @@ export default function MedicationManager({
     switch (field) {
       case 'dosage':
         if (typeof value === 'string' && value.trim()) {
-          // Basic dosage format validation
-          const dosagePattern = /^(\d+(?:\.\d+)?)\s*(tablet|capsule|ml|mg|g|tsp|tbsp|drop|spray|puff|unit)s?\s*(once|twice|three times|four times|every \d+ hours?|as needed)?/i;
+          // Complete dosage validation - includes unit
+          const dosagePattern = /^\d+(?:\.\d+)?\s*(mg|mcg|g|ml|units?|iu|tablet|capsule)s?$/i;
           if (!dosagePattern.test(value.trim())) {
-            errors.dosage = 'Please enter a valid dosage (e.g., "1 tablet", "5 ml", "2 capsules")';
-          }
-        }
-        break;
-        
-      case 'strength':
-        if (typeof value === 'string' && value.trim()) {
-          const strengthPattern = /^\d+(?:\.\d+)?\s*(mg|mcg|g|ml|units?|iu)$/i;
-          if (!strengthPattern.test(value.trim())) {
-            errors.strength = 'Please enter a valid strength (e.g., "10mg", "500mg", "5ml")';
+            errors.dosage = 'Please enter a valid dosage (e.g., "500mg", "1 tablet", "5ml")';
           }
         }
         break;
@@ -230,9 +245,7 @@ export default function MedicationManager({
     if (!formData.name.trim()) errors.name = 'Medication name is required';
     if (!formData.dosage.trim()) errors.dosage = 'Dosage is required';
     if (!formData.frequency.trim()) errors.frequency = 'Frequency is required';
-    if (!formData.instructions.trim()) errors.instructions = 'Instructions are required';
-    if (!formData.prescribedBy.trim()) errors.prescribedBy = 'Prescribing doctor is required';
-    if (!formData.prescribedDate) errors.prescribedDate = 'Prescribed date is required';
+    // Instructions and prescribedBy are now optional
     
     // Dosage form validation
     if (formData.dosageForm && !COMMON_DOSAGE_FORMS.includes(formData.dosageForm.toLowerCase())) {
@@ -274,13 +287,12 @@ export default function MedicationManager({
         brandName: formData.brandName?.trim() || undefined,
         rxcui: formData.rxcui || undefined,
         dosage: formData.dosage.trim(),
-        strength: formData.strength?.trim() || undefined,
         dosageForm: formData.dosageForm?.trim() || undefined,
         frequency: formData.frequency,
         route: formData.route || undefined,
-        instructions: formData.instructions.trim(),
-        prescribedBy: formData.prescribedBy.trim(),
-        prescribedDate: new Date(formData.prescribedDate),
+        instructions: formData.instructions?.trim() || undefined, // Now optional
+        prescribedBy: formData.prescribedBy?.trim() || undefined, // Now optional
+        prescribedDate: formData.prescribedDate ? new Date(formData.prescribedDate) : new Date(), // Default to today if not provided
         startDate: formData.startDate ? new Date(formData.startDate) : undefined,
         endDate: formData.endDate ? new Date(formData.endDate) : undefined,
         isActive: true,
@@ -302,10 +314,15 @@ export default function MedicationManager({
         console.log('🔍 MedicationManager: Adding new medication');
         await onAddMedication(medicationData);
         setIsAddingMedication(false);
+        
+        // Show reminder prompt for new medications
+        setShowReminderPrompt(true);
       }
 
       console.log('✅ MedicationManager: Medication saved successfully');
-      handleCancel(); // Reset form and clear state
+      if (!showReminderPrompt) {
+        handleCancel(); // Reset form and clear state only if not showing reminder prompt
+      }
     } catch (error) {
       console.error('❌ MedicationManager: Error saving medication:', error);
       // You could add a toast notification here for better UX
@@ -321,12 +338,11 @@ export default function MedicationManager({
       brandName: medication.brandName || '',
       rxcui: medication.rxcui || '',
       dosage: medication.dosage,
-      strength: medication.strength || '',
       dosageForm: medication.dosageForm || '',
       frequency: medication.frequency,
       route: medication.route || 'oral',
-      instructions: medication.instructions,
-      prescribedBy: medication.prescribedBy,
+      instructions: medication.instructions || '',
+      prescribedBy: medication.prescribedBy || '',
       prescribedDate: medication.prescribedDate instanceof Date
         ? medication.prescribedDate.toISOString().split('T')[0]
         : new Date(medication.prescribedDate).toISOString().split('T')[0],
@@ -356,8 +372,6 @@ export default function MedicationManager({
     setEditingMedicationId(null);
     setFormData(initialFormData);
     setValidationErrors({});
-    setDrugInteractions([]);
-    setRelatedDrugs([]);
     setDuplicateWarning(null);
   };
 
@@ -425,32 +439,7 @@ export default function MedicationManager({
               </div>
             )}
 
-            {/* Drug Interactions Warning */}
-            {drugInteractions.length > 0 && (
-              <div className="bg-red-50 border border-red-200 rounded-md p-3">
-                <div className="flex items-start space-x-2">
-                  <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <h4 className="text-sm font-medium text-red-800">Potential Drug Interactions</h4>
-                    <div className="mt-2 space-y-1">
-                      {drugInteractions.slice(0, 3).map((interaction, index) => (
-                        <p key={index} className="text-xs text-red-700">
-                          • {interaction.description || 'Interaction detected with existing medications'}
-                        </p>
-                      ))}
-                      {drugInteractions.length > 3 && (
-                        <p className="text-xs text-red-600">
-                          +{drugInteractions.length - 3} more interactions found
-                        </p>
-                      )}
-                    </div>
-                    <p className="text-xs text-red-600 mt-2">
-                      Please consult with the prescribing physician before adding this medication.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Drug interactions removed for OpenFDA-only implementation */}
 
             {/* Medication Search */}
             <div>
@@ -464,15 +453,9 @@ export default function MedicationManager({
                 <div className="mt-2 space-y-1">
                   <p className="text-sm text-gray-600">
                     Selected: <span className="font-medium">{formData.name}</span>
-                    {formData.rxcui && <span className="text-gray-400 ml-2">(RXCUI: {formData.rxcui})</span>}
+                    {formData.rxcui && <span className="text-gray-400 ml-2">(ID: {formData.rxcui})</span>}
                   </p>
-                  {relatedDrugs.length > 0 && (
-                    <div className="text-xs text-gray-500">
-                      <span className="font-medium">Related medications:</span>{' '}
-                      {relatedDrugs.slice(0, 3).map(drug => drug.name).join(', ')}
-                      {relatedDrugs.length > 3 && ` +${relatedDrugs.length - 3} more`}
-                    </div>
-                  )}
+                  {/* Related drugs removed for OpenFDA-only implementation */}
                 </div>
               )}
             </div>
@@ -502,24 +485,13 @@ export default function MedicationManager({
                   onChange={(e) => handleInputChange('dosage', e.target.value)}
                   className={`input ${validationErrors.dosage ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
                   required
-                  placeholder="e.g., 1 tablet, 5ml, 2 capsules"
+                  placeholder="e.g., 500mg, 200mg, 1 tablet"
                 />
+                <p className="mt-1 text-xs text-gray-500">
+                  Complete dosage with unit (auto-filled from search)
+                </p>
                 {validationErrors.dosage && (
                   <p className="mt-1 text-sm text-red-600">{validationErrors.dosage}</p>
-                )}
-              </div>
-
-              <div>
-                <label className="label">Strength</label>
-                <input
-                  type="text"
-                  value={formData.strength}
-                  onChange={(e) => handleInputChange('strength', e.target.value)}
-                  className={`input ${validationErrors.strength ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
-                  placeholder="e.g., 10mg, 500mg, 5ml"
-                />
-                {validationErrors.strength && (
-                  <p className="mt-1 text-sm text-red-600">{validationErrors.strength}</p>
                 )}
               </div>
 
@@ -584,14 +556,13 @@ export default function MedicationManager({
               </div>
 
               <div>
-                <label className="label">Prescribed By *</label>
+                <label className="label">Prescribed By</label>
                 <input
                   type="text"
                   value={formData.prescribedBy}
                   onChange={(e) => handleInputChange('prescribedBy', e.target.value)}
                   className={`input ${validationErrors.prescribedBy ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
-                  required
-                  placeholder="Doctor's name"
+                  placeholder="Doctor's name (optional)"
                 />
                 {validationErrors.prescribedBy && (
                   <p className="mt-1 text-sm text-red-600">{validationErrors.prescribedBy}</p>
@@ -599,13 +570,12 @@ export default function MedicationManager({
               </div>
 
               <div>
-                <label className="label">Prescribed Date *</label>
+                <label className="label">Prescribed Date</label>
                 <input
                   type="date"
                   value={formData.prescribedDate}
                   onChange={(e) => handleInputChange('prescribedDate', e.target.value)}
                   className={`input ${validationErrors.prescribedDate ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
-                  required
                 />
                 {validationErrors.prescribedDate && (
                   <p className="mt-1 text-sm text-red-600">{validationErrors.prescribedDate}</p>
@@ -637,14 +607,13 @@ export default function MedicationManager({
             </div>
 
             <div>
-              <label className="label">Instructions *</label>
+              <label className="label">Extra Instructions</label>
               <textarea
                 value={formData.instructions}
                 onChange={(e) => handleInputChange('instructions', e.target.value)}
                 className={`input ${validationErrors.instructions ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''}`}
                 rows={3}
-                required
-                placeholder="e.g., Take with food, avoid alcohol, take on empty stomach"
+                placeholder="e.g., Take with food, avoid alcohol, take on empty stomach (optional)"
               />
               {validationErrors.instructions && (
                 <p className="mt-1 text-sm text-red-600">{validationErrors.instructions}</p>
@@ -689,13 +658,7 @@ export default function MedicationManager({
               </label>
             </div>
 
-            {/* Checking interactions indicator */}
-            {isCheckingInteractions && (
-              <div className="bg-blue-50 border border-blue-200 rounded-md p-3 flex items-center space-x-2">
-                <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                <p className="text-sm text-blue-800">Checking for drug interactions...</p>
-              </div>
-            )}
+            {/* Drug interaction checking removed for OpenFDA-only implementation */}
 
             <div className="flex justify-end space-x-3 pt-4">
               <button
@@ -725,6 +688,182 @@ export default function MedicationManager({
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Medication Reminder Prompt */}
+      {showReminderPrompt && (
+        <div className="bg-blue-50 rounded-lg p-6 border border-blue-200">
+          <div className="flex items-start space-x-3">
+            <div className="flex-shrink-0">
+              <Bell className="w-6 h-6 text-blue-600" />
+            </div>
+            <div className="flex-1">
+              <h4 className="text-lg font-medium text-blue-900 mb-2">
+                Set Up Medication Reminders
+              </h4>
+              <p className="text-blue-800 mb-4">
+                Would you like to receive reminders for this medication? We can send you notifications to help you stay on track with your medication schedule.
+              </p>
+              
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="enableReminders"
+                    checked={reminderSettings.enableReminders}
+                    onChange={(e) => setReminderSettings(prev => ({
+                      ...prev,
+                      enableReminders: e.target.checked
+                    }))}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="enableReminders" className="text-sm font-medium text-blue-900">
+                    Enable medication reminders
+                  </label>
+                </div>
+                
+                {reminderSettings.enableReminders && (
+                  <div className="ml-6 space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-blue-900 mb-2">
+                        Reminder timing (minutes before dose)
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {['5', '10', '15', '30', '60'].map(minutes => (
+                          <label key={minutes} className="flex items-center space-x-1">
+                            <input
+                              type="checkbox"
+                              checked={reminderSettings.reminderTimes.includes(minutes)}
+                              onChange={(e) => {
+                                setReminderSettings(prev => ({
+                                  ...prev,
+                                  reminderTimes: e.target.checked
+                                    ? [...prev.reminderTimes, minutes]
+                                    : prev.reminderTimes.filter(t => t !== minutes)
+                                }));
+                              }}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-sm text-blue-800">{minutes} min</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-blue-900 mb-2">
+                        Notification methods
+                      </label>
+                      <div className="space-y-2">
+                        <label className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            checked={reminderSettings.notificationMethods.includes('browser')}
+                            onChange={(e) => {
+                              setReminderSettings(prev => ({
+                                ...prev,
+                                notificationMethods: e.target.checked
+                                  ? [...prev.notificationMethods.filter(m => m !== 'browser'), 'browser']
+                                  : prev.notificationMethods.filter(m => m !== 'browser')
+                              }));
+                            }}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm text-blue-800">Browser notifications</span>
+                        </label>
+                        <label className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            checked={reminderSettings.notificationMethods.includes('email')}
+                            onChange={(e) => {
+                              setReminderSettings(prev => ({
+                                ...prev,
+                                notificationMethods: e.target.checked
+                                  ? [...prev.notificationMethods.filter(m => m !== 'email'), 'email']
+                                  : prev.notificationMethods.filter(m => m !== 'email')
+                              }));
+                            }}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm text-blue-800">Email notifications</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              <div className="flex justify-end space-x-3 mt-6">
+                <button
+                  onClick={() => {
+                    setShowReminderPrompt(false);
+                    setReminderSettings({
+                      enableReminders: false,
+                      reminderTimes: ['15'],
+                      notificationMethods: ['browser']
+                    });
+                    handleCancel();
+                  }}
+                  className="btn-secondary"
+                >
+                  Skip for now
+                </button>
+                <button
+                  onClick={async () => {
+                    if (reminderSettings.enableReminders) {
+                      try {
+                        // Request browser notification permission
+                        if (reminderSettings.notificationMethods.includes('browser')) {
+                          if ('Notification' in window && Notification.permission === 'default') {
+                            await Notification.requestPermission();
+                          }
+                        }
+                        
+                        // Get the most recently added medication ID
+                        const latestMedication = medications[medications.length - 1];
+                        if (latestMedication) {
+                          // Save reminder settings to backend
+                          const response = await fetch(`${API_BASE}/medication-reminders`, {
+                            method: 'POST',
+                            headers: await getAuthHeaders(),
+                            body: JSON.stringify({
+                              medicationId: latestMedication.id,
+                              reminderTimes: reminderSettings.reminderTimes,
+                              notificationMethods: reminderSettings.notificationMethods,
+                              isActive: true
+                            })
+                          });
+                          
+                          if (response.ok) {
+                            console.log('✅ Medication reminder settings saved successfully');
+                            alert('Medication reminders have been set up successfully!');
+                          } else {
+                            console.error('❌ Failed to save reminder settings');
+                            alert('Failed to set up reminders. Please try again.');
+                          }
+                        }
+                      } catch (error) {
+                        console.error('❌ Error setting up reminders:', error);
+                        alert('Failed to set up reminders. Please try again.');
+                      }
+                    }
+                    
+                    setShowReminderPrompt(false);
+                    setReminderSettings({
+                      enableReminders: false,
+                      reminderTimes: ['15'],
+                      notificationMethods: ['browser']
+                    });
+                    handleCancel();
+                  }}
+                  className="btn-primary"
+                >
+                  {reminderSettings.enableReminders ? 'Set Up Reminders' : 'Continue'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

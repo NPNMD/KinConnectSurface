@@ -779,7 +779,13 @@ app.get('/drugs/search', authenticate, async (req, res) => {
                         const brandNames = result.openfda?.brand_name || [];
                         const genericNames = result.openfda?.generic_name || [];
                         const rxcuis = result.openfda?.rxcui || [];
-                        // Add brand names
+                        const dosageForms = result.openfda?.dosage_form || [];
+                        const routes = result.openfda?.route || [];
+                        const strengths = result.openfda?.substance_name || [];
+                        // Extract dosage instructions and indications
+                        const dosageInstructions = result.dosage_and_administration?.[0] || '';
+                        const indications = result.indications_and_usage?.[0] || '';
+                        // Add brand names with enhanced data
                         brandNames.forEach((name, index) => {
                             allResults.push({
                                 rxcui: rxcuis[index] || `fda_brand_${Date.now()}_${index}`,
@@ -787,7 +793,12 @@ app.get('/drugs/search', authenticate, async (req, res) => {
                                 synonym: genericNames[0] || name,
                                 tty: 'SBD', // Semantic Branded Drug
                                 language: 'ENG',
-                                source: 'FDA_Brand'
+                                source: 'FDA_Brand',
+                                dosageForm: dosageForms[0] || 'Unknown',
+                                route: routes[0] || 'Unknown',
+                                strength: strengths[0] || name,
+                                dosageInstructions: dosageInstructions,
+                                indications: indications
                             });
                         });
                         // Add generic names if different
@@ -799,7 +810,12 @@ app.get('/drugs/search', authenticate, async (req, res) => {
                                     synonym: brandNames[0] || name,
                                     tty: 'SCD', // Semantic Clinical Drug
                                     language: 'ENG',
-                                    source: 'FDA_Generic'
+                                    source: 'FDA_Generic',
+                                    dosageForm: dosageForms[0] || 'Unknown',
+                                    route: routes[0] || 'Unknown',
+                                    strength: strengths[0] || name,
+                                    dosageInstructions: dosageInstructions,
+                                    indications: indications
                                 });
                             }
                         });
@@ -823,6 +839,12 @@ app.get('/drugs/search', authenticate, async (req, res) => {
                             const genericNames = result.openfda?.generic_name || [];
                             const brandNames = result.openfda?.brand_name || [];
                             const rxcuis = result.openfda?.rxcui || [];
+                            const dosageForms = result.openfda?.dosage_form || [];
+                            const routes = result.openfda?.route || [];
+                            const strengths = result.openfda?.substance_name || [];
+                            // Extract dosage instructions and indications
+                            const dosageInstructions = result.dosage_and_administration?.[0] || '';
+                            const indications = result.indications_and_usage?.[0] || '';
                             genericNames.forEach((name, index) => {
                                 // Avoid duplicates
                                 if (!allResults.some(r => r.name.toLowerCase() === name.toLowerCase())) {
@@ -832,7 +854,12 @@ app.get('/drugs/search', authenticate, async (req, res) => {
                                         synonym: brandNames[0] || name,
                                         tty: 'SCD',
                                         language: 'ENG',
-                                        source: 'FDA_Generic'
+                                        source: 'FDA_Generic',
+                                        dosageForm: dosageForms[0] || 'Unknown',
+                                        route: routes[0] || 'Unknown',
+                                        strength: strengths[0] || name,
+                                        dosageInstructions: dosageInstructions,
+                                        indications: indications
                                     });
                                 }
                             });
@@ -844,50 +871,159 @@ app.get('/drugs/search', authenticate, async (req, res) => {
                 console.warn('OpenFDA generic search failed:', error);
             }
         }
-        // Strategy 3: RxNorm Fallback (for comprehensive coverage)
+        // Strategy 3: OpenFDA Substance Name Search (for comprehensive coverage)
         if (allResults.length < 5) {
             try {
-                console.log('🔍 Falling back to RxNorm search');
-                const rxnormUrl = `https://rxnav.nlm.nih.gov/REST/drugs.json?name=${encodeURIComponent(cleanQuery)}`;
-                const rxnormResponse = await fetch(rxnormUrl);
-                if (rxnormResponse.ok) {
-                    const rxnormData = await rxnormResponse.json();
-                    if (rxnormData?.drugGroup?.conceptGroup) {
-                        for (const group of rxnormData.drugGroup.conceptGroup) {
-                            if (group.conceptProperties && Array.isArray(group.conceptProperties)) {
-                                for (const concept of group.conceptProperties.slice(0, 10)) {
+                console.log('🔍 Trying OpenFDA substance search');
+                const fdaSubstanceUrl = `https://api.fda.gov/drug/label.json?search=openfda.substance_name:${encodeURIComponent(cleanQuery)}*&limit=${Math.min(searchLimit, 15)}`;
+                const fdaSubstanceResponse = await fetch(fdaSubstanceUrl);
+                if (fdaSubstanceResponse.ok) {
+                    const fdaSubstanceData = await fdaSubstanceResponse.json();
+                    if (fdaSubstanceData?.results) {
+                        for (const result of fdaSubstanceData.results) {
+                            const substanceNames = result.openfda?.substance_name || [];
+                            const brandNames = result.openfda?.brand_name || [];
+                            const genericNames = result.openfda?.generic_name || [];
+                            const dosageForms = result.openfda?.dosage_form || [];
+                            const routes = result.openfda?.route || [];
+                            // Extract dosage instructions and indications
+                            const dosageInstructions = result.dosage_and_administration?.[0] || '';
+                            const indications = result.indications_and_usage?.[0] || '';
+                            // Add substance-based results
+                            substanceNames.forEach((substance, index) => {
+                                if (!allResults.some(r => r.name.toLowerCase() === substance.toLowerCase())) {
                                     allResults.push({
-                                        rxcui: concept.rxcui,
-                                        name: concept.name,
-                                        synonym: concept.synonym || concept.name,
-                                        tty: concept.tty,
-                                        language: concept.language || 'ENG',
-                                        source: 'RxNorm'
+                                        rxcui: `fda_substance_${Date.now()}_${index}`,
+                                        name: substance,
+                                        synonym: genericNames[0] || brandNames[0] || substance,
+                                        tty: 'IN', // Ingredient
+                                        language: 'ENG',
+                                        source: 'FDA_Substance',
+                                        dosageForm: dosageForms[0] || 'Unknown',
+                                        route: routes[0] || 'Unknown',
+                                        strength: substance,
+                                        dosageInstructions: dosageInstructions,
+                                        indications: indications
                                     });
                                 }
-                            }
+                            });
                         }
                     }
                 }
             }
             catch (error) {
-                console.warn('RxNorm fallback search failed:', error);
+                console.warn('OpenFDA substance search failed:', error);
             }
         }
-        // Remove duplicates and format results
+        // Add standard dosing recommendations for common medications
+        const standardDosing = {
+            'metformin': {
+                commonDoses: ['500mg', '850mg', '1000mg'],
+                standardInstructions: [
+                    '500mg twice daily with meals',
+                    '850mg once daily with dinner',
+                    '1000mg twice daily with meals'
+                ],
+                maxDailyDose: '2550mg',
+                commonForm: 'tablet',
+                route: 'oral'
+            },
+            'ibuprofen': {
+                commonDoses: ['200mg', '400mg', '600mg', '800mg'],
+                standardInstructions: [
+                    '200mg every 4-6 hours as needed',
+                    '400mg every 6-8 hours as needed',
+                    '600mg every 6-8 hours as needed',
+                    '800mg every 8 hours as needed'
+                ],
+                maxDailyDose: '3200mg',
+                commonForm: 'tablet',
+                route: 'oral'
+            },
+            'acetaminophen': {
+                commonDoses: ['325mg', '500mg', '650mg'],
+                standardInstructions: [
+                    '325mg every 4-6 hours as needed',
+                    '500mg every 6 hours as needed',
+                    '650mg every 6 hours as needed'
+                ],
+                maxDailyDose: '3000mg',
+                commonForm: 'tablet',
+                route: 'oral'
+            },
+            'aspirin': {
+                commonDoses: ['81mg', '325mg', '500mg'],
+                standardInstructions: [
+                    '81mg once daily (low dose)',
+                    '325mg every 4 hours as needed',
+                    '500mg every 4 hours as needed'
+                ],
+                maxDailyDose: '4000mg',
+                commonForm: 'tablet',
+                route: 'oral'
+            },
+            'lisinopril': {
+                commonDoses: ['2.5mg', '5mg', '10mg', '20mg', '40mg'],
+                standardInstructions: [
+                    '2.5mg once daily',
+                    '5mg once daily',
+                    '10mg once daily',
+                    '20mg once daily',
+                    '40mg once daily'
+                ],
+                maxDailyDose: '40mg',
+                commonForm: 'tablet',
+                route: 'oral'
+            },
+            'atorvastatin': {
+                commonDoses: ['10mg', '20mg', '40mg', '80mg'],
+                standardInstructions: [
+                    '10mg once daily in the evening',
+                    '20mg once daily in the evening',
+                    '40mg once daily in the evening',
+                    '80mg once daily in the evening'
+                ],
+                maxDailyDose: '80mg',
+                commonForm: 'tablet',
+                route: 'oral'
+            }
+        };
+        // Remove duplicates and format results with enhanced dosage data
         const seenNames = new Set();
         const drugConcepts = [];
         for (const concept of allResults) {
             const normalizedName = concept.name.toLowerCase().trim();
             if (!seenNames.has(normalizedName) && drugConcepts.length < searchLimit) {
                 seenNames.add(normalizedName);
+                // Extract dosage from name if available
+                const dosageMatch = concept.name.match(/(\d+(?:\.\d+)?)\s*(mg|mcg|g|ml|units?|iu)/i);
+                const extractedDosage = dosageMatch ? `${dosageMatch[1]} ${dosageMatch[2].toLowerCase()}` : '';
+                // Find standard dosing for this medication
+                const genericName = (concept.synonym || concept.name).toLowerCase();
+                let standardDosingInfo = null;
+                // Check if this medication has standard dosing recommendations
+                for (const [medName, dosing] of Object.entries(standardDosing)) {
+                    if (genericName.includes(medName) || concept.name.toLowerCase().includes(medName)) {
+                        standardDosingInfo = dosing;
+                        break;
+                    }
+                }
                 drugConcepts.push({
                     rxcui: concept.rxcui,
                     name: concept.name,
                     synonym: concept.synonym || concept.name,
                     tty: concept.tty,
                     language: concept.language || 'ENG',
-                    source: concept.source || 'Unknown'
+                    source: concept.source || 'Unknown',
+                    // Enhanced dosage information
+                    dosageForm: concept.dosageForm || 'Unknown',
+                    route: concept.route || 'Unknown',
+                    strength: concept.strength || concept.name,
+                    extractedDosage: extractedDosage,
+                    dosageInstructions: concept.dosageInstructions || '',
+                    indications: concept.indications || '',
+                    // Standard dosing recommendations
+                    standardDosing: standardDosingInfo
                 });
             }
         }
@@ -1116,6 +1252,182 @@ app.get('/drugs/:rxcui/related', authenticate, async (req, res) => {
     }
     catch (error) {
         console.error('Error getting related drugs:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Get detailed medication information with dosing recommendations
+app.get('/drugs/:rxcui/dosing', authenticate, async (req, res) => {
+    try {
+        const { rxcui } = req.params;
+        if (!rxcui) {
+            return res.status(400).json({
+                success: false,
+                error: 'RXCUI parameter is required'
+            });
+        }
+        console.log('🔍 Getting detailed dosing info for RXCUI:', rxcui);
+        // Get basic drug properties from RxNorm
+        const propertiesUrl = `https://rxnav.nlm.nih.gov/REST/rxcui/${rxcui}/properties.json`;
+        const propertiesResponse = await fetch(propertiesUrl);
+        let drugInfo = {};
+        if (propertiesResponse.ok) {
+            const propertiesData = await propertiesResponse.json();
+            if (propertiesData?.properties) {
+                drugInfo = propertiesData.properties;
+            }
+        }
+        // Try to get additional info from OpenFDA if we have a drug name
+        let fdaInfo = {};
+        if (drugInfo.name) {
+            try {
+                const fdaUrl = `https://api.fda.gov/drug/label.json?search=openfda.generic_name:"${encodeURIComponent(drugInfo.name)}"&limit=1`;
+                const fdaResponse = await fetch(fdaUrl);
+                if (fdaResponse.ok) {
+                    const fdaData = await fdaResponse.json();
+                    if (fdaData?.results?.[0]) {
+                        const result = fdaData.results[0];
+                        fdaInfo = {
+                            dosageForm: result.openfda?.dosage_form?.[0] || 'Unknown',
+                            route: result.openfda?.route?.[0] || 'Unknown',
+                            dosageInstructions: result.dosage_and_administration?.[0] || '',
+                            indications: result.indications_and_usage?.[0] || '',
+                            brandNames: result.openfda?.brand_name || [],
+                            genericNames: result.openfda?.generic_name || []
+                        };
+                    }
+                }
+            }
+            catch (error) {
+                console.warn('Failed to get FDA info:', error);
+            }
+        }
+        // Standard dosing recommendations
+        const standardDosing = {
+            'metformin': {
+                commonDoses: ['500mg', '850mg', '1000mg'],
+                standardInstructions: [
+                    '500mg twice daily with meals',
+                    '850mg once daily with dinner',
+                    '1000mg twice daily with meals'
+                ],
+                maxDailyDose: '2550mg',
+                commonForm: 'tablet',
+                route: 'oral',
+                timing: ['with meals'],
+                frequency: ['once daily', 'twice daily'],
+                notes: 'Take with food to reduce stomach upset'
+            },
+            'ibuprofen': {
+                commonDoses: ['200mg', '400mg', '600mg', '800mg'],
+                standardInstructions: [
+                    '200mg every 4-6 hours as needed',
+                    '400mg every 6-8 hours as needed',
+                    '600mg every 6-8 hours as needed',
+                    '800mg every 8 hours as needed'
+                ],
+                maxDailyDose: '3200mg',
+                commonForm: 'tablet',
+                route: 'oral',
+                timing: ['with food'],
+                frequency: ['as needed', 'every 4-6 hours', 'every 6-8 hours'],
+                notes: 'Take with food to reduce stomach irritation'
+            },
+            'acetaminophen': {
+                commonDoses: ['325mg', '500mg', '650mg'],
+                standardInstructions: [
+                    '325mg every 4-6 hours as needed',
+                    '500mg every 6 hours as needed',
+                    '650mg every 6 hours as needed'
+                ],
+                maxDailyDose: '3000mg',
+                commonForm: 'tablet',
+                route: 'oral',
+                timing: ['any time'],
+                frequency: ['as needed', 'every 4-6 hours'],
+                notes: 'Do not exceed maximum daily dose'
+            },
+            'aspirin': {
+                commonDoses: ['81mg', '325mg', '500mg'],
+                standardInstructions: [
+                    '81mg once daily (low dose)',
+                    '325mg every 4 hours as needed',
+                    '500mg every 4 hours as needed'
+                ],
+                maxDailyDose: '4000mg',
+                commonForm: 'tablet',
+                route: 'oral',
+                timing: ['with food'],
+                frequency: ['once daily', 'every 4 hours'],
+                notes: 'Take with food to reduce stomach irritation'
+            },
+            'lisinopril': {
+                commonDoses: ['2.5mg', '5mg', '10mg', '20mg', '40mg'],
+                standardInstructions: [
+                    '2.5mg once daily',
+                    '5mg once daily',
+                    '10mg once daily',
+                    '20mg once daily',
+                    '40mg once daily'
+                ],
+                maxDailyDose: '40mg',
+                commonForm: 'tablet',
+                route: 'oral',
+                timing: ['same time each day'],
+                frequency: ['once daily'],
+                notes: 'Take at the same time each day'
+            },
+            'atorvastatin': {
+                commonDoses: ['10mg', '20mg', '40mg', '80mg'],
+                standardInstructions: [
+                    '10mg once daily in the evening',
+                    '20mg once daily in the evening',
+                    '40mg once daily in the evening',
+                    '80mg once daily in the evening'
+                ],
+                maxDailyDose: '80mg',
+                commonForm: 'tablet',
+                route: 'oral',
+                timing: ['evening'],
+                frequency: ['once daily'],
+                notes: 'Take in the evening for best effectiveness'
+            }
+        };
+        // Find standard dosing for this medication
+        const genericName = (drugInfo.synonym || drugInfo.name || '').toLowerCase();
+        let standardDosingInfo = null;
+        for (const [medName, dosing] of Object.entries(standardDosing)) {
+            if (genericName.includes(medName)) {
+                standardDosingInfo = dosing;
+                break;
+            }
+        }
+        // Combine all information
+        const detailedDrugInfo = {
+            rxcui: drugInfo.rxcui || rxcui,
+            name: drugInfo.name || 'Unknown',
+            synonym: drugInfo.synonym || drugInfo.name,
+            tty: drugInfo.tty || 'Unknown',
+            language: drugInfo.language || 'ENG',
+            // FDA information
+            dosageForm: fdaInfo.dosageForm || 'Unknown',
+            route: fdaInfo.route || 'Unknown',
+            dosageInstructions: fdaInfo.dosageInstructions || '',
+            indications: fdaInfo.indications || '',
+            brandNames: fdaInfo.brandNames || [],
+            genericNames: fdaInfo.genericNames || [],
+            // Standard dosing recommendations
+            standardDosing: standardDosingInfo
+        };
+        res.json({
+            success: true,
+            data: detailedDrugInfo
+        });
+    }
+    catch (error) {
+        console.error('Error getting detailed drug dosing info:', error);
         res.status(500).json({
             success: false,
             error: 'Internal server error'
@@ -1610,6 +1922,60 @@ app.post('/medications', authenticate, async (req, res) => {
     }
     catch (error) {
         console.error('Error adding medication:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Delete medication
+app.delete('/medications/:medicationId', authenticate, async (req, res) => {
+    try {
+        const { medicationId } = req.params;
+        const userId = req.user.uid;
+        console.log('🗑️ Deleting medication:', { medicationId, userId });
+        // Get the medication document
+        const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+        if (!medicationDoc.exists) {
+            return res.status(404).json({
+                success: false,
+                error: 'Medication not found'
+            });
+        }
+        const medicationData = medicationDoc.data();
+        // Check if user owns this medication
+        if (medicationData?.patientId !== userId) {
+            // Check family access with delete permissions
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', userId)
+                .where('patientId', '==', medicationData?.patientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+            // Check if user has delete permissions
+            const accessData = familyAccess.docs[0].data();
+            if (!accessData.permissions?.canDelete) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Insufficient permissions to delete medications'
+                });
+            }
+        }
+        // Delete the medication
+        await medicationDoc.ref.delete();
+        console.log('✅ Medication deleted successfully:', medicationId);
+        res.json({
+            success: true,
+            message: 'Medication deleted successfully'
+        });
+    }
+    catch (error) {
+        console.error('Error deleting medication:', error);
         res.status(500).json({
             success: false,
             error: 'Internal server error'

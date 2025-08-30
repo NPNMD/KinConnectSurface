@@ -9,6 +9,25 @@ export interface DrugConcept {
   synonym?: string;
   tty?: string; // Term type
   language?: string;
+  source?: string;
+  // Enhanced dosage information
+  dosageForm?: string;
+  route?: string;
+  strength?: string;
+  extractedDosage?: string;
+  dosageInstructions?: string;
+  indications?: string;
+  // Standard dosing recommendations
+  standardDosing?: {
+    commonDoses: string[];
+    standardInstructions: string[];
+    maxDailyDose: string;
+    commonForm: string;
+    route: string;
+    timing: string[];
+    frequency: string[];
+    notes: string;
+  };
 }
 
 export interface DrugSearchResult {
@@ -149,6 +168,23 @@ class DrugApiService {
     } catch (error) {
       console.error('Error getting related drugs:', error);
       return [];
+    }
+  }
+
+  /**
+   * Get detailed dosing information for a specific drug
+   * @param rxcui - RxNorm Concept Unique Identifier
+   */
+  async getDrugDosingInfo(rxcui: string): Promise<DrugConcept | null> {
+    try {
+      const response = await apiClient.get<{ success: boolean; data: DrugConcept }>(
+        `/drugs/${rxcui}/dosing`
+      );
+
+      return response.data || null;
+    } catch (error) {
+      console.error('Error getting drug dosing info:', error);
+      return null;
     }
   }
 }
