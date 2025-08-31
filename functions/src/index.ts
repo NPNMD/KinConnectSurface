@@ -1880,9 +1880,31 @@ app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req,
 		const userId = (req as any).user.uid;
 		const { takenAt, notes } = req.body;
 		
-		const eventDoc = await firestore.collection('medication_calendar_events').doc(eventId).get();
+		console.log('💊 Marking medication as taken:', { eventId, userId, takenAt, notes });
+		
+		// Validate eventId
+		if (!eventId || typeof eventId !== 'string') {
+			console.log('❌ Invalid eventId:', eventId);
+			return res.status(400).json({
+				success: false,
+				error: 'Invalid event ID'
+			});
+		}
+		
+		// Get the event document with better error handling
+		let eventDoc;
+		try {
+			eventDoc = await firestore.collection('medication_calendar_events').doc(eventId).get();
+		} catch (firestoreError) {
+			console.error('❌ Firestore error getting event:', firestoreError);
+			return res.status(500).json({
+				success: false,
+				error: 'Database error retrieving event'
+			});
+		}
 		
 		if (!eventDoc.exists) {
+			console.log('❌ Medication event not found:', eventId);
 			return res.status(404).json({
 				success: false,
 				error: 'Medication event not found'
@@ -1890,70 +1912,199 @@ app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req,
 		}
 		
 		const eventData = eventDoc.data();
+		if (!eventData) {
+			console.log('❌ Event data is null:', eventId);
+			return res.status(404).json({
+				success: false,
+				error: 'Event data not found'
+			});
+		}
+		
+		console.log('📋 Current event data:', {
+			id: eventId,
+			patientId: eventData.patientId,
+			status: eventData.status,
+			medicationName: eventData.medicationName
+		});
 		
 		// Check if user has access to this event
-		if (eventData?.patientId !== userId) {
-			// Check family access
-			const familyAccess = await firestore.collection('family_calendar_access')
-				.where('familyMemberId', '==', userId)
-				.where('patientId', '==', eventData?.patientId)
-				.where('status', '==', 'active')
-				.get();
+		if (eventData.patientId !== userId) {
+			console.log('🔍 Checking family access for user:', userId, 'to patient:', eventData.patientId);
 			
-			if (familyAccess.empty) {
-				return res.status(403).json({
+			try {
+				// Check family access
+				const familyAccess = await firestore.collection('family_calendar_access')
+					.where('familyMemberId', '==', userId)
+					.where('patientId', '==', eventData.patientId)
+					.where('status', '==', 'active')
+					.get();
+				
+				if (familyAccess.empty) {
+					console.log('❌ Access denied for user:', userId, 'to event:', eventId);
+					return res.status(403).json({
+						success: false,
+						error: 'Access denied'
+					});
+				}
+				
+				console.log('✅ Family access verified for user:', userId);
+			} catch (accessError) {
+				console.error('❌ Error checking family access:', accessError);
+				return res.status(500).json({
 					success: false,
-					error: 'Access denied'
+					error: 'Error verifying access permissions'
 				});
 			}
 		}
 		
-		// Update the event
-		const updateData = {
+		// Prepare update data with better error handling
+		const updateData: any = {
 			status: 'taken',
-			actualTakenDateTime: takenAt ? admin.firestore.Timestamp.fromDate(new Date(takenAt)) : admin.firestore.Timestamp.now(),
 			takenBy: userId,
-			notes: notes || undefined,
-			isOnTime: true, // Calculate based on scheduled time vs actual time
 			updatedAt: admin.firestore.Timestamp.now()
 		};
 		
-		// Calculate if taken on time (within 30 minutes of scheduled time)
-		if (eventData?.scheduledDateTime) {
-			const scheduledTime = eventData.scheduledDateTime.toDate();
-			const takenTime = updateData.actualTakenDateTime.toDate();
-			const timeDiffMinutes = Math.abs((takenTime.getTime() - scheduledTime.getTime()) / (1000 * 60));
-			updateData.isOnTime = timeDiffMinutes <= 30;
+		// Handle takenAt timestamp safely with better validation
+		try {
+			let takenDateTime: Date;
 			
-			if (timeDiffMinutes > 30) {
-				updateData.status = 'late';
-				(updateData as any).minutesLate = Math.round(timeDiffMinutes);
+			if (takenAt) {
+				if (typeof takenAt === 'string') {
+					// Try to parse the string as a date
+					takenDateTime = new Date(takenAt);
+					if (isNaN(takenDateTime.getTime())) {
+						console.warn('⚠️ Invalid takenAt date string, using current time:', takenAt);
+						takenDateTime = new Date();
+					}
+				} else if (takenAt instanceof Date) {
+					takenDateTime = takenAt;
+				} else {
+					console.warn('⚠️ Invalid takenAt type, using current time:', typeof takenAt);
+					takenDateTime = new Date();
+				}
+			} else {
+				takenDateTime = new Date();
 			}
+			
+			updateData.actualTakenDateTime = admin.firestore.Timestamp.fromDate(takenDateTime);
+			console.log('📅 Set actualTakenDateTime to:', takenDateTime.toISOString());
+		} catch (dateError) {
+			console.error('❌ Error processing takenAt date:', dateError);
+			updateData.actualTakenDateTime = admin.firestore.Timestamp.now();
 		}
 		
-		await eventDoc.ref.update(updateData);
+		// Add notes if provided and valid - ONLY add if not undefined
+		if (notes !== undefined && notes !== null && typeof notes === 'string' && notes.trim().length > 0) {
+			updateData.notes = notes.trim();
+		}
+		// Do not add notes field at all if it's undefined, null, or empty
 		
-		// Get updated event
-		const updatedDoc = await eventDoc.ref.get();
-		const updatedData = updatedDoc.data();
+		// Calculate if taken on time (within 30 minutes of scheduled time)
+		updateData.isOnTime = true; // Default to true
+		
+		try {
+			if (eventData.scheduledDateTime && updateData.actualTakenDateTime) {
+				const scheduledTime = eventData.scheduledDateTime.toDate();
+				const takenTime = updateData.actualTakenDateTime.toDate();
+				const timeDiffMinutes = Math.abs((takenTime.getTime() - scheduledTime.getTime()) / (1000 * 60));
+				updateData.isOnTime = timeDiffMinutes <= 30;
+				
+				if (timeDiffMinutes > 30) {
+					updateData.status = 'late';
+					updateData.minutesLate = Math.round(timeDiffMinutes);
+				}
+				
+				console.log('⏰ Time calculation:', {
+					scheduledTime: scheduledTime.toISOString(),
+					takenTime: takenTime.toISOString(),
+					timeDiffMinutes,
+					isOnTime: updateData.isOnTime,
+					status: updateData.status
+				});
+			}
+		} catch (timeError) {
+			console.error('❌ Error calculating timing:', timeError);
+			// Don't fail the request, just log the error
+		}
+		
+		console.log('📝 Final update data for event:', {
+			...updateData,
+			actualTakenDateTime: updateData.actualTakenDateTime?.toDate()?.toISOString()
+		});
+		
+		// Update the event document with better error handling
+		try {
+			await eventDoc.ref.update(updateData);
+			console.log('✅ Event updated successfully');
+		} catch (updateError) {
+			console.error('❌ Error updating event document:', updateError);
+			return res.status(500).json({
+				success: false,
+				error: 'Failed to update medication event',
+				details: updateError instanceof Error ? updateError.message : 'Unknown update error'
+			});
+		}
+		
+		// Get updated event with error handling
+		let updatedDoc;
+		let updatedData;
+		try {
+			updatedDoc = await eventDoc.ref.get();
+			updatedData = updatedDoc.data();
+		} catch (fetchError) {
+			console.error('❌ Error fetching updated event:', fetchError);
+			// Still return success since the update worked
+			return res.json({
+				success: true,
+				data: {
+					id: eventId,
+					status: updateData.status,
+					takenBy: updateData.takenBy,
+					actualTakenDateTime: updateData.actualTakenDateTime.toDate(),
+					updatedAt: updateData.updatedAt.toDate()
+				},
+				message: 'Medication marked as taken successfully'
+			});
+		}
+		
+		console.log('✅ Medication marked as taken successfully:', eventId);
+		
+		// Return the response with safe data conversion
+		const responseData: any = {
+			id: eventId,
+			...updatedData
+		};
+		
+		// Safely convert timestamps to dates
+		try {
+			if (updatedData?.scheduledDateTime?.toDate) {
+				responseData.scheduledDateTime = updatedData.scheduledDateTime.toDate();
+			}
+			if (updatedData?.actualTakenDateTime?.toDate) {
+				responseData.actualTakenDateTime = updatedData.actualTakenDateTime.toDate();
+			}
+			if (updatedData?.createdAt?.toDate) {
+				responseData.createdAt = updatedData.createdAt.toDate();
+			}
+			if (updatedData?.updatedAt?.toDate) {
+				responseData.updatedAt = updatedData.updatedAt.toDate();
+			}
+		} catch (conversionError) {
+			console.warn('⚠️ Error converting timestamps:', conversionError);
+		}
 		
 		res.json({
 			success: true,
-			data: {
-				id: eventId,
-				...updatedData,
-				scheduledDateTime: updatedData?.scheduledDateTime?.toDate(),
-				actualTakenDateTime: updatedData?.actualTakenDateTime?.toDate(),
-				createdAt: updatedData?.createdAt?.toDate(),
-				updatedAt: updatedData?.updatedAt?.toDate()
-			},
+			data: responseData,
 			message: 'Medication marked as taken successfully'
 		});
 	} catch (error) {
-		console.error('Error marking medication as taken:', error);
+		console.error('❌ Error marking medication as taken:', error);
+		console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
 		res.status(500).json({
 			success: false,
-			error: 'Internal server error'
+			error: 'Internal server error',
+			details: error instanceof Error ? error.message : 'Unknown error'
 		});
 	}
 });

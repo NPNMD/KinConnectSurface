@@ -227,23 +227,52 @@ class MedicationCalendarApi {
     notes?: string
   ): Promise<ApiResponse<MedicationCalendarEvent>> {
     try {
+      console.log('🔧 MedicationCalendarApi: Marking medication as taken:', { eventId, takenAt, notes });
+      
       const headers = await getAuthHeaders();
+      console.log('🔧 MedicationCalendarApi: Headers prepared for mark taken request');
+      
+      // Build request body without undefined values
+      const requestBody: any = {};
+      
+      if (takenAt) {
+        requestBody.takenAt = takenAt.toISOString();
+      }
+      
+      if (notes !== undefined && notes !== null && typeof notes === 'string' && notes.trim().length > 0) {
+        requestBody.notes = notes.trim();
+      }
+      
+      console.log('🔧 MedicationCalendarApi: Request body (cleaned):', requestBody);
+      
       const response = await fetch(`${API_BASE}/medication-calendar/events/${eventId}/taken`, {
         method: 'POST',
         headers,
         credentials: 'include',
-        body: JSON.stringify({
-          takenAt: takenAt?.toISOString(),
-          notes
-        }),
+        body: JSON.stringify(requestBody),
       });
 
-      return await response.json();
+      console.log('🔧 MedicationCalendarApi: Response status:', response.status);
+      console.log('🔧 MedicationCalendarApi: Response ok:', response.ok);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ MedicationCalendarApi: HTTP error:', response.status, errorText);
+        return {
+          success: false,
+          error: `HTTP ${response.status}: ${errorText}`
+        };
+      }
+
+      const result = await response.json();
+      console.log('🔧 MedicationCalendarApi: Mark taken response:', result);
+      
+      return result;
     } catch (error) {
-      console.error('Error marking medication as taken:', error);
+      console.error('❌ MedicationCalendarApi: Error marking medication as taken:', error);
       return {
         success: false,
-        error: 'Failed to mark medication as taken'
+        error: error instanceof Error ? error.message : 'Failed to mark medication as taken'
       };
     }
   }

@@ -177,6 +177,7 @@ export default function Dashboard() {
 
   const handleMarkMedicationTaken = async (medicationId: string) => {
     try {
+      console.log('🔧 Dashboard: Marking medication as taken:', medicationId);
       setTakingMedication(medicationId);
       
       const result = await medicationCalendarApi.markMedicationTaken(
@@ -184,7 +185,10 @@ export default function Dashboard() {
         new Date()
       );
 
+      console.log('🔧 Dashboard: Mark medication result:', result);
+
       if (result.success) {
+        console.log('✅ Dashboard: Medication marked as taken successfully');
         await fetchTodaysMedications();
         // Remove from selected medications if it was selected
         setSelectedMedications(prev => {
@@ -192,9 +196,15 @@ export default function Dashboard() {
           newSet.delete(medicationId);
           return newSet;
         });
+      } else {
+        console.error('❌ Dashboard: Failed to mark medication as taken:', result.error);
+        // You could add a toast notification here to show the error to the user
+        alert(`Failed to mark medication as taken: ${result.error}`);
       }
     } catch (error) {
-      console.error('Error marking medication as taken:', error);
+      console.error('❌ Dashboard: Error marking medication as taken:', error);
+      // You could add a toast notification here to show the error to the user
+      alert('An unexpected error occurred while marking the medication as taken. Please try again.');
     } finally {
       setTakingMedication(null);
     }
@@ -202,16 +212,30 @@ export default function Dashboard() {
 
   const handleMarkAllSelectedTaken = async () => {
     try {
-      const promises = Array.from(selectedMedications).map(id => 
+      console.log('🔧 Dashboard: Marking all selected medications as taken:', Array.from(selectedMedications));
+      
+      const promises = Array.from(selectedMedications).map(id =>
         medicationCalendarApi.markMedicationTaken(id, new Date())
       );
       
-      await Promise.all(promises);
+      const results = await Promise.all(promises);
+      console.log('🔧 Dashboard: Mark all selected results:', results);
+      
+      // Check if any failed
+      const failedResults = results.filter(result => !result.success);
+      if (failedResults.length > 0) {
+        console.error('❌ Dashboard: Some medications failed to be marked as taken:', failedResults);
+        alert(`Failed to mark ${failedResults.length} medication(s) as taken. Please try again.`);
+      } else {
+        console.log('✅ Dashboard: All selected medications marked as taken successfully');
+      }
+      
       await fetchTodaysMedications();
       setSelectedMedications(new Set());
       setSelectAllChecked(false);
     } catch (error) {
-      console.error('Error marking selected medications as taken:', error);
+      console.error('❌ Dashboard: Error marking selected medications as taken:', error);
+      alert('An unexpected error occurred while marking medications as taken. Please try again.');
     }
   };
 
