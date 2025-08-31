@@ -112,8 +112,25 @@ export default function Dashboard() {
       console.log('🔍 Dashboard: Medication events result:', result);
 
       if (result.success && result.data) {
-        // Show all events, not just 'scheduled' ones
+        // Filter to show only medications that need action (not taken or late) AND are for today
         const todaysEvents = result.data
+          .filter(event => {
+            const eventDate = new Date(event.scheduledDateTime);
+            const isToday = eventDate >= startOfDay && eventDate <= endOfDay;
+            const needsAction = !['taken', 'late'].includes(event.status); // Hide both taken and late
+            
+            console.log('🔍 Event filter check:', {
+              eventId: event.id,
+              medicationName: event.medicationName,
+              scheduledDateTime: eventDate.toISOString(),
+              status: event.status,
+              isToday,
+              needsAction,
+              willShow: isToday && needsAction
+            });
+            
+            return isToday && needsAction;
+          })
           .map(event => ({
             id: event.id,
             medicationName: event.medicationName,
@@ -125,7 +142,8 @@ export default function Dashboard() {
           }))
           .sort((a, b) => a.scheduledDateTime.getTime() - b.scheduledDateTime.getTime());
 
-        console.log('🔍 Dashboard: Processed today\'s events:', todaysEvents);
+        console.log('🔍 Dashboard: Processed today\'s events (filtered by date and status):', todaysEvents);
+        console.log('🔍 Dashboard: Total events received:', result.data.length, 'Showing (today + not taken):', todaysEvents.length);
         setTodaysMedications(todaysEvents);
       }
     } catch (error) {

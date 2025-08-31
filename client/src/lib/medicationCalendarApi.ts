@@ -239,7 +239,8 @@ class MedicationCalendarApi {
         requestBody.takenAt = takenAt.toISOString();
       }
       
-      if (notes !== undefined && notes !== null && typeof notes === 'string' && notes.trim().length > 0) {
+      // Only include notes if it's a non-empty string
+      if (notes && typeof notes === 'string' && notes.trim().length > 0) {
         requestBody.notes = notes.trim();
       }
       

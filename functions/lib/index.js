@@ -119,6 +119,15 @@ async function authenticate(req, res, next) {
 async function generateCalendarEventsForSchedule(scheduleId, scheduleData) {
     try {
         console.log('📅 Generating calendar events for schedule:', scheduleId);
+        // 🔥 DUPLICATE PREVENTION: Check if events already exist for this schedule
+        const existingEventsQuery = await firestore.collection('medication_calendar_events')
+            .where('medicationScheduleId', '==', scheduleId)
+            .limit(1)
+            .get();
+        if (!existingEventsQuery.empty) {
+            console.log('⚠️ Calendar events already exist for schedule:', scheduleId, '- skipping generation');
+            return;
+        }
         const startDate = scheduleData.startDate.toDate();
         const endDate = scheduleData.endDate ? scheduleData.endDate.toDate() : null;
         const isIndefinite = scheduleData.isIndefinite;
@@ -189,16 +198,40 @@ async function generateCalendarEventsForSchedule(scheduleId, scheduleData) {
             // Move to next day
             currentDate.setDate(currentDate.getDate() + 1);
         }
-        // Batch create all events
+        // Batch create all events with additional duplicate prevention
         if (events.length > 0) {
             console.log(`📅 Creating ${events.length} calendar events for schedule:`, scheduleId);
-            const batch = firestore.batch();
-            events.forEach(event => {
-                const eventRef = firestore.collection('medication_calendar_events').doc();
-                batch.set(eventRef, event);
+            // 🔥 FINAL DUPLICATE CHECK: Verify no events exist for these exact times
+            const eventTimestamps = events.map(e => e.scheduledDateTime);
+            const duplicateCheckQuery = await firestore.collection('medication_calendar_events')
+                .where('medicationId', '==', scheduleData.medicationId)
+                .where('patientId', '==', scheduleData.patientId)
+                .get();
+            const existingTimes = new Set();
+            duplicateCheckQuery.docs.forEach(doc => {
+                const data = doc.data();
+                if (data.scheduledDateTime) {
+                    existingTimes.add(data.scheduledDateTime.toDate().toISOString());
+                }
             });
-            await batch.commit();
-            console.log('✅ Calendar events created successfully');
+            // Filter out events that would create duplicates
+            const uniqueEvents = events.filter(event => {
+                const eventTimeISO = event.scheduledDateTime.toDate().toISOString();
+                return !existingTimes.has(eventTimeISO);
+            });
+            if (uniqueEvents.length > 0) {
+                console.log(`📅 Creating ${uniqueEvents.length} unique calendar events (filtered ${events.length - uniqueEvents.length} duplicates)`);
+                const batch = firestore.batch();
+                uniqueEvents.forEach(event => {
+                    const eventRef = firestore.collection('medication_calendar_events').doc();
+                    batch.set(eventRef, event);
+                });
+                await batch.commit();
+                console.log('✅ Calendar events created successfully');
+            }
+            else {
+                console.log('ℹ️ No new calendar events to create (all would be duplicates)');
+            }
         }
         else {
             console.log('ℹ️ No calendar events to create (all would be in the past)');
@@ -1708,74 +1741,271 @@ app.get('/medication-calendar/adherence', authenticate, async (req, res) => {
 // Mark medication as taken
 app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req, res) => {
     try {
+        console.log('🚀 === MARK MEDICATION AS TAKEN - START ===');
         const { eventId } = req.params;
         const userId = req.user.uid;
         const { takenAt, notes } = req.body;
-        const eventDoc = await firestore.collection('medication_calendar_events').doc(eventId).get();
+        console.log('💊 Marking medication as taken:', { eventId, userId, takenAt, notes });
+        console.log('💊 Request body type check:', {
+            takenAtType: typeof takenAt,
+            notesType: typeof notes,
+            bodyKeys: Object.keys(req.body),
+            rawBody: req.body
+        });
+        console.log('💊 Step 1: Initial validation - PASSED');
+        // Validate eventId
+        if (!eventId || typeof eventId !== 'string') {
+            console.log('❌ Step 2: Invalid eventId:', eventId);
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid event ID'
+            });
+        }
+        console.log('💊 Step 2: EventId validation - PASSED');
+        // Get the event document with better error handling
+        console.log('💊 Step 3: Attempting to fetch event from Firestore...');
+        let eventDoc;
+        try {
+            eventDoc = await firestore.collection('medication_calendar_events').doc(eventId).get();
+            console.log('💊 Step 3: Firestore fetch - SUCCESS');
+        }
+        catch (firestoreError) {
+            console.error('❌ Step 3: Firestore error getting event:', firestoreError);
+            console.error('❌ Step 3: Error details:', {
+                message: firestoreError instanceof Error ? firestoreError.message : 'Unknown error',
+                code: firestoreError?.code || 'Unknown code',
+                stack: firestoreError instanceof Error ? firestoreError.stack : 'No stack'
+            });
+            return res.status(500).json({
+                success: false,
+                error: 'Database error retrieving event',
+                details: firestoreError instanceof Error ? firestoreError.message : 'Unknown error'
+            });
+        }
         if (!eventDoc.exists) {
+            console.log('❌ Step 4: Medication event not found:', eventId);
             return res.status(404).json({
                 success: false,
                 error: 'Medication event not found'
             });
         }
+        console.log('💊 Step 4: Event exists - PASSED');
         const eventData = eventDoc.data();
+        if (!eventData) {
+            console.log('❌ Step 5: Event data is null:', eventId);
+            return res.status(404).json({
+                success: false,
+                error: 'Event data not found'
+            });
+        }
+        console.log('💊 Step 5: Event data retrieved - PASSED');
+        console.log('📋 Current event data:', {
+            id: eventId,
+            patientId: eventData.patientId,
+            status: eventData.status,
+            medicationName: eventData.medicationName
+        });
         // Check if user has access to this event
-        if (eventData?.patientId !== userId) {
-            // Check family access
-            const familyAccess = await firestore.collection('family_calendar_access')
-                .where('familyMemberId', '==', userId)
-                .where('patientId', '==', eventData?.patientId)
-                .where('status', '==', 'active')
-                .get();
-            if (familyAccess.empty) {
-                return res.status(403).json({
+        if (eventData.patientId !== userId) {
+            console.log('🔍 Checking family access for user:', userId, 'to patient:', eventData.patientId);
+            try {
+                // Check family access
+                const familyAccess = await firestore.collection('family_calendar_access')
+                    .where('familyMemberId', '==', userId)
+                    .where('patientId', '==', eventData.patientId)
+                    .where('status', '==', 'active')
+                    .get();
+                if (familyAccess.empty) {
+                    console.log('❌ Access denied for user:', userId, 'to event:', eventId);
+                    return res.status(403).json({
+                        success: false,
+                        error: 'Access denied'
+                    });
+                }
+                console.log('✅ Family access verified for user:', userId);
+            }
+            catch (accessError) {
+                console.error('❌ Error checking family access:', accessError);
+                return res.status(500).json({
                     success: false,
-                    error: 'Access denied'
+                    error: 'Error verifying access permissions'
                 });
             }
         }
-        // Update the event
+        // Prepare update data with better error handling
         const updateData = {
             status: 'taken',
-            actualTakenDateTime: takenAt ? admin.firestore.Timestamp.fromDate(new Date(takenAt)) : admin.firestore.Timestamp.now(),
             takenBy: userId,
-            notes: notes || undefined,
-            isOnTime: true, // Calculate based on scheduled time vs actual time
             updatedAt: admin.firestore.Timestamp.now()
         };
+        console.log('💊 Initial update data:', updateData);
+        // Handle takenAt timestamp safely with better validation
+        try {
+            let takenDateTime;
+            if (takenAt) {
+                if (typeof takenAt === 'string') {
+                    // Try to parse the string as a date
+                    takenDateTime = new Date(takenAt);
+                    if (isNaN(takenDateTime.getTime())) {
+                        console.warn('⚠️ Invalid takenAt date string, using current time:', takenAt);
+                        takenDateTime = new Date();
+                    }
+                }
+                else if (takenAt instanceof Date) {
+                    takenDateTime = takenAt;
+                }
+                else {
+                    console.warn('⚠️ Invalid takenAt type, using current time:', typeof takenAt);
+                    takenDateTime = new Date();
+                }
+            }
+            else {
+                takenDateTime = new Date();
+            }
+            updateData.actualTakenDateTime = admin.firestore.Timestamp.fromDate(takenDateTime);
+            console.log('📅 Set actualTakenDateTime to:', takenDateTime.toISOString());
+        }
+        catch (dateError) {
+            console.error('❌ Error processing takenAt date:', dateError);
+            updateData.actualTakenDateTime = admin.firestore.Timestamp.now();
+        }
+        // Add notes if provided and valid - ONLY add if not undefined
+        if (notes && typeof notes === 'string' && notes.trim().length > 0) {
+            updateData.notes = notes.trim();
+        }
+        // Do not add notes field at all if it's undefined, null, or empty
         // Calculate if taken on time (within 30 minutes of scheduled time)
-        if (eventData?.scheduledDateTime) {
-            const scheduledTime = eventData.scheduledDateTime.toDate();
-            const takenTime = updateData.actualTakenDateTime.toDate();
-            const timeDiffMinutes = Math.abs((takenTime.getTime() - scheduledTime.getTime()) / (1000 * 60));
-            updateData.isOnTime = timeDiffMinutes <= 30;
-            if (timeDiffMinutes > 30) {
-                updateData.status = 'late';
-                updateData.minutesLate = Math.round(timeDiffMinutes);
+        updateData.isOnTime = true; // Default to true
+        try {
+            if (eventData.scheduledDateTime && updateData.actualTakenDateTime) {
+                const scheduledTime = eventData.scheduledDateTime.toDate();
+                const takenTime = updateData.actualTakenDateTime.toDate();
+                const timeDiffMinutes = Math.abs((takenTime.getTime() - scheduledTime.getTime()) / (1000 * 60));
+                updateData.isOnTime = timeDiffMinutes <= 30;
+                // 🔥 FIX: Always mark as 'taken' when user explicitly marks it
+                // Only set to 'late' if it's extremely late (more than 4 hours) for tracking purposes
+                if (timeDiffMinutes > 240) { // 4 hours instead of 30 minutes
+                    updateData.status = 'late';
+                    updateData.minutesLate = Math.round(timeDiffMinutes);
+                }
+                else {
+                    // Keep status as 'taken' for reasonable delays
+                    updateData.status = 'taken';
+                }
+                console.log('⏰ Time calculation:', {
+                    scheduledTime: scheduledTime.toISOString(),
+                    takenTime: takenTime.toISOString(),
+                    timeDiffMinutes,
+                    isOnTime: updateData.isOnTime,
+                    status: updateData.status
+                });
             }
         }
-        await eventDoc.ref.update(updateData);
-        // Get updated event
-        const updatedDoc = await eventDoc.ref.get();
-        const updatedData = updatedDoc.data();
+        catch (timeError) {
+            console.error('❌ Error calculating timing:', timeError);
+            // Don't fail the request, just log the error
+        }
+        console.log('📝 Final update data for event:', {
+            ...updateData,
+            actualTakenDateTime: updateData.actualTakenDateTime?.toDate()?.toISOString()
+        });
+        // Validate update data before sending to Firestore
+        const cleanUpdateData = {};
+        Object.keys(updateData).forEach(key => {
+            const value = updateData[key];
+            if (value !== undefined && value !== null) {
+                cleanUpdateData[key] = value;
+            }
+        });
+        console.log('📝 Cleaned update data for Firestore:', cleanUpdateData);
+        // Update the event document with better error handling
+        console.log('💊 Step 6: Attempting Firestore update...');
+        try {
+            await eventDoc.ref.update(cleanUpdateData);
+            console.log('✅ Step 6: Event updated successfully');
+        }
+        catch (updateError) {
+            console.error('❌ Step 6: Error updating event document:', updateError);
+            console.error('❌ Step 6: Update data that caused error:', cleanUpdateData);
+            console.error('❌ Step 6: Error details:', {
+                message: updateError instanceof Error ? updateError.message : 'Unknown error',
+                code: updateError?.code || 'Unknown code',
+                stack: updateError instanceof Error ? updateError.stack : 'No stack'
+            });
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to update medication event',
+                details: updateError instanceof Error ? updateError.message : 'Unknown update error'
+            });
+        }
+        // Get updated event with error handling
+        let updatedDoc;
+        let updatedData;
+        try {
+            updatedDoc = await eventDoc.ref.get();
+            updatedData = updatedDoc.data();
+        }
+        catch (fetchError) {
+            console.error('❌ Error fetching updated event:', fetchError);
+            // Still return success since the update worked
+            return res.json({
+                success: true,
+                data: {
+                    id: eventId,
+                    status: cleanUpdateData.status,
+                    takenBy: cleanUpdateData.takenBy,
+                    actualTakenDateTime: cleanUpdateData.actualTakenDateTime?.toDate(),
+                    updatedAt: cleanUpdateData.updatedAt?.toDate()
+                },
+                message: 'Medication marked as taken successfully'
+            });
+        }
+        console.log('✅ Medication marked as taken successfully:', eventId);
+        // Return the response with safe data conversion
+        const responseData = {
+            id: eventId,
+            ...updatedData
+        };
+        // Safely convert timestamps to dates
+        try {
+            if (updatedData?.scheduledDateTime?.toDate) {
+                responseData.scheduledDateTime = updatedData.scheduledDateTime.toDate();
+            }
+            if (updatedData?.actualTakenDateTime?.toDate) {
+                responseData.actualTakenDateTime = updatedData.actualTakenDateTime.toDate();
+            }
+            if (updatedData?.createdAt?.toDate) {
+                responseData.createdAt = updatedData.createdAt.toDate();
+            }
+            if (updatedData?.updatedAt?.toDate) {
+                responseData.updatedAt = updatedData.updatedAt.toDate();
+            }
+        }
+        catch (conversionError) {
+            console.warn('⚠️ Error converting timestamps:', conversionError);
+        }
         res.json({
             success: true,
-            data: {
-                id: eventId,
-                ...updatedData,
-                scheduledDateTime: updatedData?.scheduledDateTime?.toDate(),
-                actualTakenDateTime: updatedData?.actualTakenDateTime?.toDate(),
-                createdAt: updatedData?.createdAt?.toDate(),
-                updatedAt: updatedData?.updatedAt?.toDate()
-            },
+            data: responseData,
             message: 'Medication marked as taken successfully'
         });
     }
     catch (error) {
-        console.error('Error marking medication as taken:', error);
+        console.error('❌ === MARK MEDICATION AS TAKEN - FATAL ERROR ===');
+        console.error('❌ Error marking medication as taken:', error);
+        console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+        console.error('❌ Error details:', {
+            message: error instanceof Error ? error.message : 'Unknown error',
+            code: error?.code || 'Unknown code',
+            name: error instanceof Error ? error.name : 'Unknown name',
+            eventId: req.params?.eventId || 'Unknown eventId',
+            userId: req?.user?.uid || 'Unknown userId',
+            requestBody: req.body
+        });
         res.status(500).json({
             success: false,
-            error: 'Internal server error'
+            error: 'Internal server error',
+            details: error instanceof Error ? error.message : 'Unknown error'
         });
     }
 });
@@ -2511,16 +2741,18 @@ app.put('/medications/:medicationId', authenticate, async (req, res) => {
         const { medicationId } = req.params;
         const userId = req.user.uid;
         const updateData = req.body;
-        console.log('📝 Updating medication:', { medicationId, userId });
+        console.log('📝 Updating medication:', { medicationId, userId, updateData });
         // Get the medication document
         const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
         if (!medicationDoc.exists) {
+            console.log('❌ Medication not found:', medicationId);
             return res.status(404).json({
                 success: false,
                 error: 'Medication not found'
             });
         }
         const medicationData = medicationDoc.data();
+        console.log('📋 Current medication data:', medicationData);
         // Check if user owns this medication
         if (medicationData?.patientId !== userId) {
             // Check family access with edit permissions
@@ -2544,25 +2776,37 @@ app.put('/medications/:medicationId', authenticate, async (req, res) => {
                 });
             }
         }
-        // Prepare update data
+        // Prepare update data - be more careful with date handling
         const updatedMedication = {
-            ...updateData,
             updatedAt: admin.firestore.Timestamp.now()
         };
-        // Convert date strings to timestamps if provided
-        if (updateData.prescribedDate) {
-            updatedMedication.prescribedDate = admin.firestore.Timestamp.fromDate(new Date(updateData.prescribedDate));
-        }
-        if (updateData.startDate) {
-            updatedMedication.startDate = admin.firestore.Timestamp.fromDate(new Date(updateData.startDate));
-        }
-        if (updateData.endDate) {
-            updatedMedication.endDate = admin.firestore.Timestamp.fromDate(new Date(updateData.endDate));
-        }
+        // Only convert date fields if they are actually date strings, not other data
+        Object.keys(updateData).forEach(key => {
+            if (key === 'prescribedDate' || key === 'startDate' || key === 'endDate') {
+                // Only convert if the value is a valid date string
+                if (updateData[key] && typeof updateData[key] === 'string') {
+                    try {
+                        updatedMedication[key] = admin.firestore.Timestamp.fromDate(new Date(updateData[key]));
+                    }
+                    catch (dateError) {
+                        console.warn(`⚠️ Invalid date format for ${key}:`, updateData[key]);
+                        // Skip invalid dates
+                    }
+                }
+                else if (updateData[key] instanceof Date) {
+                    updatedMedication[key] = admin.firestore.Timestamp.fromDate(updateData[key]);
+                }
+            }
+            else {
+                // For non-date fields, copy directly
+                updatedMedication[key] = updateData[key];
+            }
+        });
         // Remove fields that shouldn't be updated
         delete updatedMedication.id;
         delete updatedMedication.createdAt;
         delete updatedMedication.patientId;
+        console.log('📝 Final update data:', updatedMedication);
         await medicationDoc.ref.update(updatedMedication);
         // Get updated medication
         const updatedDoc = await medicationDoc.ref.get();
@@ -2582,10 +2826,12 @@ app.put('/medications/:medicationId', authenticate, async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Error updating medication:', error);
+        console.error('❌ Error updating medication:', error);
+        console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
         res.status(500).json({
             success: false,
-            error: 'Internal server error'
+            error: 'Internal server error',
+            details: error instanceof Error ? error.message : 'Unknown error'
         });
     }
 });

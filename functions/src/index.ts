@@ -91,6 +91,17 @@ async function generateCalendarEventsForSchedule(scheduleId: string, scheduleDat
 	try {
 		console.log('📅 Generating calendar events for schedule:', scheduleId);
 		
+		// 🔥 DUPLICATE PREVENTION: Check if events already exist for this schedule
+		const existingEventsQuery = await firestore.collection('medication_calendar_events')
+			.where('medicationScheduleId', '==', scheduleId)
+			.limit(1)
+			.get();
+		
+		if (!existingEventsQuery.empty) {
+			console.log('⚠️ Calendar events already exist for schedule:', scheduleId, '- skipping generation');
+			return;
+		}
+		
 		const startDate = scheduleData.startDate.toDate();
 		const endDate = scheduleData.endDate ? scheduleData.endDate.toDate() : null;
 		const isIndefinite = scheduleData.isIndefinite;
@@ -171,18 +182,45 @@ async function generateCalendarEventsForSchedule(scheduleId: string, scheduleDat
 			currentDate.setDate(currentDate.getDate() + 1);
 		}
 		
-		// Batch create all events
+		// Batch create all events with additional duplicate prevention
 		if (events.length > 0) {
 			console.log(`📅 Creating ${events.length} calendar events for schedule:`, scheduleId);
 			
-			const batch = firestore.batch();
-			events.forEach(event => {
-				const eventRef = firestore.collection('medication_calendar_events').doc();
-				batch.set(eventRef, event);
+			// 🔥 FINAL DUPLICATE CHECK: Verify no events exist for these exact times
+			const eventTimestamps = events.map(e => e.scheduledDateTime);
+			const duplicateCheckQuery = await firestore.collection('medication_calendar_events')
+				.where('medicationId', '==', scheduleData.medicationId)
+				.where('patientId', '==', scheduleData.patientId)
+				.get();
+			
+			const existingTimes = new Set();
+			duplicateCheckQuery.docs.forEach(doc => {
+				const data = doc.data();
+				if (data.scheduledDateTime) {
+					existingTimes.add(data.scheduledDateTime.toDate().toISOString());
+				}
 			});
 			
-			await batch.commit();
-			console.log('✅ Calendar events created successfully');
+			// Filter out events that would create duplicates
+			const uniqueEvents = events.filter(event => {
+				const eventTimeISO = event.scheduledDateTime.toDate().toISOString();
+				return !existingTimes.has(eventTimeISO);
+			});
+			
+			if (uniqueEvents.length > 0) {
+				console.log(`📅 Creating ${uniqueEvents.length} unique calendar events (filtered ${events.length - uniqueEvents.length} duplicates)`);
+				
+				const batch = firestore.batch();
+				uniqueEvents.forEach(event => {
+					const eventRef = firestore.collection('medication_calendar_events').doc();
+					batch.set(eventRef, event);
+				});
+				
+				await batch.commit();
+				console.log('✅ Calendar events created successfully');
+			} else {
+				console.log('ℹ️ No new calendar events to create (all would be duplicates)');
+			}
 		} else {
 			console.log('ℹ️ No calendar events to create (all would be in the past)');
 		}
@@ -1876,49 +1914,68 @@ app.get('/medication-calendar/adherence', authenticate, async (req, res) => {
 // Mark medication as taken
 app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req, res) => {
 	try {
+		console.log('🚀 === MARK MEDICATION AS TAKEN - START ===');
 		const { eventId } = req.params;
 		const userId = (req as any).user.uid;
 		const { takenAt, notes } = req.body;
 		
 		console.log('💊 Marking medication as taken:', { eventId, userId, takenAt, notes });
+		console.log('💊 Request body type check:', {
+			takenAtType: typeof takenAt,
+			notesType: typeof notes,
+			bodyKeys: Object.keys(req.body),
+			rawBody: req.body
+		});
+		console.log('💊 Step 1: Initial validation - PASSED');
 		
 		// Validate eventId
 		if (!eventId || typeof eventId !== 'string') {
-			console.log('❌ Invalid eventId:', eventId);
+			console.log('❌ Step 2: Invalid eventId:', eventId);
 			return res.status(400).json({
 				success: false,
 				error: 'Invalid event ID'
 			});
 		}
+		console.log('💊 Step 2: EventId validation - PASSED');
 		
 		// Get the event document with better error handling
+		console.log('💊 Step 3: Attempting to fetch event from Firestore...');
 		let eventDoc;
 		try {
 			eventDoc = await firestore.collection('medication_calendar_events').doc(eventId).get();
+			console.log('💊 Step 3: Firestore fetch - SUCCESS');
 		} catch (firestoreError) {
-			console.error('❌ Firestore error getting event:', firestoreError);
+			console.error('❌ Step 3: Firestore error getting event:', firestoreError);
+			console.error('❌ Step 3: Error details:', {
+				message: firestoreError instanceof Error ? firestoreError.message : 'Unknown error',
+				code: (firestoreError as any)?.code || 'Unknown code',
+				stack: firestoreError instanceof Error ? firestoreError.stack : 'No stack'
+			});
 			return res.status(500).json({
 				success: false,
-				error: 'Database error retrieving event'
+				error: 'Database error retrieving event',
+				details: firestoreError instanceof Error ? firestoreError.message : 'Unknown error'
 			});
 		}
 		
 		if (!eventDoc.exists) {
-			console.log('❌ Medication event not found:', eventId);
+			console.log('❌ Step 4: Medication event not found:', eventId);
 			return res.status(404).json({
 				success: false,
 				error: 'Medication event not found'
 			});
 		}
+		console.log('💊 Step 4: Event exists - PASSED');
 		
 		const eventData = eventDoc.data();
 		if (!eventData) {
-			console.log('❌ Event data is null:', eventId);
+			console.log('❌ Step 5: Event data is null:', eventId);
 			return res.status(404).json({
 				success: false,
 				error: 'Event data not found'
 			});
 		}
+		console.log('💊 Step 5: Event data retrieved - PASSED');
 		
 		console.log('📋 Current event data:', {
 			id: eventId,
@@ -1964,6 +2021,8 @@ app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req,
 			updatedAt: admin.firestore.Timestamp.now()
 		};
 		
+		console.log('💊 Initial update data:', updateData);
+		
 		// Handle takenAt timestamp safely with better validation
 		try {
 			let takenDateTime: Date;
@@ -1994,7 +2053,7 @@ app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req,
 		}
 		
 		// Add notes if provided and valid - ONLY add if not undefined
-		if (notes !== undefined && notes !== null && typeof notes === 'string' && notes.trim().length > 0) {
+		if (notes && typeof notes === 'string' && notes.trim().length > 0) {
 			updateData.notes = notes.trim();
 		}
 		// Do not add notes field at all if it's undefined, null, or empty
@@ -2009,9 +2068,14 @@ app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req,
 				const timeDiffMinutes = Math.abs((takenTime.getTime() - scheduledTime.getTime()) / (1000 * 60));
 				updateData.isOnTime = timeDiffMinutes <= 30;
 				
-				if (timeDiffMinutes > 30) {
+				// 🔥 FIX: Always mark as 'taken' when user explicitly marks it
+				// Only set to 'late' if it's extremely late (more than 4 hours) for tracking purposes
+				if (timeDiffMinutes > 240) { // 4 hours instead of 30 minutes
 					updateData.status = 'late';
 					updateData.minutesLate = Math.round(timeDiffMinutes);
+				} else {
+					// Keep status as 'taken' for reasonable delays
+					updateData.status = 'taken';
 				}
 				
 				console.log('⏰ Time calculation:', {
@@ -2032,12 +2096,30 @@ app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req,
 			actualTakenDateTime: updateData.actualTakenDateTime?.toDate()?.toISOString()
 		});
 		
+		// Validate update data before sending to Firestore
+		const cleanUpdateData: any = {};
+		Object.keys(updateData).forEach(key => {
+			const value = updateData[key];
+			if (value !== undefined && value !== null) {
+				cleanUpdateData[key] = value;
+			}
+		});
+		
+		console.log('📝 Cleaned update data for Firestore:', cleanUpdateData);
+		
 		// Update the event document with better error handling
+		console.log('💊 Step 6: Attempting Firestore update...');
 		try {
-			await eventDoc.ref.update(updateData);
-			console.log('✅ Event updated successfully');
+			await eventDoc.ref.update(cleanUpdateData);
+			console.log('✅ Step 6: Event updated successfully');
 		} catch (updateError) {
-			console.error('❌ Error updating event document:', updateError);
+			console.error('❌ Step 6: Error updating event document:', updateError);
+			console.error('❌ Step 6: Update data that caused error:', cleanUpdateData);
+			console.error('❌ Step 6: Error details:', {
+				message: updateError instanceof Error ? updateError.message : 'Unknown error',
+				code: (updateError as any)?.code || 'Unknown code',
+				stack: updateError instanceof Error ? updateError.stack : 'No stack'
+			});
 			return res.status(500).json({
 				success: false,
 				error: 'Failed to update medication event',
@@ -2058,10 +2140,10 @@ app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req,
 				success: true,
 				data: {
 					id: eventId,
-					status: updateData.status,
-					takenBy: updateData.takenBy,
-					actualTakenDateTime: updateData.actualTakenDateTime.toDate(),
-					updatedAt: updateData.updatedAt.toDate()
+					status: cleanUpdateData.status,
+					takenBy: cleanUpdateData.takenBy,
+					actualTakenDateTime: cleanUpdateData.actualTakenDateTime?.toDate(),
+					updatedAt: cleanUpdateData.updatedAt?.toDate()
 				},
 				message: 'Medication marked as taken successfully'
 			});
@@ -2099,8 +2181,17 @@ app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req,
 			message: 'Medication marked as taken successfully'
 		});
 	} catch (error) {
+		console.error('❌ === MARK MEDICATION AS TAKEN - FATAL ERROR ===');
 		console.error('❌ Error marking medication as taken:', error);
 		console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+		console.error('❌ Error details:', {
+			message: error instanceof Error ? error.message : 'Unknown error',
+			code: (error as any)?.code || 'Unknown code',
+			name: error instanceof Error ? error.name : 'Unknown name',
+			eventId: req.params?.eventId || 'Unknown eventId',
+			userId: (req as any)?.user?.uid || 'Unknown userId',
+			requestBody: req.body
+		});
 		res.status(500).json({
 			success: false,
 			error: 'Internal server error',
