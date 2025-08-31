@@ -16,106 +16,49 @@ import {
   Mail,
   Trash2,
   AlertTriangle,
-  AlertCircle
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  ChevronRight,
+  FileText,
+  User,
+  Building,
+  MapPin,
+  Stethoscope
 } from 'lucide-react';
-import MedicationReminders from '@/components/MedicationReminders';
-import MedicationAdherenceDashboard from '@/components/MedicationAdherenceDashboard';
-import CalendarIntegration from '@/components/CalendarIntegration';
-import VisitSummaryCard from '@/components/VisitSummaryCard';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
+import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import type { VisitSummary } from '@shared/types';
+import VisitSummaryCard from '@/components/VisitSummaryCard';
+import type { VisitSummary, MedicationCalendarEvent, MedicalEvent } from '@shared/types';
 
-interface FamilyConnection {
+interface TodaysMedication {
   id: string;
-  patientId?: string;
-  familyMemberId?: string;
-  patientName?: string;
-  familyMemberName?: string;
-  patientEmail?: string;
-  familyMemberEmail?: string;
-  accessLevel: string;
-  permissions: any;
-  status: string;
-  acceptedAt?: Date;
-  relationship: 'family_member' | 'patient';
-}
-
-interface FamilyAccessData {
-  patientsIHaveAccessTo: FamilyConnection[];
-  familyMembersWithAccessToMe: FamilyConnection[];
-  totalConnections: number;
+  medicationName: string;
+  dosageAmount: string;
+  scheduledDateTime: Date;
+  status: 'scheduled' | 'taken' | 'missed' | 'skipped';
+  instructions?: string;
+  isOverdue: boolean;
 }
 
 export default function Dashboard() {
   const { user, firebaseUser } = useAuth();
-  const [familyAccess, setFamilyAccess] = useState<FamilyAccessData | null>(null);
-  const [loadingFamily, setLoadingFamily] = useState(true);
-  const [familyError, setFamilyError] = useState<string | null>(null);
-  const [removingMember, setRemovingMember] = useState<string | null>(null);
-  const [showRemoveConfirm, setShowRemoveConfirm] = useState<string | null>(null);
   const [recentVisitSummaries, setRecentVisitSummaries] = useState<VisitSummary[]>([]);
   const [loadingVisitSummaries, setLoadingVisitSummaries] = useState(false);
+  const [todaysMedications, setTodaysMedications] = useState<TodaysMedication[]>([]);
+  const [loadingMedications, setLoadingMedications] = useState(false);
+  const [upcomingAppointments, setUpcomingAppointments] = useState<MedicalEvent[]>([]);
+  const [loadingAppointments, setLoadingAppointments] = useState(false);
+  const [takingMedication, setTakingMedication] = useState<string | null>(null);
+  const [selectAllChecked, setSelectAllChecked] = useState(false);
+  const [selectedMedications, setSelectedMedications] = useState<Set<string>>(new Set());
 
   const handleSignOut = async () => {
     try {
       await signOutUser();
     } catch (error) {
       console.error('Sign out error:', error);
-    }
-  };
-
-  const fetchFamilyAccess = async () => {
-    try {
-      setLoadingFamily(true);
-      setFamilyError(null);
-      
-      console.log('🔧 Dashboard: Fetching family access data...');
-      console.log('🔧 Dashboard: Using endpoint:', API_ENDPOINTS.FAMILY_ACCESS);
-      
-      const response = await apiClient.get<{ success: boolean; data: FamilyAccessData }>(
-        API_ENDPOINTS.FAMILY_ACCESS
-      );
-      
-      console.log('🔧 Dashboard: Family access response:', response);
-      
-      if (response.success) {
-        setFamilyAccess(response.data);
-        console.log('✅ Dashboard: Family access data loaded successfully');
-      } else {
-        console.error('❌ Dashboard: Family access request failed:', response);
-        setFamilyError('Failed to load family connections');
-      }
-    } catch (error) {
-      console.error('❌ Dashboard: Error fetching family access:', error);
-      setFamilyError('Failed to load family connections');
-    } finally {
-      setLoadingFamily(false);
-    }
-  };
-
-  const handleRemoveFamilyMember = async (accessId: string, memberName: string) => {
-    try {
-      setRemovingMember(accessId);
-      const response = await apiClient.post<{ success: boolean; message: string }>(
-        API_ENDPOINTS.REMOVE_FAMILY_MEMBER,
-        { action: 'remove', accessId }
-      );
-      
-      if (response.success) {
-        // Refresh family access data
-        await fetchFamilyAccess();
-        setShowRemoveConfirm(null);
-        // You could add a toast notification here
-        console.log(`✅ Successfully removed ${memberName} from your care network`);
-      } else {
-        setFamilyError('Failed to remove family member');
-      }
-    } catch (error) {
-      console.error('Error removing family member:', error);
-      setFamilyError('Failed to remove family member');
-    } finally {
-      setRemovingMember(null);
     }
   };
 
@@ -132,111 +75,277 @@ export default function Dashboard() {
       );
       
       if (response.success && response.data) {
-        setRecentVisitSummaries(response.data);
-        console.log('✅ Recent visit summaries loaded:', response.data.length);
+        // Filter to last 30 days
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        
+        const recentSummaries = response.data.filter(summary => 
+          new Date(summary.visitDate) >= thirtyDaysAgo
+        );
+        
+        setRecentVisitSummaries(recentSummaries);
+        console.log('✅ Recent visit summaries loaded:', recentSummaries.length);
       }
     } catch (error) {
       console.error('❌ Error fetching recent visit summaries:', error);
-      // Don't show error to user for this non-critical feature
     } finally {
       setLoadingVisitSummaries(false);
     }
   };
 
-  useEffect(() => {
-    if (firebaseUser) {
-      fetchFamilyAccess();
-      fetchRecentVisitSummaries();
-    }
-  }, [firebaseUser]);
+  const fetchTodaysMedications = async () => {
+    try {
+      setLoadingMedications(true);
+      const now = new Date();
+      const startOfDay = new Date(now);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(now);
+      endOfDay.setHours(23, 59, 59, 999);
 
-  const getAccessLevelColor = (level: string) => {
-    switch (level) {
-      case 'full': return 'bg-green-100 text-green-800 border-green-200';
-      case 'limited': return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'view_only': return 'bg-gray-100 text-gray-800 border-gray-200';
-      case 'emergency_only': return 'bg-red-100 text-red-800 border-red-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+      console.log('🔍 Dashboard: Fetching today\'s medications from', startOfDay, 'to', endOfDay);
+
+      const result = await medicationCalendarApi.getMedicationCalendarEvents({
+        startDate: startOfDay,
+        endDate: endOfDay
+      });
+
+      console.log('🔍 Dashboard: Medication events result:', result);
+
+      if (result.success && result.data) {
+        // Show all events, not just 'scheduled' ones
+        const todaysEvents = result.data
+          .map(event => ({
+            id: event.id,
+            medicationName: event.medicationName,
+            dosageAmount: event.dosageAmount,
+            scheduledDateTime: new Date(event.scheduledDateTime),
+            status: event.status as 'scheduled' | 'taken' | 'missed' | 'skipped',
+            instructions: event.instructions,
+            isOverdue: new Date(event.scheduledDateTime) < now
+          }))
+          .sort((a, b) => a.scheduledDateTime.getTime() - b.scheduledDateTime.getTime());
+
+        console.log('🔍 Dashboard: Processed today\'s events:', todaysEvents);
+        setTodaysMedications(todaysEvents);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching today\'s medications:', error);
+    } finally {
+      setLoadingMedications(false);
     }
   };
 
-  const quickActions = [
-    {
-      title: 'Add Medication',
-      description: 'Record a new prescription',
-      icon: Pill,
-      href: '/profile',
-      color: 'bg-blue-500',
-    },
-    {
-      title: 'Schedule Appointment',
-      description: 'Book a healthcare visit',
-      icon: Calendar,
-      href: '/appointments/new',
-      color: 'bg-green-500',
-    },
-    {
-      title: 'Invite Family Member',
-      description: 'Add someone to your care team',
-      icon: Users,
-      href: '/family/invite',
-      color: 'bg-purple-500',
-    },
-    {
-      title: 'Update Profile',
-      description: 'Edit your medical information',
-      icon: Heart,
-      href: '/profile',
-      color: 'bg-red-500',
-    },
-  ];
+  const fetchUpcomingAppointments = async () => {
+    try {
+      setLoadingAppointments(true);
+      const userId = firebaseUser?.uid;
+      if (!userId) return;
+
+      const response = await apiClient.get<{ success: boolean; data: MedicalEvent[] }>(
+        API_ENDPOINTS.MEDICAL_EVENTS(userId)
+      );
+
+      if (response.success && response.data) {
+        const now = new Date();
+        const thirtyDaysFromNow = new Date();
+        thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+
+        const upcoming = response.data
+          .filter(event => {
+            const eventDate = new Date(event.startDateTime);
+            return eventDate >= now && eventDate <= thirtyDaysFromNow && 
+                   ['scheduled', 'confirmed'].includes(event.status);
+          })
+          .map(event => ({
+            ...event,
+            startDateTime: new Date(event.startDateTime),
+            endDateTime: new Date(event.endDateTime),
+            createdAt: new Date(event.createdAt),
+            updatedAt: new Date(event.updatedAt)
+          }))
+          .sort((a, b) => a.startDateTime.getTime() - b.startDateTime.getTime())
+          .slice(0, 5); // Show only next 5 appointments
+
+        setUpcomingAppointments(upcoming);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching upcoming appointments:', error);
+    } finally {
+      setLoadingAppointments(false);
+    }
+  };
+
+  const handleMarkMedicationTaken = async (medicationId: string) => {
+    try {
+      setTakingMedication(medicationId);
+      
+      const result = await medicationCalendarApi.markMedicationTaken(
+        medicationId,
+        new Date()
+      );
+
+      if (result.success) {
+        await fetchTodaysMedications();
+        // Remove from selected medications if it was selected
+        setSelectedMedications(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(medicationId);
+          return newSet;
+        });
+      }
+    } catch (error) {
+      console.error('Error marking medication as taken:', error);
+    } finally {
+      setTakingMedication(null);
+    }
+  };
+
+  const handleMarkAllSelectedTaken = async () => {
+    try {
+      const promises = Array.from(selectedMedications).map(id => 
+        medicationCalendarApi.markMedicationTaken(id, new Date())
+      );
+      
+      await Promise.all(promises);
+      await fetchTodaysMedications();
+      setSelectedMedications(new Set());
+      setSelectAllChecked(false);
+    } catch (error) {
+      console.error('Error marking selected medications as taken:', error);
+    }
+  };
+
+  const handleSelectAll = () => {
+    if (selectAllChecked) {
+      setSelectedMedications(new Set());
+      setSelectAllChecked(false);
+    } else {
+      const allMedicationIds = new Set(todaysMedications.map(med => med.id));
+      setSelectedMedications(allMedicationIds);
+      setSelectAllChecked(true);
+    }
+  };
+
+  const handleMedicationSelect = (medicationId: string) => {
+    setSelectedMedications(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(medicationId)) {
+        newSet.delete(medicationId);
+      } else {
+        newSet.add(medicationId);
+      }
+      
+      // Update select all checkbox
+      setSelectAllChecked(newSet.size === todaysMedications.length && todaysMedications.length > 0);
+      
+      return newSet;
+    });
+  };
+
+  useEffect(() => {
+    if (firebaseUser) {
+      fetchRecentVisitSummaries();
+      fetchTodaysMedications();
+      fetchUpcomingAppointments();
+    }
+  }, [firebaseUser]);
+
+  // Listen for medication schedule updates
+  useEffect(() => {
+    const handleScheduleUpdate = () => {
+      console.log('🔍 Dashboard: Received schedule update event, refreshing data');
+      fetchTodaysMedications();
+    };
+
+    window.addEventListener('medicationScheduleUpdated', handleScheduleUpdate);
+    
+    return () => {
+      window.removeEventListener('medicationScheduleUpdated', handleScheduleUpdate);
+    };
+  }, []);
+
+  const formatTime = (date: Date): string => {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const formatDate = (date: Date): string => {
+    return date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  const getTimeUntil = (date: Date): string => {
+    const now = new Date();
+    const diffMs = date.getTime() - now.getTime();
+    
+    if (diffMs < 0) {
+      const overdueMins = Math.abs(Math.floor(diffMs / (1000 * 60)));
+      if (overdueMins < 60) {
+        return `${overdueMins}m overdue`;
+      } else {
+        const overdueHours = Math.floor(overdueMins / 60);
+        return `${overdueHours}h overdue`;
+      }
+    }
+    
+    const mins = Math.floor(diffMs / (1000 * 60));
+    if (mins < 60) {
+      return `in ${mins}m`;
+    } else {
+      const hours = Math.floor(mins / 60);
+      const remainingMins = mins % 60;
+      return remainingMins > 0 ? `in ${hours}h ${remainingMins}m` : `in ${hours}h`;
+    }
+  };
+
+  const getEventTypeIcon = (eventType: string) => {
+    switch (eventType) {
+      case 'appointment':
+      case 'consultation':
+        return <Stethoscope className="w-4 h-4" />;
+      case 'surgery':
+      case 'procedure':
+        return <AlertCircle className="w-4 h-4" />;
+      case 'lab_test':
+      case 'imaging':
+        return <Activity className="w-4 h-4" />;
+      default:
+        return <Calendar className="w-4 h-4" />;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header - Mobile Optimized */}
-      <header className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
+      {/* Mobile-First Header */}
+      <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
+        <div className="px-4 py-3">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2 sm:space-x-3">
-              <Heart className="w-6 h-6 sm:w-8 sm:h-8 text-primary-600" />
-              <span className="text-lg sm:text-2xl font-bold text-gray-900">KinConnect</span>
+            <div className="flex items-center space-x-2">
+              <Heart className="w-6 h-6 text-primary-600" />
+              <span className="text-lg font-bold text-gray-900">KinConnect</span>
             </div>
             
-            <div className="flex items-center space-x-2 sm:space-x-4">
+            <div className="flex items-center space-x-2">
               <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
-                <Bell className="w-5 h-5 sm:w-6 sm:h-6" />
+                <Bell className="w-5 h-5" />
               </button>
               
-              <div className="hidden sm:flex items-center space-x-3">
-                {firebaseUser?.photoURL && (
-                  <img
-                    src={firebaseUser.photoURL}
-                    alt="Profile"
-                    className="w-8 h-8 rounded-full"
-                  />
-                )}
-                <span className="text-gray-700 font-medium">
-                  {user?.name || firebaseUser?.displayName || 'User'}
-                </span>
-              </div>
-              
-              {/* Mobile: Show only avatar */}
-              <div className="sm:hidden">
-                {firebaseUser?.photoURL && (
-                  <img
-                    src={firebaseUser.photoURL}
-                    alt="Profile"
-                    className="w-8 h-8 rounded-full"
-                  />
-                )}
-              </div>
+              {firebaseUser?.photoURL && (
+                <img
+                  src={firebaseUser.photoURL}
+                  alt="Profile"
+                  className="w-8 h-8 rounded-full"
+                />
+              )}
               
               <button
                 onClick={handleSignOut}
                 className="p-2 text-gray-400 hover:text-red-600 transition-colors"
                 title="Sign out"
               >
-                <LogOut className="w-4 h-4 sm:w-5 sm:h-5" />
+                <LogOut className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -244,315 +353,324 @@ export default function Dashboard() {
       </header>
 
       {/* Main Content - Mobile Optimized */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8">
+      <main className="px-4 py-4 pb-20">
         {/* Welcome Section */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Welcome back, {user?.name || 'there'}! 👋
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">
+            Welcome back, {user?.name?.split(' ')[0] || 'there'}! 👋
           </h1>
-          <p className="text-gray-600">
-            Here's what's happening with your family's care today.
+          <p className="text-gray-600 text-sm">
+            Here's your health overview for today
           </p>
         </div>
 
-        {/* Quick Actions - Mobile Optimized */}
-        <div className="mb-6 sm:mb-8">
-          <h2 className="text-lg sm:text-xl font-semibold text-gray-900 mb-3 sm:mb-4">Quick Actions</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            {quickActions.map((action) => (
-              <Link
-                key={action.title}
-                to={action.href}
-                className="bg-white p-3 sm:p-6 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow group"
+        {/* Recent Events Section */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-gray-900">Recent Events</h2>
+            {recentVisitSummaries.length > 0 && (
+              <Link 
+                to="/visit-summaries" 
+                className="text-sm text-primary-600 hover:text-primary-700 font-medium"
               >
-                <div className="flex flex-col sm:flex-row items-center sm:space-x-4 space-y-2 sm:space-y-0">
-                  <div className={`${action.color} p-2 sm:p-3 rounded-lg group-hover:scale-110 transition-transform`}>
-                    <action.icon className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
-                  </div>
-                  <div className="text-center sm:text-left">
-                    <h3 className="text-sm sm:text-base font-semibold text-gray-900 group-hover:text-primary-600 transition-colors">
-                      {action.title}
-                    </h3>
-                    <p className="text-xs sm:text-sm text-gray-600 hidden sm:block">{action.description}</p>
+                View All
+              </Link>
+            )}
+          </div>
+          
+          {loadingVisitSummaries ? (
+            <div className="bg-white rounded-lg p-4 border border-gray-200">
+              <div className="flex items-center justify-center py-4">
+                <LoadingSpinner size="sm" />
+                <span className="ml-2 text-gray-600 text-sm">Loading recent events...</span>
+              </div>
+            </div>
+          ) : recentVisitSummaries.length > 0 ? (
+            <div className="space-y-3">
+              {recentVisitSummaries.slice(0, 2).map((summary) => (
+                <div key={summary.id} className="bg-white rounded-lg p-4 border border-gray-200">
+                  <div className="flex items-start space-x-3">
+                    <div className="flex-shrink-0 mt-1">
+                      <FileText className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center space-x-2 mb-1">
+                        <h3 className="font-medium text-gray-900 text-sm">
+                          {summary.visitType.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())} Visit
+                        </h3>
+                        {summary.aiProcessedSummary?.urgencyLevel && (
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                            summary.aiProcessedSummary.urgencyLevel === 'urgent' ? 'bg-red-100 text-red-800' :
+                            summary.aiProcessedSummary.urgencyLevel === 'high' ? 'bg-orange-100 text-orange-800' :
+                            'bg-blue-100 text-blue-800'
+                          }`}>
+                            {summary.aiProcessedSummary.urgencyLevel}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center space-x-4 text-xs text-gray-500 mb-2">
+                        <span className="flex items-center space-x-1">
+                          <Calendar className="w-3 h-3" />
+                          <span>{new Date(summary.visitDate).toLocaleDateString()}</span>
+                        </span>
+                        {summary.providerName && (
+                          <span className="flex items-center space-x-1">
+                            <User className="w-3 h-3" />
+                            <span>{summary.providerName}</span>
+                          </span>
+                        )}
+                      </div>
+                      {summary.aiProcessedSummary?.keyPoints && summary.aiProcessedSummary.keyPoints.length > 0 && (
+                        <p className="text-sm text-gray-600 line-clamp-2">
+                          {summary.aiProcessedSummary.keyPoints[0]}
+                        </p>
+                      )}
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0 mt-1" />
                   </div>
                 </div>
-              </Link>
-            ))}
-          </div>
-        </div>
-
-        {/* Recent Visit Summaries Widget */}
-        {recentVisitSummaries.length > 0 && (
-          <div className="mb-6 sm:mb-8">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Recent Visit Summaries</h2>
-              <button className="text-sm text-primary-600 hover:text-primary-700 font-medium">
-                View All →
-              </button>
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-              {recentVisitSummaries.map((summary) => (
-                <VisitSummaryCard
-                  key={summary.id}
-                  summary={summary}
-                  showFamilyView={false}
-                  isFamily={false}
-                />
               ))}
             </div>
-          </div>
-        )}
-
-        {/* Dashboard Grid - Mobile Optimized */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
-          {/* Medication Reminders */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
-              <MedicationReminders
-                patientId={user?.id || firebaseUser?.uid || ''}
-                maxItems={5}
-              />
+          ) : (
+            <div className="bg-white rounded-lg p-6 border border-gray-200 text-center">
+              <FileText className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+              <p className="text-gray-500 text-sm">Nothing new in the last 30 days</p>
             </div>
-          </div>
+          )}
+        </div>
 
-          {/* Quick Stats */}
-          <div className="space-y-4 sm:space-y-6">
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
-              <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Today's Overview</h3>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Medications Due</span>
-                  <span className="font-semibold text-gray-400">Loading...</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Appointments</span>
-                  <span className="font-semibold text-gray-400">0</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Recent Visits</span>
-                  <span className="font-semibold text-blue-600">{recentVisitSummaries.length}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Pending Tasks</span>
-                  <span className="font-semibold text-gray-400">0</span>
-                </div>
-              </div>
-              <div className="mt-4 pt-4 border-t border-gray-100">
-                <Link
-                  to="/profile"
-                  className="text-sm text-primary-600 hover:text-primary-700 font-medium"
-                >
-                  View all medications →
-                </Link>
+        {/* Today's Medications Section */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-gray-900">Today's Medications</h2>
+            <Link 
+              to="/medications" 
+              className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+            >
+              Manage
+            </Link>
+          </div>
+          
+          {loadingMedications ? (
+            <div className="bg-white rounded-lg p-4 border border-gray-200">
+              <div className="flex items-center justify-center py-4">
+                <LoadingSpinner size="sm" />
+                <span className="ml-2 text-gray-600 text-sm">Loading medications...</span>
               </div>
             </div>
-
-            {/* Visit Summary Quick Actions */}
-            {recentVisitSummaries.length > 0 && (
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
-                <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Latest Visit Actions</h3>
-                <div className="space-y-3">
-                  {recentVisitSummaries[0]?.aiProcessedSummary?.actionItems?.slice(0, 3).map((item, index) => (
-                    <div key={index} className="flex items-start space-x-3">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
-                      <span className="text-sm text-gray-700">{item}</span>
-                    </div>
-                  )) || (
-                    <div className="text-sm text-gray-500">No action items available</div>
-                  )}
-                </div>
-                {recentVisitSummaries[0]?.aiProcessedSummary?.followUpRequired && (
-                  <div className="mt-4 pt-4 border-t border-gray-100">
-                    <div className="flex items-center space-x-2 text-sm text-orange-600">
-                      <AlertCircle className="w-4 h-4" />
-                      <span>Follow-up appointment required</span>
-                    </div>
+          ) : todaysMedications.length > 0 ? (
+            <div className="bg-white rounded-lg border border-gray-200">
+              {/* Select All Header */}
+              {todaysMedications.length > 1 && (
+                <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectAllChecked}
+                        onChange={handleSelectAll}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span className="text-sm font-medium text-gray-700">Select All</span>
+                    </label>
+                    {selectedMedications.size > 0 && (
+                      <button
+                        onClick={handleMarkAllSelectedTaken}
+                        className="px-3 py-1 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition-colors"
+                      >
+                        Mark {selectedMedications.size} as Taken
+                      </button>
+                    )}
                   </div>
-                )}
-              </div>
-            )}
-
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
-              <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Family Connections</h3>
-              
-              {loadingFamily ? (
-                <div className="text-center py-6">
-                  <LoadingSpinner size="sm" />
-                  <p className="text-gray-500 mt-2">Loading family connections...</p>
-                </div>
-              ) : familyError ? (
-                <div className="text-center py-6">
-                  <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Users className="w-6 h-6 text-red-400" />
-                  </div>
-                  <p className="text-red-600 mb-4 text-sm">{familyError}</p>
-                  <button
-                    onClick={fetchFamilyAccess}
-                    className="text-primary-600 hover:text-primary-700 text-sm font-medium"
-                  >
-                    Try Again
-                  </button>
-                </div>
-              ) : familyAccess && familyAccess.totalConnections > 0 ? (
-                <div className="space-y-4">
-                  {/* Patients I have access to */}
-                  {familyAccess.patientsIHaveAccessTo.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-medium text-gray-700 mb-2">Patients I Help Care For</h4>
-                      <div className="space-y-2">
-                        {familyAccess.patientsIHaveAccessTo.map((connection) => (
-                          <div key={connection.id} className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
-                            <div className="flex items-center space-x-3">
-                              <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                                <Users className="w-4 h-4 text-blue-600" />
-                              </div>
-                              <div>
-                                <p className="font-medium text-gray-900">{connection.patientName}</p>
-                                <p className="text-xs text-gray-600">{connection.patientEmail}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getAccessLevelColor(connection.accessLevel)}`}>
-                                <Shield className="w-3 h-3 mr-1" />
-                                {connection.accessLevel.replace('_', ' ')}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Family members who have access to me */}
-                  {familyAccess.familyMembersWithAccessToMe.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-medium text-gray-700 mb-2">My Care Team</h4>
-                      <div className="space-y-2">
-                        {familyAccess.familyMembersWithAccessToMe.map((connection) => (
-                          <div key={connection.id} className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
-                            <div className="flex items-center space-x-3">
-                              <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                                <Users className="w-4 h-4 text-green-600" />
-                              </div>
-                              <div>
-                                <p className="font-medium text-gray-900">{connection.familyMemberName}</p>
-                                <p className="text-xs text-gray-600">{connection.familyMemberEmail}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getAccessLevelColor(connection.accessLevel)}`}>
-                                <Shield className="w-3 h-3 mr-1" />
-                                {connection.accessLevel.replace('_', ' ')}
-                              </span>
-                              <button
-                                onClick={() => setShowRemoveConfirm(connection.id)}
-                                className="p-1 text-red-400 hover:text-red-600 hover:bg-red-100 rounded transition-colors"
-                                title="Remove family member"
-                                disabled={removingMember === connection.id}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="pt-4 border-t border-gray-100">
-                    <Link
-                      to="/family/invite"
-                      className="inline-flex items-center text-primary-600 hover:text-primary-700 text-sm font-medium"
-                    >
-                      <Plus className="w-4 h-4 mr-1" />
-                      Invite Family Member
-                    </Link>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center py-6">
-                  <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Users className="w-6 h-6 text-gray-400" />
-                  </div>
-                  <h4 className="text-lg font-medium text-gray-900 mb-2">No family connections yet</h4>
-                  <p className="text-gray-500 mb-4 text-sm">
-                    Invite family members to help coordinate care or accept invitations from patients.
-                  </p>
-                  <Link
-                    to="/family/invite"
-                    className="inline-flex items-center text-primary-600 hover:text-primary-700 text-sm font-medium"
-                  >
-                    <Plus className="w-4 h-4 mr-1" />
-                    Invite Family Member
-                  </Link>
                 </div>
               )}
+              
+              {/* Medications List */}
+              <div className="divide-y divide-gray-200">
+                {todaysMedications.map((medication) => (
+                  <div key={medication.id} className="p-4">
+                    <div className="flex items-center space-x-3">
+                      {todaysMedications.length > 1 && (
+                        <input
+                          type="checkbox"
+                          checked={selectedMedications.has(medication.id)}
+                          onChange={() => handleMedicationSelect(medication.id)}
+                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                      )}
+                      
+                      <div className={`p-2 rounded-full ${
+                        medication.isOverdue ? 'bg-red-100' : 'bg-blue-100'
+                      }`}>
+                        <Pill className={`w-4 h-4 ${
+                          medication.isOverdue ? 'text-red-600' : 'text-blue-600'
+                        }`} />
+                      </div>
+                      
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-medium text-gray-900 text-sm">
+                          {medication.medicationName}
+                        </h3>
+                        <p className="text-sm text-gray-600">
+                          {medication.dosageAmount}
+                        </p>
+                        {medication.instructions && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            {medication.instructions}
+                          </p>
+                        )}
+                        <div className="flex items-center space-x-3 mt-1">
+                          <span className={`flex items-center space-x-1 text-xs ${
+                            medication.isOverdue ? 'text-red-600' : 'text-blue-600'
+                          }`}>
+                            <Clock className="w-3 h-3" />
+                            <span>{formatTime(medication.scheduledDateTime)}</span>
+                          </span>
+                          <span className={`text-xs ${
+                            medication.isOverdue ? 'text-red-500' : 'text-gray-500'
+                          }`}>
+                            {getTimeUntil(medication.scheduledDateTime)}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <button
+                        onClick={() => handleMarkMedicationTaken(medication.id)}
+                        disabled={takingMedication === medication.id}
+                        className="p-2 text-green-600 hover:text-green-800 hover:bg-green-100 rounded-md disabled:opacity-50 transition-colors"
+                        title="Mark as taken"
+                      >
+                        {takingMedication === medication.id ? (
+                          <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <CheckCircle className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="bg-white rounded-lg p-6 border border-gray-200 text-center">
+              <Pill className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+              <p className="text-gray-500 text-sm">No medications scheduled for today</p>
+            </div>
+          )}
         </div>
 
-        {/* Medical Calendar Section - Mobile Optimized */}
-        <div className="mt-6 sm:mt-8">
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
-            <CalendarIntegration
-              patientId={user?.id || firebaseUser?.uid || ''}
-            />
+        {/* Upcoming Appointments Section */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-gray-900">Upcoming Appointments</h2>
+            <Link 
+              to="/calendar" 
+              className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+            >
+              View Calendar
+            </Link>
           </div>
-        </div>
-
-        {/* Medication Adherence Section - Mobile Optimized */}
-        <div className="mt-6 sm:mt-8">
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
-            <MedicationAdherenceDashboard
-              patientId={user?.id || firebaseUser?.uid || ''}
-            />
-          </div>
+          
+          {loadingAppointments ? (
+            <div className="bg-white rounded-lg p-4 border border-gray-200">
+              <div className="flex items-center justify-center py-4">
+                <LoadingSpinner size="sm" />
+                <span className="ml-2 text-gray-600 text-sm">Loading appointments...</span>
+              </div>
+            </div>
+          ) : upcomingAppointments.length > 0 ? (
+            <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-200">
+              {upcomingAppointments.map((appointment) => (
+                <div key={appointment.id} className="p-4">
+                  <div className="flex items-start space-x-3">
+                    <div className="flex-shrink-0 mt-1">
+                      {getEventTypeIcon(appointment.eventType)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-medium text-gray-900 text-sm">
+                        {appointment.title}
+                      </h3>
+                      <div className="flex items-center space-x-4 text-xs text-gray-500 mt-1">
+                        <span className="flex items-center space-x-1">
+                          <Calendar className="w-3 h-3" />
+                          <span>{formatDate(appointment.startDateTime)}</span>
+                        </span>
+                        <span className="flex items-center space-x-1">
+                          <Clock className="w-3 h-3" />
+                          <span>{formatTime(appointment.startDateTime)}</span>
+                        </span>
+                      </div>
+                      {appointment.providerName && (
+                        <div className="flex items-center space-x-1 mt-1">
+                          <User className="w-3 h-3 text-gray-400" />
+                          <span className="text-xs text-gray-600">{appointment.providerName}</span>
+                        </div>
+                      )}
+                      {appointment.location && (
+                        <div className="flex items-center space-x-1 mt-1">
+                          <MapPin className="w-3 h-3 text-gray-400" />
+                          <span className="text-xs text-gray-600 truncate">{appointment.location}</span>
+                        </div>
+                      )}
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0 mt-1" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-white rounded-lg p-6 border border-gray-200 text-center">
+              <Calendar className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+              <p className="text-gray-500 text-sm">No upcoming appointments in the next 30 days</p>
+            </div>
+          )}
         </div>
       </main>
 
-      {/* Remove Family Member Confirmation Modal */}
-      {showRemoveConfirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <div className="flex items-center space-x-3 mb-4">
-              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-                <AlertTriangle className="w-5 h-5 text-red-600" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">Remove Family Member</h3>
-                <p className="text-sm text-gray-600">This action cannot be undone</p>
-              </div>
-            </div>
-            
-            <p className="text-gray-700 mb-6">
-              Are you sure you want to remove this family member from your care network?
-              They will no longer be able to access your medical information.
-            </p>
-            
-            <div className="flex space-x-3">
-              <button
-                onClick={() => setShowRemoveConfirm(null)}
-                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors"
-                disabled={removingMember === showRemoveConfirm}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  const connection = familyAccess?.familyMembersWithAccessToMe.find(c => c.id === showRemoveConfirm);
-                  if (connection) {
-                    handleRemoveFamilyMember(showRemoveConfirm, connection.familyMemberName || 'Unknown');
-                  }
-                }}
-                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={removingMember === showRemoveConfirm}
-              >
-                {removingMember === showRemoveConfirm ? 'Removing...' : 'Remove'}
-              </button>
-            </div>
-          </div>
+      {/* Mobile Bottom Navigation */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-2 z-50">
+        <div className="flex items-center justify-around">
+          <Link
+            to="/dashboard"
+            className="flex flex-col items-center space-y-1 p-2 text-primary-600"
+          >
+            <Heart className="w-5 h-5" />
+            <span className="text-xs font-medium">Home</span>
+          </Link>
+          
+          <Link
+            to="/medications"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <Pill className="w-5 h-5" />
+            <span className="text-xs">Medications</span>
+          </Link>
+          
+          <Link
+            to="/calendar"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <Calendar className="w-5 h-5" />
+            <span className="text-xs">Calendar</span>
+          </Link>
+          
+          <Link
+            to="/profile"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <User className="w-5 h-5" />
+            <span className="text-xs">Profile</span>
+          </Link>
+          
+          <Link
+            to="/family/invite"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <Users className="w-5 h-5" />
+            <span className="text-xs">Family</span>
+          </Link>
         </div>
-      )}
+      </nav>
     </div>
   );
 }

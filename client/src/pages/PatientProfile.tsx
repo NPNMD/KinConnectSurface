@@ -8,20 +8,21 @@ import {
   Save,
   X,
   Plus,
-  Trash2
+  Trash2,
+  User,
+  Users,
+  Calendar,
+  Pill,
+  Settings
 } from 'lucide-react';
 import {
-  Medication,
-  NewMedication,
   HealthcareProvider,
   NewHealthcareProvider,
   MedicalFacility,
   NewMedicalFacility
 } from '@shared/types';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
-import MedicationManager from '@/components/MedicationManager';
 import AddressAutocomplete from '@/components/AddressAutocomplete';
-import CalendarIntegration from '@/components/CalendarIntegration';
 import MedicalConditionSelect from '@/components/MedicalConditionSelect';
 import AllergySelect from '@/components/AllergySelect';
 import HealthcareProvidersManager from '@/components/HealthcareProvidersManager';
@@ -29,8 +30,6 @@ import HealthcareProvidersManager from '@/components/HealthcareProvidersManager'
 export default function PatientProfile() {
   const { user } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
-  const [medications, setMedications] = useState<Medication[]>([]);
-  const [isLoadingMedications, setIsLoadingMedications] = useState(false);
   const [healthcareProviders, setHealthcareProviders] = useState<HealthcareProvider[]>([]);
   const [medicalFacilities, setMedicalFacilities] = useState<MedicalFacility[]>([]);
   const [isLoadingProviders, setIsLoadingProviders] = useState(false);
@@ -146,31 +145,6 @@ export default function PatientProfile() {
       }
     };
 
-    const loadMedications = async () => {
-      try {
-        setIsLoadingMedications(true);
-        const response = await apiClient.get<{ success: boolean; data: Medication[] }>(
-          API_ENDPOINTS.MEDICATIONS
-        );
-        
-        if (response.success && response.data) {
-          // Parse date strings back to Date objects
-          const medicationsWithDates = response.data.map(med => ({
-            ...med,
-            prescribedDate: new Date(med.prescribedDate),
-            startDate: med.startDate ? new Date(med.startDate) : undefined,
-            endDate: med.endDate ? new Date(med.endDate) : undefined,
-            createdAt: new Date(med.createdAt),
-            updatedAt: new Date(med.updatedAt),
-          }));
-          setMedications(medicationsWithDates);
-        }
-      } catch (error) {
-        console.error('Error loading medications:', error);
-      } finally {
-        setIsLoadingMedications(false);
-      }
-    };
 
     const loadHealthcareProviders = async () => {
       try {
@@ -205,90 +179,11 @@ export default function PatientProfile() {
 
     if (user?.id) {
       loadProfileData();
-      loadMedications();
       loadHealthcareProviders();
       loadMedicalFacilities();
     }
   }, [user?.id]);
 
-  // Medication management functions
-  const handleAddMedication = async (medication: NewMedication) => {
-    try {
-      setIsLoadingMedications(true);
-      const response = await apiClient.post<{ success: boolean; data: Medication }>(
-        API_ENDPOINTS.MEDICATIONS,
-        medication
-      );
-      
-      if (response.success && response.data) {
-        // Parse date strings back to Date objects for the new medication
-        const medicationWithDates = {
-          ...response.data,
-          prescribedDate: new Date(response.data.prescribedDate),
-          startDate: response.data.startDate ? new Date(response.data.startDate) : undefined,
-          endDate: response.data.endDate ? new Date(response.data.endDate) : undefined,
-          createdAt: new Date(response.data.createdAt),
-          updatedAt: new Date(response.data.updatedAt),
-        };
-        setMedications(prev => [...prev, medicationWithDates]);
-      }
-    } catch (error) {
-      console.error('Error adding medication:', error);
-      throw error; // Re-throw to let the component handle the error
-    } finally {
-      setIsLoadingMedications(false);
-    }
-  };
-
-  const handleUpdateMedication = async (id: string, updates: Partial<Medication>) => {
-    try {
-      setIsLoadingMedications(true);
-      const response = await apiClient.put<{ success: boolean; data: Medication }>(
-        API_ENDPOINTS.MEDICATION_BY_ID(id),
-        updates
-      );
-      
-      if (response.success && response.data) {
-        // Parse date strings back to Date objects for the updated medication
-        const medicationWithDates = {
-          ...response.data,
-          prescribedDate: new Date(response.data.prescribedDate),
-          startDate: response.data.startDate ? new Date(response.data.startDate) : undefined,
-          endDate: response.data.endDate ? new Date(response.data.endDate) : undefined,
-          createdAt: new Date(response.data.createdAt),
-          updatedAt: new Date(response.data.updatedAt),
-        };
-        setMedications(prev =>
-          prev.map(med =>
-            med.id === id ? medicationWithDates : med
-          )
-        );
-      }
-    } catch (error) {
-      console.error('Error updating medication:', error);
-      throw error;
-    } finally {
-      setIsLoadingMedications(false);
-    }
-  };
-
-  const handleDeleteMedication = async (id: string) => {
-    try {
-      setIsLoadingMedications(true);
-      const response = await apiClient.delete<{ success: boolean }>(
-        API_ENDPOINTS.MEDICATION_BY_ID(id)
-      );
-      
-      if (response.success) {
-        setMedications(prev => prev.filter(med => med.id !== id));
-      }
-    } catch (error) {
-      console.error('Error deleting medication:', error);
-      throw error;
-    } finally {
-      setIsLoadingMedications(false);
-    }
-  };
 
   // Healthcare Provider management functions
   const handleAddProvider = async (provider: NewHealthcareProvider) => {
@@ -404,48 +299,45 @@ export default function PatientProfile() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-6 py-4">
+      {/* Mobile-First Header */}
+      <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
+        <div className="px-4 py-3">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-3">
               <Link
                 to="/dashboard"
                 className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
               >
                 <ArrowLeft className="w-5 h-5" />
               </Link>
-              <div className="flex items-center space-x-3">
-                <Heart className="w-8 h-8 text-primary-600" />
-                <span className="text-2xl font-bold text-gray-900">KinConnect</span>
+              <div className="flex items-center space-x-2">
+                <User className="w-6 h-6 text-primary-600" />
+                <span className="text-lg font-bold text-gray-900">Profile</span>
               </div>
             </div>
             
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-2">
               {isEditing ? (
                 <>
                   <button
                     onClick={handleCancel}
-                    className="btn-secondary flex items-center space-x-2"
+                    className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
                   >
                     <X className="w-4 h-4" />
-                    <span>Cancel</span>
                   </button>
                   <button
                     onClick={handleSave}
-                    className="btn-primary flex items-center space-x-2"
+                    className="p-2 text-primary-600 hover:text-primary-700 transition-colors"
                   >
                     <Save className="w-4 h-4" />
-                    <span>Save</span>
                   </button>
                 </>
               ) : (
                 <button
                   onClick={() => setIsEditing(true)}
-                  className="btn-primary flex items-center space-x-2"
+                  className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
                 >
                   <Edit className="w-4 h-4" />
-                  <span>Edit Profile</span>
                 </button>
               )}
             </div>
@@ -454,19 +346,19 @@ export default function PatientProfile() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-4xl mx-auto px-6 py-8">
+      <main className="px-4 py-4 pb-20">
         {/* Profile Header */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-          <div className="flex items-center space-x-6">
-            <div className="w-24 h-24 bg-primary-100 rounded-full flex items-center justify-center">
-              <Heart className="w-12 h-12 text-primary-600" />
+        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+          <div className="flex items-center space-x-4">
+            <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center">
+              <Heart className="w-8 h-8 text-primary-600" />
             </div>
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            <div className="flex-1 min-w-0">
+              <h1 className="text-xl font-bold text-gray-900 mb-1">
                 {user?.name || 'Patient Profile'}
               </h1>
-              <p className="text-gray-600 mb-1">{user?.email}</p>
-              <p className="text-sm text-gray-500">
+              <p className="text-gray-600 text-sm mb-1">{user?.email}</p>
+              <p className="text-xs text-gray-500">
                 {user?.userType?.replace('_', ' ').toUpperCase()}
               </p>
             </div>
@@ -474,10 +366,10 @@ export default function PatientProfile() {
         </div>
 
         {/* Profile Form */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-6">Personal Information</h2>
+        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Personal Information</h2>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-4">
             {/* Date of Birth */}
             <div>
               <label className="label">Date of Birth</label>
@@ -508,7 +400,7 @@ export default function PatientProfile() {
             </div>
 
             {/* Address */}
-            <div className="md:col-span-2">
+            <div>
               <label className="label">Address</label>
               <AddressAutocomplete
                 value={formData.address}
@@ -547,7 +439,7 @@ export default function PatientProfile() {
           </div>
 
           {/* Medical Conditions */}
-          <div className="mt-8">
+          <div className="mt-6">
             <label className="label">Medical Conditions</label>
             <div className="space-y-3">
               {formData.medicalConditions.map((condition, index) => (
@@ -583,7 +475,7 @@ export default function PatientProfile() {
           </div>
 
           {/* Allergies */}
-          <div className="mt-8">
+          <div className="mt-6">
             <label className="label">Allergies</label>
             <div className="space-y-3">
               {formData.allergies.map((allergy, index) => (
@@ -620,7 +512,7 @@ export default function PatientProfile() {
         </div>
 
         {/* Healthcare Providers Section */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
+        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
           <HealthcareProvidersManager
             patientId={user?.id || ''}
             providers={healthcareProviders}
@@ -635,23 +527,52 @@ export default function PatientProfile() {
           />
         </div>
 
-        {/* Medications Section */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-          <MedicationManager
-            patientId={user?.id || ''}
-            medications={medications}
-            onAddMedication={handleAddMedication}
-            onUpdateMedication={handleUpdateMedication}
-            onDeleteMedication={handleDeleteMedication}
-            isLoading={isLoadingMedications}
-          />
-        </div>
-
-        {/* Calendar Integration Section */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <CalendarIntegration patientId={user?.id || ''} />
-        </div>
       </main>
+
+      {/* Mobile Bottom Navigation */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-2 z-50">
+        <div className="flex items-center justify-around">
+          <Link
+            to="/dashboard"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <Heart className="w-5 h-5" />
+            <span className="text-xs">Home</span>
+          </Link>
+          
+          <Link
+            to="/medications"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <Pill className="w-5 h-5" />
+            <span className="text-xs">Medications</span>
+          </Link>
+          
+          <Link
+            to="/calendar"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <Calendar className="w-5 h-5" />
+            <span className="text-xs">Calendar</span>
+          </Link>
+          
+          <Link
+            to="/profile"
+            className="flex flex-col items-center space-y-1 p-2 text-primary-600"
+          >
+            <User className="w-5 h-5" />
+            <span className="text-xs font-medium">Profile</span>
+          </Link>
+          
+          <Link
+            to="/family/invite"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <Users className="w-5 h-5" />
+            <span className="text-xs">Family</span>
+          </Link>
+        </div>
+      </nav>
     </div>
   );
 }

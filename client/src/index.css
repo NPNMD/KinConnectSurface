@@ -46,4 +46,47 @@
   .text-balance {
     text-wrap: balance;
   }
+/* Mobile-friendly utilities */
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  
+  /* Safe area for mobile devices */
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  
+  /* Mobile touch targets */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Mobile-optimized cards */
+  .mobile-card {
+    @apply bg-white rounded-lg border border-gray-200 p-4 shadow-sm;
+  }
+  
+  /* Mobile navigation */
+  .mobile-nav-item {
+    @apply flex flex-col items-center space-y-1 p-2 transition-colors;
+  }
+  
+  .mobile-nav-item.active {
+    @apply text-primary-600;
+  }
+  
+  .mobile-nav-item:not(.active) {
+    @apply text-gray-400 hover:text-gray-600;
+  }
 }

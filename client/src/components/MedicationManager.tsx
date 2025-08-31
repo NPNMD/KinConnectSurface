@@ -3,14 +3,14 @@ import { Plus, Edit, Trash2, Calendar, Pill, Save, X, AlertTriangle, CheckCircle
 import { Medication, NewMedication } from '@shared/types';
 import { DrugConcept, drugApiService } from '@/lib/drugApi';
 import MedicationSearch from './MedicationSearch';
-import MedicationScheduleManager from './MedicationScheduleManager';
 
 // API constants
 const API_BASE = 'https://us-central1-claritystream-uldp9.cloudfunctions.net/api';
 
+import { getIdToken } from '@/lib/firebase';
+
 // Helper function to get authenticated headers
 async function getAuthHeaders(): Promise<HeadersInit> {
-  const { getIdToken } = await import('@/lib/firebase');
   const token = await getIdToken();
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -111,12 +111,15 @@ export default function MedicationManager({
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   // Removed RxNorm-based state variables for OpenFDA-only implementation
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
-  const [showScheduleFor, setShowScheduleFor] = useState<string | null>(null);
-  const [showReminderPrompt, setShowReminderPrompt] = useState(false);
-  const [reminderSettings, setReminderSettings] = useState({
-    enableReminders: false,
-    reminderTimes: ['15'], // minutes before dose
-    notificationMethods: ['browser'] as ('browser' | 'email' | 'sms')[]
+
+  // Default medication timing settings
+  const [defaultTimes, setDefaultTimes] = useState({
+    daily: ['07:00'],
+    twice_daily: ['07:00', '19:00'],
+    three_times_daily: ['07:00', '13:00', '19:00'],
+    four_times_daily: ['07:00', '12:00', '17:00', '22:00'],
+    weekly: ['07:00'],
+    monthly: ['07:00']
   });
 
   const handleDrugSelect = async (drug: DrugConcept) => {
@@ -270,13 +273,13 @@ export default function MedicationManager({
     console.log('🔍 MedicationManager: Form submitted');
     console.log('🔍 MedicationManager: Patient ID:', patientId);
     console.log('🔍 MedicationManager: Form data:', formData);
-    
+
     // Validate form before submission
     if (!validateForm()) {
       console.log('❌ MedicationManager: Form validation failed');
       return;
     }
-    
+
     setIsSubmitting(true);
 
     try {
@@ -313,18 +316,19 @@ export default function MedicationManager({
       } else {
         console.log('🔍 MedicationManager: Adding new medication');
         await onAddMedication(medicationData);
+        console.log('🔍 MedicationManager: Add medication completed');
+
         setIsAddingMedication(false);
-        
-        // Show reminder prompt for new medications
-        setShowReminderPrompt(true);
       }
 
       console.log('✅ MedicationManager: Medication saved successfully');
-      if (!showReminderPrompt) {
-        handleCancel(); // Reset form and clear state only if not showing reminder prompt
-      }
+      handleCancel(); // Reset form and clear state
     } catch (error) {
       console.error('❌ MedicationManager: Error saving medication:', error);
+      // Reset the form state on error
+      if (!editingMedicationId) {
+        setIsAddingMedication(false);
+      }
       // You could add a toast notification here for better UX
     } finally {
       setIsSubmitting(false);
@@ -385,30 +389,195 @@ export default function MedicationManager({
     }
   };
 
+  // Generate default reminder times based on medication frequency
+  const generateDefaultReminderTimes = (frequency: string): string[] => {
+    const freq = frequency.toLowerCase();
+    
+    if (freq.includes('once') || freq.includes('daily')) {
+      return defaultTimes.daily;
+    } else if (freq.includes('twice') || freq.includes('bid')) {
+      return defaultTimes.twice_daily;
+    } else if (freq.includes('three') || freq.includes('tid')) {
+      return defaultTimes.three_times_daily;
+    } else if (freq.includes('four') || freq.includes('qid')) {
+      return defaultTimes.four_times_daily;
+    } else if (freq.includes('weekly')) {
+      return defaultTimes.weekly;
+    } else if (freq.includes('monthly')) {
+      return defaultTimes.monthly;
+    } else {
+      return defaultTimes.daily; // Default fallback
+    }
+  };
+
+  // Simple reminder toggle function
+  const handleToggleReminder = async (medication: Medication) => {
+    try {
+      const newReminderState = !medication.hasReminders;
+      const reminderTimes = newReminderState ? generateDefaultReminderTimes(medication.frequency) : [];
+      
+      // Update medication with reminder state
+      await onUpdateMedication(medication.id, {
+        hasReminders: newReminderState,
+        reminderTimes: reminderTimes
+      });
+
+      // If enabling reminders, create a simple schedule
+      if (newReminderState) {
+        console.log(`✅ Enabled reminders for ${medication.name} at times:`, reminderTimes);
+        
+        // Show a simple confirmation
+        const timesText = reminderTimes.map(time => {
+          const [hours, minutes] = time.split(':');
+          const hour = parseInt(hours);
+          const ampm = hour >= 12 ? 'PM' : 'AM';
+          const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+          return `${displayHour}:${minutes} ${ampm}`;
+        }).join(', ');
+        
+        alert(`Reminders enabled for ${medication.name} at ${timesText}. You can modify default times in settings.`);
+      } else {
+        console.log(`❌ Disabled reminders for ${medication.name}`);
+        alert(`Reminders disabled for ${medication.name}`);
+      }
+    } catch (error) {
+      console.error('Error toggling reminder:', error);
+      alert('Failed to update reminder settings. Please try again.');
+    }
+  };
+
   const activeMedications = medications.filter(med => med.isActive);
   const inactiveMedications = medications.filter(med => !med.isActive);
+
+  // State for showing default times settings
+  const [showDefaultTimesSettings, setShowDefaultTimesSettings] = useState(false);
+
+  // Handle updating default times
+  const handleUpdateDefaultTime = (frequency: string, timeIndex: number, newTime: string) => {
+    setDefaultTimes(prev => ({
+      ...prev,
+      [frequency]: prev[frequency as keyof typeof prev].map((time, index) =>
+        index === timeIndex ? newTime : time
+      )
+    }));
+  };
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-gray-900">Medications</h3>
-        {!isAddingMedication && (
+        <div className="flex items-center space-x-2">
           <button
-            onClick={() => {
-              console.log('🔍 MedicationManager: Add Medication button clicked');
-              console.log('🔍 MedicationManager: Current patient ID:', patientId);
-              console.log('🔍 MedicationManager: Is loading:', isLoading);
-              setIsAddingMedication(true);
-            }}
-            className="btn-primary flex items-center space-x-2"
-            disabled={isLoading}
+            onClick={() => setShowDefaultTimesSettings(!showDefaultTimesSettings)}
+            className="btn-secondary flex items-center space-x-2"
+            title="Medication reminder settings"
           >
-            <Plus className="w-4 h-4" />
-            <span>Add Medication</span>
+            <Clock className="w-4 h-4" />
+            <span>Times</span>
           </button>
-        )}
+          {!isAddingMedication && (
+            <button
+              onClick={() => {
+                console.log('🔍 MedicationManager: Add Medication button clicked');
+                console.log('🔍 MedicationManager: Current patient ID:', patientId);
+                console.log('🔍 MedicationManager: Is loading:', isLoading);
+                setIsAddingMedication(true);
+              }}
+              className="btn-primary flex items-center space-x-2"
+              disabled={isLoading}
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Medication</span>
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Default Times Settings */}
+      {showDefaultTimesSettings && (
+        <div className="bg-blue-50 rounded-lg p-6 border border-blue-200">
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-md font-medium text-blue-900">Default Medication Times</h4>
+            <button
+              onClick={() => setShowDefaultTimesSettings(false)}
+              className="text-blue-400 hover:text-blue-600"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <p className="text-sm text-blue-800 mb-4">
+            Set your preferred times for medication reminders. These will be used as defaults when you enable reminders for medications.
+          </p>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-blue-900 mb-2">Daily (Once a day)</label>
+              <input
+                type="time"
+                value={defaultTimes.daily[0]}
+                onChange={(e) => handleUpdateDefaultTime('daily', 0, e.target.value)}
+                className="input"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-blue-900 mb-2">Twice Daily (BID)</label>
+              <div className="space-y-2">
+                <input
+                  type="time"
+                  value={defaultTimes.twice_daily[0]}
+                  onChange={(e) => handleUpdateDefaultTime('twice_daily', 0, e.target.value)}
+                  className="input"
+                />
+                <input
+                  type="time"
+                  value={defaultTimes.twice_daily[1]}
+                  onChange={(e) => handleUpdateDefaultTime('twice_daily', 1, e.target.value)}
+                  className="input"
+                />
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-blue-900 mb-2">Three Times Daily (TID)</label>
+              <div className="space-y-2">
+                {defaultTimes.three_times_daily.map((time, index) => (
+                  <input
+                    key={index}
+                    type="time"
+                    value={time}
+                    onChange={(e) => handleUpdateDefaultTime('three_times_daily', index, e.target.value)}
+                    className="input"
+                  />
+                ))}
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-blue-900 mb-2">Four Times Daily (QID)</label>
+              <div className="space-y-2">
+                {defaultTimes.four_times_daily.map((time, index) => (
+                  <input
+                    key={index}
+                    type="time"
+                    value={time}
+                    onChange={(e) => handleUpdateDefaultTime('four_times_daily', index, e.target.value)}
+                    className="input"
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+          
+          <div className="mt-4 p-3 bg-blue-100 rounded-md">
+            <p className="text-sm text-blue-800">
+              <Info className="w-4 h-4 inline mr-1" />
+              These times will be automatically applied when you enable reminders for medications. You can always adjust individual medication times later.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Add/Edit Medication Form */}
       {isAddingMedication && (
@@ -691,181 +860,6 @@ export default function MedicationManager({
         </div>
       )}
 
-      {/* Medication Reminder Prompt */}
-      {showReminderPrompt && (
-        <div className="bg-blue-50 rounded-lg p-6 border border-blue-200">
-          <div className="flex items-start space-x-3">
-            <div className="flex-shrink-0">
-              <Bell className="w-6 h-6 text-blue-600" />
-            </div>
-            <div className="flex-1">
-              <h4 className="text-lg font-medium text-blue-900 mb-2">
-                Set Up Medication Reminders
-              </h4>
-              <p className="text-blue-800 mb-4">
-                Would you like to receive reminders for this medication? We can send you notifications to help you stay on track with your medication schedule.
-              </p>
-              
-              <div className="space-y-4">
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="enableReminders"
-                    checked={reminderSettings.enableReminders}
-                    onChange={(e) => setReminderSettings(prev => ({
-                      ...prev,
-                      enableReminders: e.target.checked
-                    }))}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <label htmlFor="enableReminders" className="text-sm font-medium text-blue-900">
-                    Enable medication reminders
-                  </label>
-                </div>
-                
-                {reminderSettings.enableReminders && (
-                  <div className="ml-6 space-y-3">
-                    <div>
-                      <label className="block text-sm font-medium text-blue-900 mb-2">
-                        Reminder timing (minutes before dose)
-                      </label>
-                      <div className="flex flex-wrap gap-2">
-                        {['5', '10', '15', '30', '60'].map(minutes => (
-                          <label key={minutes} className="flex items-center space-x-1">
-                            <input
-                              type="checkbox"
-                              checked={reminderSettings.reminderTimes.includes(minutes)}
-                              onChange={(e) => {
-                                setReminderSettings(prev => ({
-                                  ...prev,
-                                  reminderTimes: e.target.checked
-                                    ? [...prev.reminderTimes, minutes]
-                                    : prev.reminderTimes.filter(t => t !== minutes)
-                                }));
-                              }}
-                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            <span className="text-sm text-blue-800">{minutes} min</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium text-blue-900 mb-2">
-                        Notification methods
-                      </label>
-                      <div className="space-y-2">
-                        <label className="flex items-center space-x-2">
-                          <input
-                            type="checkbox"
-                            checked={reminderSettings.notificationMethods.includes('browser')}
-                            onChange={(e) => {
-                              setReminderSettings(prev => ({
-                                ...prev,
-                                notificationMethods: e.target.checked
-                                  ? [...prev.notificationMethods.filter(m => m !== 'browser'), 'browser']
-                                  : prev.notificationMethods.filter(m => m !== 'browser')
-                              }));
-                            }}
-                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <span className="text-sm text-blue-800">Browser notifications</span>
-                        </label>
-                        <label className="flex items-center space-x-2">
-                          <input
-                            type="checkbox"
-                            checked={reminderSettings.notificationMethods.includes('email')}
-                            onChange={(e) => {
-                              setReminderSettings(prev => ({
-                                ...prev,
-                                notificationMethods: e.target.checked
-                                  ? [...prev.notificationMethods.filter(m => m !== 'email'), 'email']
-                                  : prev.notificationMethods.filter(m => m !== 'email')
-                              }));
-                            }}
-                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <span className="text-sm text-blue-800">Email notifications</span>
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-              
-              <div className="flex justify-end space-x-3 mt-6">
-                <button
-                  onClick={() => {
-                    setShowReminderPrompt(false);
-                    setReminderSettings({
-                      enableReminders: false,
-                      reminderTimes: ['15'],
-                      notificationMethods: ['browser']
-                    });
-                    handleCancel();
-                  }}
-                  className="btn-secondary"
-                >
-                  Skip for now
-                </button>
-                <button
-                  onClick={async () => {
-                    if (reminderSettings.enableReminders) {
-                      try {
-                        // Request browser notification permission
-                        if (reminderSettings.notificationMethods.includes('browser')) {
-                          if ('Notification' in window && Notification.permission === 'default') {
-                            await Notification.requestPermission();
-                          }
-                        }
-                        
-                        // Get the most recently added medication ID
-                        const latestMedication = medications[medications.length - 1];
-                        if (latestMedication) {
-                          // Save reminder settings to backend
-                          const response = await fetch(`${API_BASE}/medication-reminders`, {
-                            method: 'POST',
-                            headers: await getAuthHeaders(),
-                            body: JSON.stringify({
-                              medicationId: latestMedication.id,
-                              reminderTimes: reminderSettings.reminderTimes,
-                              notificationMethods: reminderSettings.notificationMethods,
-                              isActive: true
-                            })
-                          });
-                          
-                          if (response.ok) {
-                            console.log('✅ Medication reminder settings saved successfully');
-                            alert('Medication reminders have been set up successfully!');
-                          } else {
-                            console.error('❌ Failed to save reminder settings');
-                            alert('Failed to set up reminders. Please try again.');
-                          }
-                        }
-                      } catch (error) {
-                        console.error('❌ Error setting up reminders:', error);
-                        alert('Failed to set up reminders. Please try again.');
-                      }
-                    }
-                    
-                    setShowReminderPrompt(false);
-                    setReminderSettings({
-                      enableReminders: false,
-                      reminderTimes: ['15'],
-                      notificationMethods: ['browser']
-                    });
-                    handleCancel();
-                  }}
-                  className="btn-primary"
-                >
-                  {reminderSettings.enableReminders ? 'Set Up Reminders' : 'Continue'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Active Medications */}
       {activeMedications.length > 0 && (
@@ -911,15 +905,15 @@ export default function MedicationManager({
                   </div>
                   <div className="flex items-center space-x-2">
                     <button
-                      onClick={() => setShowScheduleFor(showScheduleFor === medication.id ? null : medication.id)}
+                      onClick={() => handleToggleReminder(medication)}
                       className={`p-2 transition-colors ${
-                        showScheduleFor === medication.id
+                        medication.hasReminders
                           ? 'text-primary-600 bg-primary-50'
                           : 'text-gray-400 hover:text-primary-600 hover:bg-primary-50'
                       }`}
-                      title="Manage schedule"
+                      title={medication.hasReminders ? 'Reminders enabled' : 'Enable reminders'}
                     >
-                      <Clock className="w-4 h-4" />
+                      <Bell className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => handleEdit(medication)}
@@ -937,19 +931,6 @@ export default function MedicationManager({
                     </button>
                   </div>
                 </div>
-                
-                {/* Medication Schedule Manager */}
-                {showScheduleFor === medication.id && (
-                  <div className="mt-4 pt-4 border-t border-gray-200">
-                    <MedicationScheduleManager
-                      medication={medication}
-                      onScheduleChange={() => {
-                        // Optionally refresh medication data or show success message
-                        console.log('Schedule updated for medication:', medication.name);
-                      }}
-                    />
-                  </div>
-                )}
               </div>
             ))}
           </div>

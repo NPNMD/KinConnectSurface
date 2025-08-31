@@ -72,7 +72,12 @@ class MedicationCalendarApi {
   // Create a new medication schedule
   async createMedicationSchedule(scheduleData: NewMedicationSchedule): Promise<ApiResponse<MedicationSchedule>> {
     try {
+      console.log('🔧 MedicationCalendarApi: Creating medication schedule');
+      console.log('🔧 MedicationCalendarApi: Schedule data:', scheduleData);
+      
       const headers = await getAuthHeaders();
+      console.log('🔧 MedicationCalendarApi: Headers prepared');
+      
       const response = await fetch(`${API_BASE}/medication-calendar/schedules`, {
         method: 'POST',
         headers,
@@ -80,12 +85,27 @@ class MedicationCalendarApi {
         body: JSON.stringify(scheduleData),
       });
 
-      return await response.json();
+      console.log('🔧 MedicationCalendarApi: Response status:', response.status);
+      console.log('🔧 MedicationCalendarApi: Response ok:', response.ok);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ MedicationCalendarApi: HTTP error:', response.status, errorText);
+        return {
+          success: false,
+          error: `HTTP ${response.status}: ${errorText}`
+        };
+      }
+
+      const result = await response.json();
+      console.log('🔧 MedicationCalendarApi: Response data:', result);
+      
+      return result;
     } catch (error) {
-      console.error('Error creating medication schedule:', error);
+      console.error('❌ MedicationCalendarApi: Error creating medication schedule:', error);
       return {
         success: false,
-        error: 'Failed to create medication schedule'
+        error: error instanceof Error ? error.message : 'Failed to create medication schedule'
       };
     }
   }
@@ -310,19 +330,19 @@ class MedicationCalendarApi {
   generateDefaultTimes(frequency: string): string[] {
     switch (frequency) {
       case 'daily':
-        return ['08:00'];
+        return ['07:00'];
       case 'twice_daily':
-        return ['08:00', '20:00'];
+        return ['07:00', '19:00'];
       case 'three_times_daily':
-        return ['08:00', '14:00', '20:00'];
+        return ['07:00', '13:00', '19:00'];
       case 'four_times_daily':
-        return ['08:00', '12:00', '16:00', '20:00'];
+        return ['07:00', '12:00', '17:00', '22:00'];
       case 'weekly':
-        return ['08:00'];
+        return ['07:00'];
       case 'monthly':
-        return ['08:00'];
+        return ['07:00'];
       default:
-        return ['08:00'];
+        return ['07:00'];
     }
   }
 

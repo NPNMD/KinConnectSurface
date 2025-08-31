@@ -5,6 +5,8 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import Landing from '@/pages/Landing';
 import Dashboard from '@/pages/Dashboard';
 import PatientProfile from '@/pages/PatientProfile';
+import Medications from '@/pages/Medications';
+import CalendarPage from '@/pages/CalendarPage';
 import InvitePatient from '@/pages/InvitePatient';
 import AcceptInvitation from '@/pages/AcceptInvitation';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -105,6 +107,18 @@ function AppRoutes() {
       <Route path="/profile" element={
         <ProtectedRoute>
           <PatientProfile />
+        </ProtectedRoute>
+      } />
+      
+      <Route path="/medications" element={
+        <ProtectedRoute>
+          <Medications />
+        </ProtectedRoute>
+      } />
+      
+      <Route path="/calendar" element={
+        <ProtectedRoute>
+          <CalendarPage />
         </ProtectedRoute>
       } />
       

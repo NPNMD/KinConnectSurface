@@ -142,6 +142,8 @@ export interface Medication {
   pharmacy?: string;
   prescriptionNumber?: string;
   refillsRemaining?: number;
+  hasReminders?: boolean; // Simple reminder flag
+  reminderTimes?: string[]; // Default times for reminders based on frequency
   createdAt: Date;
   updatedAt: Date;
 }
@@ -171,6 +173,8 @@ export interface NewMedication {
   pharmacy?: string;
   prescriptionNumber?: string;
   refillsRemaining?: number;
+  hasReminders?: boolean;
+  reminderTimes?: string[];
 }
 
 // Drug search and RxNorm types

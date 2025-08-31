@@ -43,7 +43,7 @@ interface ScheduleFormData {
 
 const initialFormData: ScheduleFormData = {
   frequency: 'daily',
-  times: ['08:00'],
+  times: ['07:00'],
   daysOfWeek: [],
   dayOfMonth: 1,
   startDate: new Date().toISOString().split('T')[0],
@@ -100,7 +100,33 @@ export default function MedicationScheduleManager({
   useEffect(() => {
     loadSchedules();
     loadRecentEvents();
-  }, [medication.id]);
+    
+    // Auto-populate form with medication data when component mounts
+    if (medication && !isAddingSchedule) {
+      const medicationFrequency = medication.frequency?.toLowerCase() || '';
+      let scheduleFrequency: ScheduleFormData['frequency'] = 'daily';
+      
+      // Map medication frequency to schedule frequency
+      if (medicationFrequency.includes('once') || medicationFrequency.includes('daily')) {
+        scheduleFrequency = 'daily';
+      } else if (medicationFrequency.includes('twice')) {
+        scheduleFrequency = 'twice_daily';
+      } else if (medicationFrequency.includes('three')) {
+        scheduleFrequency = 'three_times_daily';
+      } else if (medicationFrequency.includes('four')) {
+        scheduleFrequency = 'four_times_daily';
+      }
+      
+      // Update initial form data with medication info
+      setFormData(prev => ({
+        ...prev,
+        dosageAmount: medication.dosage || '',
+        instructions: medication.instructions || '',
+        frequency: scheduleFrequency,
+        times: medicationCalendarApi.generateDefaultTimes(scheduleFrequency)
+      }));
+    }
+  }, [medication.id, medication, isAddingSchedule]);
 
   const loadSchedules = async () => {
     try {
@@ -175,7 +201,7 @@ export default function MedicationScheduleManager({
   const addTime = () => {
     setFormData(prev => ({
       ...prev,
-      times: [...prev.times, '08:00']
+      times: [...prev.times, '07:00']
     }));
   };
 
@@ -252,6 +278,11 @@ export default function MedicationScheduleManager({
     setIsSubmitting(true);
 
     try {
+      console.log('🔍 MedicationScheduleManager: Submitting schedule data');
+      console.log('🔍 MedicationScheduleManager: Medication ID:', medication.id);
+      console.log('🔍 MedicationScheduleManager: Patient ID:', medication.patientId);
+      console.log('🔍 MedicationScheduleManager: Form data:', formData);
+
       const scheduleData: NewMedicationSchedule = {
         medicationId: medication.id,
         patientId: medication.patientId,
@@ -269,23 +300,32 @@ export default function MedicationScheduleManager({
         isActive: true
       };
 
+      console.log('🔍 MedicationScheduleManager: Prepared schedule data:', scheduleData);
+
       let result;
       if (editingScheduleId) {
+        console.log('🔍 MedicationScheduleManager: Updating existing schedule:', editingScheduleId);
         result = await medicationCalendarApi.updateMedicationSchedule(editingScheduleId, scheduleData);
       } else {
+        console.log('🔍 MedicationScheduleManager: Creating new schedule');
         result = await medicationCalendarApi.createMedicationSchedule(scheduleData);
       }
 
+      console.log('🔍 MedicationScheduleManager: API result:', result);
+
       if (result.success) {
+        console.log('✅ MedicationScheduleManager: Schedule saved successfully');
         await loadSchedules();
         await loadRecentEvents();
         handleCancel();
         onScheduleChange?.();
       } else {
-        console.error('Failed to save schedule:', result.error);
+        console.error('❌ MedicationScheduleManager: Failed to save schedule:', result.error);
+        alert(`Failed to save schedule: ${result.error || 'Unknown error'}`);
       }
     } catch (error) {
-      console.error('Error saving schedule:', error);
+      console.error('❌ MedicationScheduleManager: Error saving schedule:', error);
+      alert(`Error saving schedule: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -681,9 +721,9 @@ export default function MedicationScheduleManager({
                             <Clock className="w-3 h-3" />
                             <span>{formatTimes(schedule.times)}</span>
                           </span>
-                          {schedule.frequency === 'weekly' && schedule.daysOfWeek && (
+                          {schedule.frequency === 'weekly' && schedule.daysOfWeek && schedule.daysOfWeek.length > 0 && (
                             <span>
-                              Days: {schedule.daysOfWeek.map(d => DAYS_OF_WEEK.find(day => day.value === d)?.label.slice(0, 3)).join(', ')}
+                              Days: {schedule.daysOfWeek.map((d, index) => DAYS_OF_WEEK.find(day => day.value === d)?.label.slice(0, 3)).join(', ')}
                             </span>
                           )}
                         </div>
