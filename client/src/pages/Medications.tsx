@@ -35,6 +35,7 @@ export default function Medications() {
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
   const [showReminders, setShowReminders] = useState(true);
   const [useTimeBuckets, setUseTimeBuckets] = useState(true); // New enhanced view
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // Trigger for TimeBucketView refresh
 
   // Load medications function
   const loadMedications = async () => {
@@ -234,10 +235,12 @@ export default function Medications() {
                   date={new Date()}
                   onMedicationAction={(eventId, action) => {
                     console.log('Medication action performed:', { eventId, action });
-                    // Refresh medications after action
+                    // Refresh medications and trigger TimeBucketView refresh
                     loadMedications();
+                    setRefreshTrigger(prev => prev + 1);
                   }}
                   compactMode={false}
+                  refreshTrigger={refreshTrigger}
                 />
               ) : (
                 <MedicationReminders

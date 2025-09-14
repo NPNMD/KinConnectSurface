@@ -27,6 +27,7 @@ interface TimeBucketViewProps {
   date?: Date;
   onMedicationAction?: (eventId: string, action: 'take' | 'snooze' | 'skip' | 'reschedule') => void;
   compactMode?: boolean;
+  refreshTrigger?: number; // Add this to force refresh from parent
 }
 
 interface TimeBucket {
@@ -39,11 +40,12 @@ interface TimeBucket {
   color: string;
 }
 
-export default function TimeBucketView({ 
-  patientId, 
-  date = new Date(), 
+export default function TimeBucketView({
+  patientId,
+  date = new Date(),
   onMedicationAction,
-  compactMode = false 
+  compactMode = false,
+  refreshTrigger = 0
 }: TimeBucketViewProps) {
   const [buckets, setBuckets] = useState<TodayMedicationBuckets | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -57,6 +59,14 @@ export default function TimeBucketView({
     const interval = setInterval(loadTodaysBuckets, 60000);
     return () => clearInterval(interval);
   }, [patientId, date]);
+
+  // Refresh when refreshTrigger changes (triggered by parent component)
+  useEffect(() => {
+    if (refreshTrigger > 0) {
+      console.log('🔄 TimeBucketView: Refresh triggered by parent');
+      loadTodaysBuckets();
+    }
+  }, [refreshTrigger]);
 
   const loadTodaysBuckets = async () => {
     try {
@@ -87,23 +97,24 @@ export default function TimeBucketView({
     try {
       setProcessingAction(eventId);
       
+      let result;
       switch (action) {
         case 'take':
-          await medicationCalendarApi.markMedicationTaken(eventId, new Date());
+          result = await medicationCalendarApi.markMedicationTaken(eventId, new Date());
           break;
         case 'snooze':
           if (actionData?.minutes) {
-            await medicationCalendarApi.snoozeMedication(eventId, actionData.minutes, actionData.reason);
+            result = await medicationCalendarApi.snoozeMedication(eventId, actionData.minutes, actionData.reason);
           }
           break;
         case 'skip':
           if (actionData?.reason) {
-            await medicationCalendarApi.skipMedication(eventId, actionData.reason, actionData.notes);
+            result = await medicationCalendarApi.skipMedication(eventId, actionData.reason, actionData.notes);
           }
           break;
         case 'reschedule':
           if (actionData?.newTime && actionData?.reason) {
-            await medicationCalendarApi.rescheduleMedication(
+            result = await medicationCalendarApi.rescheduleMedication(
               eventId,
               actionData.newTime,
               actionData.reason,
@@ -113,12 +124,24 @@ export default function TimeBucketView({
           break;
       }
       
-      // Refresh buckets after action
-      await loadTodaysBuckets();
-      onMedicationAction?.(eventId, action);
+      // Check if the action was successful
+      if (result && result.success) {
+        console.log(`✅ ${action} action successful for event:`, eventId);
+        
+        // Force refresh buckets after successful action
+        setTimeout(async () => {
+          await loadTodaysBuckets();
+        }, 500); // Small delay to ensure backend is updated
+        
+        onMedicationAction?.(eventId, action);
+      } else {
+        console.error(`❌ ${action} action failed:`, result?.error);
+        alert(`Failed to ${action} medication: ${result?.error || 'Unknown error'}`);
+      }
       
     } catch (error) {
       console.error('Error performing medication action:', error);
+      alert(`Failed to ${action} medication. Please try again.`);
     } finally {
       setProcessingAction(null);
     }
