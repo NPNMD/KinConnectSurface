@@ -342,8 +342,36 @@ export default function VisitSummaryCard({
       {/* Expanded Content */}
       {isExpanded && (
         <div className="p-4 space-y-4">
-          {/* Original Visit Summary */}
-          {shouldShowField('doctorSummary') && (
+          {/* Original Transcript (if available) */}
+          {summary.inputMethod === 'voice' && summary.voiceTranscriptionId && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h5 className="text-sm font-medium text-gray-900 flex items-center space-x-2">
+                  <FileText className="w-4 h-4 text-blue-600" />
+                  <span>Original Transcript</span>
+                </h5>
+                <button
+                  onClick={() => setShowFullSummary(!showFullSummary)}
+                  className="text-xs text-blue-600 hover:text-blue-700 flex items-center space-x-1"
+                >
+                  {showFullSummary ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                  <span>{showFullSummary ? 'Hide' : 'Show'} Full Transcript</span>
+                </button>
+              </div>
+              <div className="text-sm text-gray-700 bg-blue-50 p-3 rounded-md border border-blue-200">
+                <div className="flex items-center space-x-2 mb-2 text-blue-600">
+                  <Clock className="w-3 h-3" />
+                  <span className="text-xs">Voice Recording ID: {summary.voiceTranscriptionId}</span>
+                </div>
+                {showFullSummary ? accessibleSummary.doctorSummary :
+                  `${accessibleSummary.doctorSummary?.substring(0, 300)}${accessibleSummary.doctorSummary && accessibleSummary.doctorSummary.length > 300 ? '...' : ''}`
+                }
+              </div>
+            </div>
+          )}
+
+          {/* Original Visit Summary (for text input) */}
+          {summary.inputMethod !== 'voice' && shouldShowField('doctorSummary') && (
             <div>
               <div className="flex items-center justify-between mb-2">
                 <h5 className="text-sm font-medium text-gray-900">Visit Summary</h5>
@@ -355,7 +383,7 @@ export default function VisitSummaryCard({
                 </button>
               </div>
               <div className="text-sm text-gray-700 bg-gray-50 p-3 rounded-md">
-                {showFullSummary ? accessibleSummary.doctorSummary : 
+                {showFullSummary ? accessibleSummary.doctorSummary :
                   `${accessibleSummary.doctorSummary?.substring(0, 200)}${accessibleSummary.doctorSummary && accessibleSummary.doctorSummary.length > 200 ? '...' : ''}`
                 }
               </div>

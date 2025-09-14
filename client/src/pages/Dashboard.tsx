@@ -725,7 +725,11 @@ export default function Dashboard() {
 
               {/* Recent Visit Summaries */}
               {recentVisitSummaries.slice(0, 2).map((summary) => (
-                <div key={summary.id} className="bg-white rounded-lg p-4 border border-gray-200">
+                <Link
+                  key={summary.id}
+                  to={`/visit-summary/${summary.id}`}
+                  className="block bg-white rounded-lg p-4 border border-gray-200 hover:shadow-md hover:border-blue-300 transition-all duration-200 cursor-pointer"
+                >
                   <div className="flex items-start space-x-3">
                     <div className="flex-shrink-0 mt-1">
                       <FileText className="w-5 h-5 text-blue-600" />
@@ -762,10 +766,16 @@ export default function Dashboard() {
                           {summary.aiProcessedSummary.keyPoints[0]}
                         </p>
                       )}
+                      {summary.inputMethod === 'voice' && summary.voiceTranscriptionId && (
+                        <div className="mt-2 flex items-center space-x-2 text-xs text-blue-600">
+                          <Mic className="w-3 h-3" />
+                          <span>Voice recording available</span>
+                        </div>
+                      )}
                     </div>
                     <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0 mt-1" />
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           ) : (

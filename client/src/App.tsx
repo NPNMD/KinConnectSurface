@@ -9,6 +9,8 @@ import Medications from '@/pages/Medications';
 import CalendarPage from '@/pages/CalendarPage';
 import InvitePatient from '@/pages/InvitePatient';
 import AcceptInvitation from '@/pages/AcceptInvitation';
+import VisitSummaryDetail from '@/pages/VisitSummaryDetail';
+import VisitSummaries from '@/pages/VisitSummaries';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import ServiceWorkerUpdate from '@/components/ServiceWorkerUpdate';
 import { registerServiceWorker } from '@/utils/serviceWorker';
@@ -125,6 +127,19 @@ function AppRoutes() {
       <Route path="/family/invite" element={
         <ProtectedRoute>
           <InvitePatient />
+        </ProtectedRoute>
+      } />
+      
+      {/* Visit Summary Routes */}
+      <Route path="/visit-summaries" element={
+        <ProtectedRoute>
+          <VisitSummaries />
+        </ProtectedRoute>
+      } />
+      
+      <Route path="/visit-summary/:summaryId" element={
+        <ProtectedRoute>
+          <VisitSummaryDetail />
         </ProtectedRoute>
       } />
       
