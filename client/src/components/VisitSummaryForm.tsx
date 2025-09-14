@@ -124,14 +124,45 @@ export default function VisitSummaryForm({
   const handleRecordingComplete = (visitId: string, results: any) => {
     console.log('🎤 Recording completed:', { visitId, results });
     
+    // The results object contains the AI-processed summary, not just transcript
+    // We need to extract the transcript or create a summary from the processed data
+    let doctorSummary = '';
+    
+    // Try to get transcript first
     if (results?.transcript) {
+      doctorSummary = results.transcript.trim();
+    }
+    // If no transcript, create summary from AI results
+    else if (results?.keyPoints && results.keyPoints.length > 0) {
+      doctorSummary = results.keyPoints.join('. ') + '.';
+      if (results.actionItems && results.actionItems.length > 0) {
+        doctorSummary += '\n\nAction Items:\n' + results.actionItems.map((item: string) => `• ${item}`).join('\n');
+      }
+    }
+    // Fallback: use any text content available
+    else if (results?.text || results?.transcription) {
+      doctorSummary = (results.text || results.transcription).trim();
+    }
+    
+    if (doctorSummary && doctorSummary.trim()) {
       setFormData(prev => ({
         ...prev,
-        doctorSummary: results.transcript,
+        doctorSummary: doctorSummary.trim(),
         inputMethod: 'voice',
         voiceTranscriptionId: visitId
       }));
       setRecordingCompleted(true);
+      console.log('✅ Doctor summary saved to form:', doctorSummary.substring(0, 100) + '...');
+    } else {
+      console.warn('⚠️ No usable content found in results:', results);
+      // Still mark as completed but show a message
+      setRecordingCompleted(true);
+      setFormData(prev => ({
+        ...prev,
+        doctorSummary: 'Recording completed - please add visit details manually.',
+        inputMethod: 'voice',
+        voiceTranscriptionId: visitId
+      }));
     }
   };
 
@@ -382,6 +413,16 @@ export default function VisitSummaryForm({
             type="submit"
             disabled={isSubmitting || !formData.doctorSummary?.trim()}
             className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
+            onClick={() => {
+              console.log('🔍 Button click debug:', {
+                isSubmitting,
+                hasDoctorSummary: !!formData.doctorSummary,
+                doctorSummaryLength: formData.doctorSummary?.length || 0,
+                doctorSummaryTrimmed: formData.doctorSummary?.trim() || '',
+                isDisabled: isSubmitting || !formData.doctorSummary?.trim(),
+                formData: formData
+              });
+            }}
           >
             {isSubmitting ? (
               <>
