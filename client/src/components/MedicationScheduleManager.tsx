@@ -103,19 +103,45 @@ export default function MedicationScheduleManager({
     
     // Auto-populate form with medication data when component mounts
     if (medication && !isAddingSchedule) {
-      const medicationFrequency = medication.frequency?.toLowerCase() || '';
+      const medicationFrequency = medication.frequency?.toLowerCase().trim() || '';
       let scheduleFrequency: ScheduleFormData['frequency'] = 'daily';
       
-      // Map medication frequency to schedule frequency
-      if (medicationFrequency.includes('once') || medicationFrequency.includes('daily')) {
+      console.log('🔍 MedicationScheduleManager: Mapping frequency:', medicationFrequency);
+      
+      // Improved medication frequency to schedule frequency mapping
+      if (medicationFrequency.includes('once daily') || medicationFrequency.includes('once a day') || medicationFrequency === 'daily' || medicationFrequency.includes('once')) {
         scheduleFrequency = 'daily';
-      } else if (medicationFrequency.includes('twice')) {
+      } else if (medicationFrequency.includes('twice daily') || medicationFrequency.includes('twice a day') || medicationFrequency.includes('bid') || medicationFrequency.includes('twice')) {
         scheduleFrequency = 'twice_daily';
-      } else if (medicationFrequency.includes('three')) {
+      } else if (medicationFrequency.includes('three times daily') || medicationFrequency.includes('three times a day') || medicationFrequency.includes('tid') || medicationFrequency.includes('three')) {
         scheduleFrequency = 'three_times_daily';
-      } else if (medicationFrequency.includes('four')) {
+      } else if (medicationFrequency.includes('four times daily') || medicationFrequency.includes('four times a day') || medicationFrequency.includes('qid') || medicationFrequency.includes('four')) {
         scheduleFrequency = 'four_times_daily';
+      } else if (medicationFrequency.includes('every 4 hours')) {
+        scheduleFrequency = 'four_times_daily'; // Closest match
+      } else if (medicationFrequency.includes('every 6 hours')) {
+        scheduleFrequency = 'four_times_daily';
+      } else if (medicationFrequency.includes('every 8 hours')) {
+        scheduleFrequency = 'three_times_daily';
+      } else if (medicationFrequency.includes('every 12 hours')) {
+        scheduleFrequency = 'twice_daily';
+      } else if (medicationFrequency.includes('weekly')) {
+        scheduleFrequency = 'weekly';
+      } else if (medicationFrequency.includes('monthly')) {
+        scheduleFrequency = 'monthly';
+      } else if (medicationFrequency.includes('as needed') || medicationFrequency.includes('prn')) {
+        scheduleFrequency = 'as_needed';
+      } else {
+        // Default fallback with warning
+        console.warn(`⚠️ MedicationScheduleManager: Unknown frequency "${medicationFrequency}", defaulting to daily`);
+        scheduleFrequency = 'daily';
       }
+      
+      console.log('🔍 MedicationScheduleManager: Mapped to schedule frequency:', scheduleFrequency);
+      
+      // Generate default times for the mapped frequency
+      const defaultTimes = medicationCalendarApi.generateDefaultTimes(scheduleFrequency);
+      console.log('🔍 MedicationScheduleManager: Generated default times:', defaultTimes);
       
       // Update initial form data with medication info
       setFormData(prev => ({
@@ -123,7 +149,7 @@ export default function MedicationScheduleManager({
         dosageAmount: medication.dosage || '',
         instructions: medication.instructions || '',
         frequency: scheduleFrequency,
-        times: medicationCalendarApi.generateDefaultTimes(scheduleFrequency)
+        times: defaultTimes
       }));
     }
   }, [medication.id, medication, isAddingSchedule]);
@@ -165,6 +191,8 @@ export default function MedicationScheduleManager({
   };
 
   const handleInputChange = (field: keyof ScheduleFormData, value: any) => {
+    console.log('🔍 MedicationScheduleManager: Input change:', field, value);
+    
     setFormData(prev => ({
       ...prev,
       [field]: value
@@ -182,6 +210,9 @@ export default function MedicationScheduleManager({
     // Auto-generate times based on frequency
     if (field === 'frequency') {
       const defaultTimes = medicationCalendarApi.generateDefaultTimes(value);
+      console.log('🔍 MedicationScheduleManager: Frequency changed to:', value);
+      console.log('🔍 MedicationScheduleManager: New default times:', defaultTimes);
+      
       setFormData(prev => ({
         ...prev,
         times: defaultTimes
@@ -190,8 +221,20 @@ export default function MedicationScheduleManager({
   };
 
   const handleTimeChange = (index: number, value: string) => {
+    console.log('🔍 MedicationScheduleManager: Time change at index', index, 'to:', value);
+    
+    // Validate time format
+    const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    if (value && !timeRegex.test(value)) {
+      console.warn('⚠️ MedicationScheduleManager: Invalid time format:', value);
+      return;
+    }
+    
     const newTimes = [...formData.times];
     newTimes[index] = value;
+    
+    console.log('🔍 MedicationScheduleManager: Updated times array:', newTimes);
+    
     setFormData(prev => ({
       ...prev,
       times: newTimes
@@ -199,6 +242,7 @@ export default function MedicationScheduleManager({
   };
 
   const addTime = () => {
+    console.log('🔍 MedicationScheduleManager: Adding new time slot');
     setFormData(prev => ({
       ...prev,
       times: [...prev.times, '07:00']
@@ -246,6 +290,27 @@ export default function MedicationScheduleManager({
 
     if (formData.times.length === 0) {
       errors.times = 'At least one time is required';
+    } else {
+      // Validate time format for all times
+      const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+      for (const time of formData.times) {
+        if (!time || !timeRegex.test(time)) {
+          errors.times = `Invalid time format: ${time}. Use HH:MM format (e.g., 07:00, 19:00)`;
+          break;
+        }
+      }
+      
+      // Check for duplicate times
+      const uniqueTimes = new Set(formData.times);
+      if (uniqueTimes.size !== formData.times.length) {
+        errors.times = 'Duplicate times are not allowed';
+      }
+      
+      // Validate times are in chronological order for better UX
+      const sortedTimes = [...formData.times].sort();
+      if (JSON.stringify(sortedTimes) !== JSON.stringify(formData.times)) {
+        console.log('ℹ️ MedicationScheduleManager: Times are not in chronological order, but this is allowed');
+      }
     }
 
     if (formData.frequency === 'weekly' && formData.daysOfWeek.length === 0) {
@@ -263,6 +328,11 @@ export default function MedicationScheduleManager({
         errors.endDate = 'End date must be after start date';
       }
     }
+
+    console.log('🔍 MedicationScheduleManager: Form validation result:', {
+      isValid: Object.keys(errors).length === 0,
+      errors
+    });
 
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;

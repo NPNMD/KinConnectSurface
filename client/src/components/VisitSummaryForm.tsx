@@ -1,26 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  FileText, 
-  Mic, 
-  MicOff, 
-  Save, 
-  Sparkles, 
-  Calendar, 
-  User, 
-  Building, 
-  Clock,
-  AlertCircle,
+import {
+  FileText,
+  Save,
+  Sparkles,
+  Calendar,
+  User,
+  Building,
+  Loader2,
   CheckCircle,
-  Loader2
+  AlertCircle
 } from 'lucide-react';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
-import type { 
-  NewVisitSummary, 
-  VisitType, 
-  VisitInputMethod, 
+import SimpleVisitRecorder from './SimpleVisitRecorder';
+import type {
+  NewVisitSummary,
+  VisitType,
+  VisitInputMethod,
   VisitFamilyAccessLevel,
   HealthcareProvider,
-  MedicalFacility 
+  MedicalFacility
 } from '@shared/types';
 
 interface VisitSummaryFormProps {
@@ -39,10 +37,10 @@ export default function VisitSummaryForm({
   initialData 
 }: VisitSummaryFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
   const [providers, setProviders] = useState<HealthcareProvider[]>([]);
   const [facilities, setFacilities] = useState<MedicalFacility[]>([]);
   const [loadingProviders, setLoadingProviders] = useState(false);
+  const [recordingCompleted, setRecordingCompleted] = useState(false);
   
   const [formData, setFormData] = useState<Partial<NewVisitSummary>>({
     patientId,
@@ -51,16 +49,11 @@ export default function VisitSummaryForm({
     visitType: 'scheduled',
     inputMethod: 'text',
     doctorSummary: '',
-    treatmentPlan: '',
     providerName: '',
     providerSpecialty: '',
     facilityName: '',
-    chiefComplaint: '',
-    diagnosis: [],
-    procedures: [],
     sharedWithFamily: true,
     familyAccessLevel: 'summary_only',
-    tags: [],
     ...initialData
   });
 
@@ -127,38 +120,34 @@ export default function VisitSummaryForm({
     }
   };
 
-  const handleVoiceRecording = async () => {
-    if (!isRecording) {
-      // Start recording
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        setIsRecording(true);
-        setFormData(prev => ({ ...prev, inputMethod: 'voice' }));
-        
-        // TODO: Implement actual voice recording and transcription
-        console.log('Voice recording started');
-        
-        // For now, just simulate recording
-        setTimeout(() => {
-          setIsRecording(false);
-          console.log('Voice recording stopped');
-        }, 5000);
-        
-      } catch (error) {
-        console.error('Error starting voice recording:', error);
-        alert('Unable to access microphone. Please check permissions.');
-      }
-    } else {
-      // Stop recording
-      setIsRecording(false);
+  // Handle recording completion
+  const handleRecordingComplete = (visitId: string, results: any) => {
+    console.log('🎤 Recording completed:', { visitId, results });
+    
+    if (results?.transcript) {
+      setFormData(prev => ({
+        ...prev,
+        doctorSummary: results.transcript,
+        inputMethod: 'voice',
+        voiceTranscriptionId: visitId
+      }));
+      setRecordingCompleted(true);
     }
+  };
+
+  // Handle recording error
+  const handleRecordingError = (error: string) => {
+    console.error('🎤 Recording error:', error);
+    // Could show a toast notification here
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.doctorSummary?.trim()) {
-      alert('Please provide a visit summary');
+    const finalDoctorSummary = formData.doctorSummary || '';
+    
+    if (!finalDoctorSummary.trim()) {
+      alert('Please provide a visit summary or record audio');
       return;
     }
 
@@ -171,26 +160,16 @@ export default function VisitSummaryForm({
         visitDate: formData.visitDate || new Date(),
         visitType: formData.visitType || 'scheduled',
         inputMethod: formData.inputMethod || 'text',
-        doctorSummary: formData.doctorSummary || '',
-        treatmentPlan: formData.treatmentPlan || '',
+        doctorSummary: finalDoctorSummary,
         providerName: formData.providerName || '',
         providerSpecialty: formData.providerSpecialty,
         providerId: formData.providerId,
         facilityName: formData.facilityName,
         facilityId: formData.facilityId,
-        visitDuration: formData.visitDuration,
-        chiefComplaint: formData.chiefComplaint,
-        diagnosis: formData.diagnosis || [],
-        procedures: formData.procedures || [],
-        labResults: formData.labResults || [],
-        imagingResults: formData.imagingResults || [],
-        vitalSigns: formData.vitalSigns,
         sharedWithFamily: formData.sharedWithFamily !== false,
         familyAccessLevel: formData.familyAccessLevel || 'summary_only',
-        restrictedFields: formData.restrictedFields || [],
-        tags: formData.tags || [],
-        categories: formData.categories || [],
-        createdBy: patientId // Will be set by backend auth
+        voiceTranscriptionId: formData.voiceTranscriptionId,
+        createdBy: patientId
       };
 
       const response = await apiClient.post<{ success: boolean; data: any }>(
@@ -218,24 +197,10 @@ export default function VisitSummaryForm({
           <FileText className="w-6 h-6 text-blue-600" />
           <h2 className="text-xl font-semibold text-gray-900">Record Visit Summary</h2>
         </div>
-        <div className="flex items-center space-x-2">
-          <button
-            type="button"
-            onClick={handleVoiceRecording}
-            className={`p-2 rounded-md transition-colors ${
-              isRecording 
-                ? 'bg-red-100 text-red-600 hover:bg-red-200' 
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-            title={isRecording ? 'Stop recording' : 'Start voice recording'}
-          >
-            {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-          </button>
-        </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Visit Details */}
+        {/* Basic Visit Info */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -266,34 +231,6 @@ export default function VisitSummaryForm({
               <option value="consultation">Consultation</option>
               <option value="telemedicine">Telemedicine</option>
             </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Duration (minutes)
-            </label>
-            <input
-              type="number"
-              value={formData.visitDuration || ''}
-              onChange={(e) => handleInputChange('visitDuration', parseInt(e.target.value) || undefined)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="30"
-              min="1"
-              max="480"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Chief Complaint
-            </label>
-            <input
-              type="text"
-              value={formData.chiefComplaint || ''}
-              onChange={(e) => handleInputChange('chiefComplaint', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="Main reason for visit"
-            />
           </div>
         </div>
 
@@ -356,39 +293,38 @@ export default function VisitSummaryForm({
           </div>
         </div>
 
-        {/* Visit Summary */}
+        {/* Visit Recording Section */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
+          <label className="block text-sm font-medium text-gray-700 mb-4">
             Visit Summary *
           </label>
-          <textarea
-            value={formData.doctorSummary || ''}
-            onChange={(e) => handleInputChange('doctorSummary', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            rows={6}
-            placeholder="Describe what happened during the visit, findings, discussions..."
-            required
+          
+          {/* New Simplified Recording Component */}
+          <SimpleVisitRecorder
+            patientId={patientId}
+            onComplete={handleRecordingComplete}
+            onError={handleRecordingError}
+            className="mb-4"
           />
-          {isRecording && (
-            <div className="mt-2 flex items-center space-x-2 text-red-600">
-              <div className="w-2 h-2 bg-red-600 rounded-full animate-pulse"></div>
-              <span className="text-sm">Recording in progress...</span>
-            </div>
-          )}
-        </div>
 
-        {/* Treatment Plan */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Treatment Plan
-          </label>
-          <textarea
-            value={formData.treatmentPlan || ''}
-            onChange={(e) => handleInputChange('treatmentPlan', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            rows={4}
-            placeholder="Treatment recommendations, medications, follow-up instructions..."
-          />
+          {/* Text Input for Manual Entry or Editing */}
+          <div className="relative">
+            <textarea
+              value={formData.doctorSummary || ''}
+              onChange={(e) => handleInputChange('doctorSummary', e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              rows={8}
+              placeholder="Record audio above or type the doctor's summary of the visit..."
+              required
+            />
+            
+            {recordingCompleted && (
+              <div className="mt-2 text-sm text-green-600 flex items-center space-x-2">
+                <CheckCircle className="w-4 h-4" />
+                <span>Audio transcription completed! You can edit the text above if needed.</span>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Family Sharing */}
@@ -450,7 +386,7 @@ export default function VisitSummaryForm({
             {isSubmitting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Processing...</span>
+                <span>Saving & Analyzing...</span>
               </>
             ) : (
               <>

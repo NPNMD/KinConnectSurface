@@ -1332,7 +1332,7 @@ export interface VisitSummary {
   
   // Input Data
   doctorSummary: string; // Raw doctor input
-  treatmentPlan: string; // Raw treatment plan input
+  treatmentPlan?: string; // Raw treatment plan input (optional)
   inputMethod: VisitInputMethod;
   voiceTranscriptionId?: string; // If voice input was used
   
@@ -1422,7 +1422,7 @@ export interface NewVisitSummary {
   visitType: VisitType;
   visitDuration?: number;
   doctorSummary: string;
-  treatmentPlan: string;
+  treatmentPlan?: string;
   inputMethod: VisitInputMethod;
   voiceTranscriptionId?: string;
   chiefComplaint?: string;

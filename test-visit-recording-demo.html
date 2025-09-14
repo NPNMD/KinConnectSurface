@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KinConnect - Visit Recording Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="max-w-4xl mx-auto p-4">
+        <!-- Header -->
+        <header class="bg-white shadow-sm border-b border-gray-200 rounded-lg mb-6 p-4">
+            <div class="flex items-center space-x-2">
+                <i data-lucide="heart" class="w-6 h-6 text-blue-600"></i>
+                <span class="text-lg font-bold text-gray-900">KinConnect - Visit Recording Demo</span>
+            </div>
+        </header>
+
+        <!-- Dashboard Content -->
+        <main class="space-y-6">
+            <!-- Welcome Section -->
+            <div class="bg-white rounded-lg p-6 border border-gray-200">
+                <h1 class="text-2xl font-bold text-gray-900 mb-1">
+                    Welcome back, Demo User! 👋
+                </h1>
+                <p class="text-gray-600 text-sm">
+                    Here's your health overview for today
+                </p>
+            </div>
+
+            <!-- Recent Events Section with Record Visit Button -->
+            <div class="bg-white rounded-lg p-6 border border-gray-200">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900">Recent Events</h2>
+                    <button 
+                        onclick="showRecordingModal()"
+                        class="flex items-center space-x-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors"
+                    >
+                        <i data-lucide="mic" class="w-4 h-4"></i>
+                        <span>Record Visit</span>
+                    </button>
+                </div>
+
+                <!-- Actionable Events -->
+                <div id="actionableEvents" class="space-y-3">
+                    <!-- Follow-up Appointment -->
+                    <div class="bg-white rounded-lg p-4 border border-orange-200 border-l-4 border-l-orange-500">
+                        <div class="flex items-start space-x-3">
+                            <div class="flex-shrink-0 mt-1">
+                                <div class="p-2 rounded-full bg-orange-100">
+                                    <i data-lucide="calendar" class="w-4 h-4 text-orange-600"></i>
+                                </div>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center space-x-2 mb-1">
+                                    <h3 class="font-medium text-gray-900 text-sm">Follow-up Appointment</h3>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                                        high
+                                    </span>
+                                </div>
+                                <p class="text-sm text-gray-600 mb-2">
+                                    Schedule follow-up appointment in 2 weeks to review blood pressure medication effectiveness
+                                </p>
+                                <div class="flex items-center space-x-4 text-xs text-gray-500">
+                                    <span class="flex items-center space-x-1">
+                                        <i data-lucide="clock" class="w-3 h-3"></i>
+                                        <span id="followUpDate"></span>
+                                    </span>
+                                    <span class="flex items-center space-x-1">
+                                        <i data-lucide="user" class="w-3 h-3"></i>
+                                        <span>Dr. Smith</span>
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="flex flex-col space-y-2">
+                                <button
+                                    onclick="addToCalendar('follow-up')"
+                                    class="flex items-center space-x-1 px-3 py-1 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 transition-colors"
+                                    title="Add to calendar"
+                                >
+                                    <i data-lucide="calendar-plus" class="w-3 h-3"></i>
+                                    <span>Add to Calendar</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- New Medication -->
+                    <div class="bg-white rounded-lg p-4 border border-blue-200 border-l-4 border-l-blue-500">
+                        <div class="flex items-start space-x-3">
+                            <div class="flex-shrink-0 mt-1">
+                                <div class="p-2 rounded-full bg-blue-100">
+                                    <i data-lucide="pill" class="w-4 h-4 text-blue-600"></i>
+                                </div>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center space-x-2 mb-1">
+                                    <h3 class="font-medium text-gray-900 text-sm">Start Lisinopril</h3>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                        medium
+                                    </span>
+                                </div>
+                                <p class="text-sm text-gray-600 mb-2">
+                                    New medication: 10mg - Take once daily in the morning
+                                </p>
+                                <div class="flex items-center space-x-4 text-xs text-gray-500">
+                                    <span class="flex items-center space-x-1">
+                                        <i data-lucide="clock" class="w-3 h-3"></i>
+                                        <span>Start today</span>
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="flex flex-col space-y-2">
+                                <button
+                                    onclick="manageMedications()"
+                                    class="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white text-xs rounded-md hover:bg-blue-700 transition-colors"
+                                    title="Manage medications"
+                                >
+                                    <i data-lucide="external-link" class="w-3 h-3"></i>
+                                    <span>Manage</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Blood Pressure Monitoring -->
+                    <div class="bg-white rounded-lg p-4 border border-yellow-200 border-l-4 border-l-yellow-500">
+                        <div class="flex items-start space-x-3">
+                            <div class="flex-shrink-0 mt-1">
+                                <div class="p-2 rounded-full bg-yellow-100">
+                                    <i data-lucide="activity" class="w-4 h-4 text-yellow-600"></i>
+                                </div>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center space-x-2 mb-1">
+                                    <h3 class="font-medium text-gray-900 text-sm">Monitor Blood Pressure Daily</h3>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                        medium
+                                    </span>
+                                </div>
+                                <p class="text-sm text-gray-600 mb-2">
+                                    Monitor blood pressure daily for 1 week and record readings
+                                </p>
+                                <div class="flex items-center space-x-4 text-xs text-gray-500">
+                                    <span class="flex items-center space-x-1">
+                                        <i data-lucide="clock" class="w-3 h-3"></i>
+                                        <span>For next 7 days</span>
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="flex flex-col space-y-2">
+                                <button
+                                    onclick="addToCalendar('monitoring')"
+                                    class="flex items-center space-x-1 px-3 py-1 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 transition-colors"
+                                    title="Add reminders to calendar"
+                                >
+                                    <i data-lucide="calendar-plus" class="w-3 h-3"></i>
+                                    <span>Set Reminders</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Today's Medications Section -->
+            <div class="bg-white rounded-lg p-6 border border-gray-200">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900">Today's Medications</h2>
+                    <span class="text-sm text-blue-600 font-medium">Manage</span>
+                </div>
+                <div class="text-center py-8">
+                    <i data-lucide="pill" class="w-8 h-8 text-gray-300 mx-auto mb-2"></i>
+                    <p class="text-gray-500 text-sm">No medications scheduled for today</p>
+                </div>
+            </div>
+
+            <!-- Upcoming Appointments Section -->
+            <div class="bg-white rounded-lg p-6 border border-gray-200">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900">Upcoming Appointments</h2>
+                    <span class="text-sm text-blue-600 font-medium">View Calendar</span>
+                </div>
+                <div class="text-center py-8">
+                    <i data-lucide="calendar" class="w-8 h-8 text-gray-300 mx-auto mb-2"></i>
+                    <p class="text-gray-500 text-sm">No upcoming appointments in the next 30 days</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- Visit Recording Modal -->
+        <div id="recordingModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 hidden">
+            <div class="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                <div class="p-6">
+                    <div class="flex items-center justify-between mb-6">
+                        <div class="flex items-center space-x-3">
+                            <i data-lucide="file-text" class="w-6 h-6 text-blue-600"></i>
+                            <h2 class="text-xl font-semibold text-gray-900">Record Visit Summary</h2>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <button
+                                id="recordButton"
+                                onclick="toggleRecording()"
+                                class="p-2 rounded-md transition-colors bg-gray-100 text-gray-600 hover:bg-gray-200"
+                                title="Start voice recording"
+                            >
+                                <i data-lucide="mic" class="w-5 h-5"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <form onsubmit="submitVisitSummary(event)" class="space-y-6">
+                        <!-- Visit Details -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Visit Date *</label>
+                                <input
+                                    type="date"
+                                    id="visitDate"
+                                    value=""
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Visit Type</label>
+                                <select
+                                    id="visitType"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                >
+                                    <option value="walk_in">Walk-in</option>
+                                    <option value="scheduled">Scheduled Appointment</option>
+                                    <option value="emergency">Emergency Visit</option>
+                                    <option value="follow_up">Follow-up</option>
+                                    <option value="consultation">Consultation</option>
+                                    <option value="telemedicine">Telemedicine</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Provider Information -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Healthcare Provider</label>
+                                <input
+                                    type="text"
+                                    id="providerName"
+                                    placeholder="Dr. Smith"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Medical Facility</label>
+                                <input
+                                    type="text"
+                                    id="facilityName"
+                                    placeholder="General Hospital"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                            </div>
+                        </div>
+
+                        <!-- Visit Summary -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Visit Summary *</label>
+                            <textarea
+                                id="doctorSummary"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                rows="6"
+                                placeholder="Patient came in for routine check-up. Blood pressure was elevated at 150/90. Started on Lisinopril 10mg daily. Patient should monitor BP daily for one week and schedule follow-up in 2 weeks to assess medication effectiveness. Discussed lifestyle modifications including diet and exercise."
+                                required
+                            ></textarea>
+                            <div id="recordingIndicator" class="mt-2 flex items-center space-x-2 text-red-600 hidden">
+                                <div class="w-2 h-2 bg-red-600 rounded-full animate-pulse"></div>
+                                <span class="text-sm">Recording in progress...</span>
+                            </div>
+                        </div>
+
+                        <!-- Treatment Plan -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Treatment Plan</label>
+                            <textarea
+                                id="treatmentPlan"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                rows="4"
+                                placeholder="1. Start Lisinopril 10mg daily 2. Monitor BP daily for 1 week 3. Follow-up in 2 weeks 4. Lifestyle modifications - reduce sodium, increase exercise"
+                            ></textarea>
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div class="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+                            <button
+                                type="button"
+                                onclick="hideRecordingModal()"
+                                class="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="submit"
+                                id="submitButton"
+                                class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                            >
+                                <i data-lucide="sparkles" class="w-4 h-4"></i>
+                                <span>Save & Process with AI</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Success Modal -->
+        <div id="successModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 hidden">
+            <div class="bg-white rounded-lg max-w-md w-full p-6">
+                <div class="text-center">
+                    <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+                        <i data-lucide="check-circle" class="w-6 h-6 text-green-600"></i>
+                    </div>
+                    <h3 class="text-lg font-medium text-gray-900 mb-2">Visit Summary Processed!</h3>
+                    <p class="text-sm text-gray-500 mb-4">
+                        AI has analyzed your visit and extracted actionable items. Check the Recent Events section for new action items.
+                    </p>
+                    <button
+                        onclick="hideSuccessModal()"
+                        class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                    >
+                        Continue
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // Set today's date
+        document.getElementById('visitDate').value = new Date().toISOString().split('T')[0];
+        
+        // Set follow-up date (2 weeks from now)
+        const followUpDate = new Date();
+        followUpDate.setDate(followUpDate.getDate() + 14);
+        document.getElementById('followUpDate').textContent = followUpDate.toLocaleDateString();
+
+        let isRecording = false;
+
+        function showRecordingModal() {
+            document.getElementById('recordingModal').classList.remove('hidden');
+        }
+
+        function hideRecordingModal() {
+            document.getElementById('recordingModal').classList.add('hidden');
+            if (isRecording) {
+                toggleRecording();
+            }
+        }
+
+        function hideSuccessModal() {
+            document.getElementById('successModal').classList.add('hidden');
+        }
+
+        function toggleRecording() {
+            const recordButton = document.getElementById('recordButton');
+            const recordingIndicator = document.getElementById('recordingIndicator');
+            
+            if (!isRecording) {
+                // Start recording
+                isRecording = true;
+                recordButton.className = 'p-2 rounded-md transition-colors bg-red-100 text-red-600 hover:bg-red-200';
+                recordButton.title = 'Stop recording';
+                recordingIndicator.classList.remove('hidden');
+                
+                // Simulate recording for 3 seconds
+                setTimeout(() => {
+                    if (isRecording) {
+                        toggleRecording();
+                    }
+                }, 3000);
+            } else {
+                // Stop recording
+                isRecording = false;
+                recordButton.className = 'p-2 rounded-md transition-colors bg-gray-100 text-gray-600 hover:bg-gray-200';
+                recordButton.title = 'Start voice recording';
+                recordingIndicator.classList.add('hidden');
+            }
+        }
+
+        function submitVisitSummary(event) {
+            event.preventDefault();
+            
+            const submitButton = document.getElementById('submitButton');
+            submitButton.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Processing...</span>';
+            submitButton.disabled = true;
+            
+            // Simulate AI processing
+            setTimeout(() => {
+                hideRecordingModal();
+                document.getElementById('successModal').classList.remove('hidden');
+                
+                // Reset button
+                submitButton.innerHTML = '<i data-lucide="sparkles" class="w-4 h-4"></i><span>Save & Process with AI</span>';
+                submitButton.disabled = false;
+                
+                // Add new actionable event to demonstrate
+                addNewActionableEvent();
+            }, 2000);
+        }
+
+        function addToCalendar(type) {
+            if (type === 'follow-up') {
+                alert('✅ Follow-up appointment added to calendar for ' + followUpDate.toLocaleDateString());
+            } else if (type === 'monitoring') {
+                alert('✅ Daily blood pressure monitoring reminders added to calendar for the next 7 days');
+            }
+        }
+
+        function manageMedications() {
+            alert('🔗 Redirecting to Medications page to add Lisinopril to your medication list...');
+        }
+
+        function addNewActionableEvent() {
+            // This would normally refresh the data from the API
+            // For demo purposes, we'll just show a success message
+            console.log('New actionable events would be loaded from the API after AI processing');
+        }
+    </script>
+</body>
+</html>

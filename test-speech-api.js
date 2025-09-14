@@ -1,0 +1,1 @@
+// Rename to .cjs to fix ES module issue

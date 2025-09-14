@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech-to-Text Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .recording {
+            background: #dc3545;
+        }
+        .log {
+            background: #fff;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .result {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Speech-to-Text API Test</h1>
+    
+    <div class="container">
+        <h2>Audio Recording Test</h2>
+        <button id="recordBtn">Start Recording</button>
+        <button id="testApiBtn" disabled>Test API with Sample</button>
+        <div id="status"></div>
+    </div>
+
+    <div class="container">
+        <h2>API Response Log</h2>
+        <div id="log" class="log"></div>
+    </div>
+
+    <div class="container">
+        <h2>Results</h2>
+        <div id="results"></div>
+    </div>
+
+    <script>
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
+
+        const recordBtn = document.getElementById('recordBtn');
+        const testApiBtn = document.getElementById('testApiBtn');
+        const status = document.getElementById('status');
+        const log = document.getElementById('log');
+        const results = document.getElementById('results');
+
+        function addLog(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            log.textContent += `[${timestamp}] ${message}\n`;
+            log.scrollTop = log.scrollHeight;
+            console.log(message);
+        }
+
+        function showResult(content, isError = false) {
+            const div = document.createElement('div');
+            div.className = isError ? 'error' : 'result';
+            div.textContent = content;
+            results.appendChild(div);
+        }
+
+        async function testSpeechAPI(audioBlob) {
+            try {
+                addLog('🎤 Converting audio to base64...');
+                
+                // Convert audio blob to base64
+                const arrayBuffer = await audioBlob.arrayBuffer();
+                const uint8Array = new Uint8Array(arrayBuffer);
+                
+                let base64Audio = '';
+                const chunkSize = 8192;
+                
+                for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                    const chunk = uint8Array.slice(i, i + chunkSize);
+                    base64Audio += btoa(String.fromCharCode.apply(null, Array.from(chunk)));
+                }
+                
+                addLog(`🎤 Audio converted to base64, size: ${base64Audio.length} characters`);
+                
+                // Test the API endpoint directly
+                const apiUrl = 'https://us-central1-claritystream-uldp9.cloudfunctions.net/api/audio/transcribe';
+                
+                addLog('🔧 Sending request to: ' + apiUrl);
+                
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer test-token' // This will fail auth but we can see the response structure
+                    },
+                    body: JSON.stringify({
+                        audioData: base64Audio,
+                        patientId: 'test-patient'
+                    })
+                });
+                
+                addLog(`🔧 Response status: ${response.status} ${response.statusText}`);
+                
+                const responseData = await response.json();
+                addLog('🔧 Response data: ' + JSON.stringify(responseData, null, 2));
+                
+                if (response.ok && responseData.success && responseData.data && responseData.data.transcription) {
+                    showResult(`✅ Transcription: "${responseData.data.transcription}"`);
+                    showResult(`🎯 Confidence: ${Math.round(responseData.data.confidence * 100)}%`);
+                } else {
+                    showResult(`❌ API Error: ${responseData.error || 'Unknown error'}`, true);
+                }
+                
+            } catch (error) {
+                addLog('❌ Error testing API: ' + error.message);
+                showResult(`❌ Test Error: ${error.message}`, true);
+            }
+        }
+
+        recordBtn.addEventListener('click', async () => {
+            if (!isRecording) {
+                try {
+                    addLog('🎤 Starting audio recording...');
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    
+                    mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
+                    
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            audioChunks.push(event.data);
+                        }
+                    };
+                    
+                    mediaRecorder.onstop = async () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        addLog(`🎤 Recording completed. Blob size: ${audioBlob.size} bytes`);
+                        
+                        stream.getTracks().forEach(track => track.stop());
+                        
+                        status.textContent = 'Processing audio...';
+                        await testSpeechAPI(audioBlob);
+                        status.textContent = 'Ready';
+                        
+                        recordBtn.textContent = 'Start Recording';
+                        recordBtn.className = '';
+                        isRecording = false;
+                    };
+                    
+                    mediaRecorder.start();
+                    isRecording = true;
+                    recordBtn.textContent = 'Stop Recording';
+                    recordBtn.className = 'recording';
+                    status.textContent = 'Recording... Speak now!';
+                    addLog('✅ Recording started successfully');
+                    
+                } catch (error) {
+                    addLog('❌ Error starting recording: ' + error.message);
+                    showResult(`❌ Recording Error: ${error.message}`, true);
+                }
+            } else {
+                addLog('🛑 Stopping recording...');
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                }
+            }
+        });
+
+        // Test with a sample base64 audio (empty for now)
+        testApiBtn.addEventListener('click', async () => {
+            addLog('🧪 Testing API with sample data...');
+            // Create a minimal audio blob for testing
+            const sampleBlob = new Blob([''], { type: 'audio/webm' });
+            await testSpeechAPI(sampleBlob);
+        });
+
+        addLog('🚀 Speech-to-Text test page loaded');
+        addLog('📱 Audio support: ' + !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
+    </script>
+</body>
+</html>

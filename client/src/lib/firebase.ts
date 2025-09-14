@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, type User } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { firebaseConfig } from '@shared/firebase';
 
 // Initialize Firebase
@@ -12,6 +13,9 @@ export const auth = getAuth(app);
 // Initialize Firestore - use default database since we're using "(default)"
 export const db = getFirestore(app);
 
+// Initialize Firebase Storage
+export const storage = getStorage(app);
+
 // Log successful initialization
 console.log('🔥 Firebase initialized successfully');
 console.log('🔥 Project ID:', firebaseConfig.projectId);
@@ -19,12 +23,13 @@ console.log('🔥 Auth Domain:', firebaseConfig.authDomain);
 console.log('🔥 Database ID: (default)');
 
 // Check if we're in development and should use emulator
-if (process.env.NODE_ENV === 'development' && process.env.REACT_APP_USE_FIREBASE_EMULATOR === 'true') {
-  console.log('🔧 Connecting to Firestore emulator...');
+if (import.meta.env.DEV && import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true') {
+  console.log('🔧 Connecting to Firebase emulators...');
   try {
     connectFirestoreEmulator(db, 'localhost', 8080);
+    connectStorageEmulator(storage, 'localhost', 9199);
   } catch (error) {
-    console.warn('⚠️ Could not connect to Firestore emulator:', error);
+    console.warn('⚠️ Could not connect to Firebase emulators:', error);
   }
 }
 

@@ -11,7 +11,11 @@
     "type-check": "tsc --noEmit",
     "setup:firebase": "node scripts/setup-firebase.js",
     "deploy": "npm run build && firebase deploy",
-    "deploy:cache-bust": "node scripts/deploy-with-cache-bust.js"
+    "deploy:cache-bust": "node scripts/deploy-with-cache-bust.js",
+    "deploy:functions": "cd functions && npm run deploy",
+    "deploy:hosting": "npm run build && firebase deploy --only hosting",
+    "deploy:all": "npm run build && cd functions && npm run build && cd .. && firebase deploy",
+    "quick-deploy": "npm run build && firebase deploy --only hosting,functions"
   },
   "keywords": [
     "healthcare",

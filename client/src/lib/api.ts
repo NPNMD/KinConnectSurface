@@ -403,6 +403,9 @@ export const API_ENDPOINTS = {
   VISIT_SUMMARY_UPDATE: (patientId: string, summaryId: string) => `/visit-summaries/${patientId}/${summaryId}`,
   VISIT_SUMMARY_DELETE: (patientId: string, summaryId: string) => `/visit-summaries/${patientId}/${summaryId}`,
   VISIT_SUMMARY_RETRY_AI: (patientId: string, summaryId: string) => `/visit-summaries/${patientId}/${summaryId}/retry-ai`,
+  
+  // Audio transcription
+  AUDIO_TRANSCRIBE: '/audio/transcribe',
 } as const;
 
 // Type-safe API response

@@ -3089,7 +3089,20 @@ app.put('/medications/:medicationId', authenticate, async (req, res) => {
 				}
 			} else {
 				// For non-date fields, copy directly
-				updatedMedication[key] = updateData[key];
+				// Special handling for reminder fields to ensure they're valid
+				if (key === 'reminderTimes' && Array.isArray(updateData[key])) {
+					// Validate that reminderTimes is an array of valid time strings
+					const validTimes = updateData[key].filter(time =>
+						typeof time === 'string' && /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(time)
+					);
+					updatedMedication[key] = validTimes;
+				} else if (key === 'hasReminders' && typeof updateData[key] === 'boolean') {
+					// Ensure hasReminders is a boolean
+					updatedMedication[key] = updateData[key];
+				} else {
+					// For all other non-date fields, copy directly
+					updatedMedication[key] = updateData[key];
+				}
 			}
 		});
 		
@@ -3100,7 +3113,30 @@ app.put('/medications/:medicationId', authenticate, async (req, res) => {
 		
 		console.log('📝 Final update data:', updatedMedication);
 		
-		await medicationDoc.ref.update(updatedMedication);
+		// Validate the update data before sending to Firestore
+		try {
+			await medicationDoc.ref.update(updatedMedication);
+		} catch (updateError) {
+			console.error('❌ Firestore update error:', updateError);
+			console.error('❌ Update data that caused error:', updatedMedication);
+			console.error('❌ Original request data:', updateData);
+			
+			// Provide more specific error information
+			if (updateError instanceof Error) {
+				console.error('❌ Error message:', updateError.message);
+				console.error('❌ Error stack:', updateError.stack);
+			}
+			
+			return res.status(500).json({
+				success: false,
+				error: 'Failed to update medication',
+				details: updateError instanceof Error ? updateError.message : 'Unknown update error',
+				debugInfo: {
+					updateData: updatedMedication,
+					originalData: updateData
+				}
+			});
+		}
 		
 		// Get updated medication
 		const updatedDoc = await medicationDoc.ref.get();
@@ -3615,23 +3651,23 @@ app.delete('/medical-events/:eventId', authenticate, async (req, res) => {
 // ===== VISIT SUMMARY ROUTES =====
 
 // Google AI Service Helper
-async function processVisitSummaryWithAI(doctorSummary: string, treatmentPlan: string) {
+async function processVisitSummaryWithAI(doctorSummary: string, treatmentPlan?: string) {
   try {
     const apiKey = googleAIApiKey.value();
     if (!apiKey) {
       throw new Error('Google AI API key not configured');
     }
 
-    // Initialize Google AI (will work when package is installed)
-    // const genAI = new GoogleGenerativeAI(apiKey);
-    // const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+    // Initialize Google AI
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
     const prompt = `
 You are a medical assistant helping to process doctor visit notes.
-Please analyze the following visit summary and treatment plan, then provide a structured response.
+Please analyze the following visit summary and provide a structured response.
 
 Visit Summary: ${doctorSummary}
-Treatment Plan: ${treatmentPlan}
+${treatmentPlan ? `Treatment Plan: ${treatmentPlan}` : ''}
 
 Please provide a JSON response with the following structure:
 {
@@ -3653,49 +3689,48 @@ Please provide a JSON response with the following structure:
 Focus on medical accuracy and patient safety. Extract specific, actionable information.
 `;
 
-    // For now, return a mock response until Google AI package is properly installed
-    // TODO: Replace with actual Google AI call
-    // const result = await model.generateContent(prompt);
-    // const response = await result.response;
-    // const text = response.text();
-    
-    // Mock response for development
-    const mockResponse = {
-      keyPoints: [
-        "Patient presented with chief complaint",
-        "Physical examination findings documented",
-        "Treatment plan discussed with patient"
-      ],
-      actionItems: [
-        "Schedule follow-up appointment in 2 weeks",
-        "Monitor symptoms and report any changes",
-        "Take medications as prescribed"
-      ],
-      medicationChanges: {
-        newMedications: [],
-        stoppedMedications: [],
-        changedMedications: []
-      },
-      followUpRequired: true,
-      followUpDate: null,
-      urgencyLevel: "medium",
-      riskFactors: [],
-      recommendations: [
-        "Continue current treatment plan",
-        "Maintain regular exercise routine"
-      ],
-      warningFlags: []
-    };
-
-    return {
-      success: true,
-      data: mockResponse,
-      metadata: {
-        promptTokenCount: prompt.length,
-        processingTime: 1000,
-        model: 'gemini-pro'
+    // Use Google Gemini AI for processing
+    try {
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+      
+      // Try to parse the JSON response from Gemini
+      let processedSummary;
+      try {
+        processedSummary = JSON.parse(text);
+      } catch (parseError) {
+        console.warn('Failed to parse Gemini response as JSON, using fallback analysis');
+        // Fallback to pattern-based analysis if JSON parsing fails
+        processedSummary = analyzeVisitSummary(doctorSummary, treatmentPlan);
       }
-    };
+      
+      return {
+        success: true,
+        data: processedSummary,
+        metadata: {
+          promptTokenCount: prompt.length,
+          candidatesTokenCount: text.length,
+          totalTokenCount: prompt.length + text.length,
+          processingTime: Date.now(),
+          model: 'gemini-1.5-flash'
+        }
+      };
+    } catch (geminiError) {
+      console.warn('Gemini AI processing failed, using fallback analysis:', geminiError);
+      // Fallback to enhanced pattern-based analysis
+      const processedSummary = analyzeVisitSummary(doctorSummary, treatmentPlan);
+      
+      return {
+        success: true,
+        data: processedSummary,
+        metadata: {
+          promptTokenCount: prompt.length,
+          processingTime: 1000,
+          model: 'gemini-1.5-flash-fallback'
+        }
+      };
+    }
   } catch (error) {
     console.error('Error processing visit summary with AI:', error);
     return {
@@ -3703,6 +3738,329 @@ Focus on medical accuracy and patient safety. Extract specific, actionable infor
       error: error instanceof Error ? error.message : 'AI processing failed'
     };
   }
+}
+
+// Enhanced AI analysis function with better pattern detection
+function analyzeVisitSummary(doctorSummary: string, treatmentPlan?: string) {
+  const fullText = `${doctorSummary} ${treatmentPlan || ''}`.toLowerCase();
+  
+  // Extract key points from the summary
+  const keyPoints = extractKeyPoints(doctorSummary);
+  
+  // Extract actionable items with time-based detection
+  const actionItems = extractActionItems(fullText);
+  
+  // Detect medication changes
+  const medicationChanges = detectMedicationChanges(fullText);
+  
+  // Detect follow-up requirements
+  const followUpInfo = detectFollowUpRequirements(fullText);
+  
+  // Assess urgency level
+  const urgencyLevel = assessUrgencyLevel(fullText);
+  
+  // Extract recommendations and warnings
+  const recommendations = extractRecommendations(fullText);
+  const riskFactors = extractRiskFactors(fullText);
+  const warningFlags = extractWarningFlags(fullText);
+  
+  return {
+    keyPoints,
+    actionItems,
+    medicationChanges,
+    followUpRequired: followUpInfo.required,
+    followUpDate: followUpInfo.date,
+    followUpInstructions: followUpInfo.instructions,
+    urgencyLevel,
+    riskFactors,
+    recommendations,
+    warningFlags
+  };
+}
+
+function extractKeyPoints(summary: string): string[] {
+  const points: string[] = [];
+  const sentences = summary.split(/[.!?]+/).filter(s => s.trim().length > 10);
+  
+  // Take first few meaningful sentences as key points
+  sentences.slice(0, 4).forEach(sentence => {
+    const trimmed = sentence.trim();
+    if (trimmed.length > 15) {
+      points.push(trimmed.charAt(0).toUpperCase() + trimmed.slice(1));
+    }
+  });
+  
+  return points.length > 0 ? points : ["Visit completed successfully"];
+}
+
+function extractActionItems(text: string): string[] {
+  const actionItems: string[] = [];
+  
+  // Time-based patterns for follow-up appointments
+  const timePatterns = [
+    /(?:see|follow.?up|return|come back|schedule|appointment).{0,20}(?:in|within)\s+(\d+)\s+(day|week|month)s?/gi,
+    /(?:schedule|book|make).{0,20}(?:appointment|visit).{0,20}(?:in|within|for)\s+(\d+)\s+(day|week|month)s?/gi,
+    /(?:return|come back).{0,20}(?:in|within)\s+(\d+)\s+(day|week|month)s?/gi,
+    /(?:follow.?up|check.?up).{0,20}(?:in|within)\s+(\d+)\s+(day|week|month)s?/gi
+  ];
+  
+  timePatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const amount = match[1];
+      const unit = match[2];
+      actionItems.push(`Schedule follow-up appointment in ${amount} ${unit}${amount !== '1' ? 's' : ''}`);
+    }
+  });
+  
+  // Medication-related actions
+  const medicationPatterns = [
+    /(?:start|begin|take|add).{0,30}(?:medication|medicine|drug|pill)/gi,
+    /(?:stop|discontinue|cease).{0,30}(?:medication|medicine|drug|pill)/gi,
+    /(?:increase|decrease|change|adjust).{0,30}(?:dose|dosage|medication)/gi,
+    /(?:monitor|check|measure).{0,30}(?:blood pressure|bp|heart rate|weight|glucose|sugar)/gi
+  ];
+  
+  medicationPatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const fullMatch = match[0].trim();
+      if (fullMatch.length > 10) {
+        actionItems.push(fullMatch.charAt(0).toUpperCase() + fullMatch.slice(1));
+      }
+    }
+  });
+  
+  // Lab/test related actions
+  const testPatterns = [
+    /(?:order|get|schedule).{0,30}(?:lab|blood work|test|x.?ray|mri|ct scan|ultrasound)/gi,
+    /(?:repeat|recheck).{0,30}(?:lab|blood work|test)/gi
+  ];
+  
+  testPatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const fullMatch = match[0].trim();
+      if (fullMatch.length > 10) {
+        actionItems.push(fullMatch.charAt(0).toUpperCase() + fullMatch.slice(1));
+      }
+    }
+  });
+  
+  // Lifestyle/monitoring actions
+  const lifestylePatterns = [
+    /(?:monitor|track|record|log).{0,30}(?:daily|weekly|regularly)/gi,
+    /(?:exercise|diet|lifestyle).{0,30}(?:change|modification|improvement)/gi,
+    /(?:call|contact).{0,30}(?:office|doctor|provider).{0,30}(?:if|when)/gi
+  ];
+  
+  lifestylePatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const fullMatch = match[0].trim();
+      if (fullMatch.length > 15) {
+        actionItems.push(fullMatch.charAt(0).toUpperCase() + fullMatch.slice(1));
+      }
+    }
+  });
+  
+  // Remove duplicates and return unique action items
+  return [...new Set(actionItems)].slice(0, 8);
+}
+
+function detectMedicationChanges(text: string) {
+  const changes = {
+    newMedications: [] as any[],
+    stoppedMedications: [] as any[],
+    changedMedications: [] as any[]
+  };
+  
+  // Common medication names to look for
+  const commonMeds = [
+    'lisinopril', 'metformin', 'atorvastatin', 'amlodipine', 'metoprolol',
+    'losartan', 'hydrochlorothiazide', 'simvastatin', 'omeprazole', 'levothyroxine',
+    'gabapentin', 'sertraline', 'trazodone', 'prednisone', 'albuterol',
+    'ibuprofen', 'acetaminophen', 'aspirin', 'insulin', 'warfarin'
+  ];
+  
+  // Detect new medications
+  const newMedPatterns = [
+    /(?:start|begin|prescrib|add).{0,30}(lisinopril|metformin|atorvastatin|amlodipine|metoprolol|losartan|hydrochlorothiazide|simvastatin|omeprazole|levothyroxine|gabapentin|sertraline|trazodone|prednisone|albuterol).{0,30}(\d+\s*mg)/gi,
+    /(?:new|starting).{0,20}(?:medication|medicine).{0,30}([\w\s]+?)(?:\s+(\d+\s*mg))/gi
+  ];
+  
+  newMedPatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const medName = match[1]?.trim();
+      const dosage = match[2]?.trim();
+      if (medName && dosage) {
+        changes.newMedications.push({
+          name: medName.charAt(0).toUpperCase() + medName.slice(1),
+          dosage: dosage,
+          instructions: "Take as directed",
+          startDate: new Date().toISOString().split('T')[0]
+        });
+      }
+    }
+  });
+  
+  // Detect stopped medications
+  const stopMedPatterns = [
+    /(?:stop|discontinue|cease).{0,30}(lisinopril|metformin|atorvastatin|amlodipine|metoprolol|losartan|hydrochlorothiazide|simvastatin|omeprazole|levothyroxine|gabapentin|sertraline|trazodone|prednisone|albuterol)/gi,
+    /(?:no longer|not taking).{0,30}([\w\s]+?)(?:\s+medication)/gi
+  ];
+  
+  stopMedPatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const medName = match[1]?.trim();
+      if (medName && commonMeds.includes(medName.toLowerCase())) {
+        changes.stoppedMedications.push({
+          name: medName.charAt(0).toUpperCase() + medName.slice(1),
+          reason: "As directed by provider",
+          stopDate: new Date().toISOString().split('T')[0]
+        });
+      }
+    }
+  });
+  
+  return changes;
+}
+
+function detectFollowUpRequirements(text: string) {
+  const followUpPatterns = [
+    /(?:follow.?up|return|come back|see me|appointment).{0,20}(?:in|within)\s+(\d+)\s+(day|week|month)s?/gi,
+    /(?:schedule|book).{0,20}(?:appointment|visit).{0,20}(?:in|for)\s+(\d+)\s+(day|week|month)s?/gi,
+    /(?:recheck|re.?evaluate).{0,20}(?:in|within)\s+(\d+)\s+(day|week|month)s?/gi
+  ];
+  
+  for (const pattern of followUpPatterns) {
+    const match = pattern.exec(text);
+    if (match) {
+      const amount = parseInt(match[1]);
+      const unit = match[2].toLowerCase();
+      
+      const followUpDate = new Date();
+      if (unit === 'day') {
+        followUpDate.setDate(followUpDate.getDate() + amount);
+      } else if (unit === 'week') {
+        followUpDate.setDate(followUpDate.getDate() + (amount * 7));
+      } else if (unit === 'month') {
+        followUpDate.setMonth(followUpDate.getMonth() + amount);
+      }
+      
+      return {
+        required: true,
+        date: followUpDate.toISOString().split('T')[0],
+        instructions: `Follow-up appointment needed in ${amount} ${unit}${amount !== 1 ? 's' : ''}`
+      };
+    }
+  }
+  
+  // Check for general follow-up mentions
+  if (/follow.?up|return|recheck|re.?evaluate/gi.test(text)) {
+    const defaultDate = new Date();
+    defaultDate.setDate(defaultDate.getDate() + 14); // Default to 2 weeks
+    
+    return {
+      required: true,
+      date: defaultDate.toISOString().split('T')[0],
+      instructions: "Follow-up appointment recommended"
+    };
+  }
+  
+  return {
+    required: false,
+    date: null,
+    instructions: null
+  };
+}
+
+function assessUrgencyLevel(text: string): 'low' | 'medium' | 'high' | 'urgent' {
+  const urgentKeywords = ['urgent', 'emergency', 'immediate', 'asap', 'critical', 'severe'];
+  const highKeywords = ['important', 'soon', 'promptly', 'quickly', 'elevated', 'high'];
+  const mediumKeywords = ['monitor', 'watch', 'follow', 'check', 'routine'];
+  
+  if (urgentKeywords.some(keyword => text.includes(keyword))) {
+    return 'urgent';
+  }
+  if (highKeywords.some(keyword => text.includes(keyword))) {
+    return 'high';
+  }
+  if (mediumKeywords.some(keyword => text.includes(keyword))) {
+    return 'medium';
+  }
+  
+  return 'low';
+}
+
+function extractRecommendations(text: string): string[] {
+  const recommendations: string[] = [];
+  
+  // Common medical recommendations
+  const recPatterns = [
+    /(?:recommend|suggest|advise).{0,50}(?:exercise|diet|lifestyle|rest|activity)/gi,
+    /(?:continue|maintain).{0,30}(?:current|treatment|medication|therapy)/gi,
+    /(?:avoid|limit|reduce).{0,30}(?:sodium|alcohol|caffeine|stress|activity)/gi,
+    /(?:increase|improve).{0,30}(?:fluid|water|fiber|activity|exercise)/gi
+  ];
+  
+  recPatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const rec = match[0].trim();
+      if (rec.length > 15) {
+        recommendations.push(rec.charAt(0).toUpperCase() + rec.slice(1));
+      }
+    }
+  });
+  
+  return [...new Set(recommendations)].slice(0, 5);
+}
+
+function extractRiskFactors(text: string): string[] {
+  const riskFactors: string[] = [];
+  
+  const riskPatterns = [
+    /(?:risk|concern|worry).{0,30}(?:for|of|about).{0,30}([\w\s]{5,30})/gi,
+    /(?:elevated|high|increased).{0,20}(blood pressure|cholesterol|glucose|heart rate)/gi,
+    /(?:family history|genetic risk).{0,30}([\w\s]{5,30})/gi
+  ];
+  
+  riskPatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const risk = match[1]?.trim();
+      if (risk && risk.length > 5) {
+        riskFactors.push(risk.charAt(0).toUpperCase() + risk.slice(1));
+      }
+    }
+  });
+  
+  return [...new Set(riskFactors)].slice(0, 3);
+}
+
+function extractWarningFlags(text: string): string[] {
+  const warningFlags: string[] = [];
+  
+  const warningPatterns = [
+    /(?:warning|caution|alert|concern).{0,50}/gi,
+    /(?:side effect|adverse|reaction).{0,30}/gi,
+    /(?:emergency|urgent|immediate).{0,30}(?:care|attention|contact)/gi
+  ];
+  
+  warningPatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const warning = match[0].trim();
+      if (warning.length > 10) {
+        warningFlags.push(warning.charAt(0).toUpperCase() + warning.slice(1));
+      }
+    }
+  });
+  
+  return [...new Set(warningFlags)].slice(0, 3);
 }
 
 // Create a new visit summary
@@ -4253,6 +4611,407 @@ app.delete('/visit-summaries/:patientId/:summaryId', authenticate, async (req, r
   }
 });
 
+// Enhanced audio transcription with detailed debug logging
+app.post('/audio/transcribe', authenticate, async (req, res) => {
+  try {
+    console.log('🔍 === BACKEND TRANSCRIPTION DEBUG START ===');
+    const { audioData, patientId, audioQuality, audioMetadata } = req.body;
+    
+    console.log('🔍 Step 1: Request Analysis:', {
+      hasAudioData: !!audioData,
+      audioDataLength: audioData?.length || 0,
+      audioDataSizeKB: audioData ? Math.round(audioData.length / 1024) : 0,
+      patientId,
+      audioQuality,
+      audioMetadata,
+      requestBodyKeys: Object.keys(req.body),
+      timestamp: new Date().toISOString()
+    });
+    
+    if (!audioData || !patientId) {
+      console.error('❌ Missing required fields:', { hasAudioData: !!audioData, hasPatientId: !!patientId });
+      return res.status(400).json({
+        success: false,
+        error: 'Audio data and patient ID are required'
+      });
+    }
+
+    console.log('🔍 Step 2: Audio Data Validation Passed');
+
+    // Import Google Speech-to-Text
+    const speech = require('@google-cloud/speech');
+    const client = new speech.SpeechClient();
+
+    console.log('🔍 Step 3: Speech Client Initialized');
+
+    // Convert base64 audio data to buffer with detailed validation
+    let audioBuffer: Buffer;
+    try {
+      console.log('🔍 Step 4: Converting base64 to buffer...');
+      audioBuffer = Buffer.from(audioData, 'base64');
+      
+      console.log('🔍 Step 4: Buffer Conversion Success:', {
+        bufferLength: audioBuffer.length,
+        bufferSizeKB: Math.round(audioBuffer.length / 1024),
+        originalBase64Length: audioData.length,
+        conversionRatio: Math.round((audioBuffer.length / audioData.length) * 100) / 100
+      });
+    } catch (conversionError) {
+      console.error('❌ Base64 conversion failed:', conversionError);
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid audio data format'
+      });
+    }
+
+    // Comprehensive audio buffer analysis
+    const bufferAnalysis = {
+      size: audioBuffer.length,
+      sizeKB: Math.round(audioBuffer.length / 1024),
+      isAllZeros: audioBuffer.every(byte => byte === 0),
+      nonZeroBytes: audioBuffer.filter(byte => byte !== 0).length,
+      averageValue: audioBuffer.reduce((sum, byte) => sum + byte, 0) / audioBuffer.length,
+      maxValue: Math.max(...audioBuffer),
+      minValue: Math.min(...audioBuffer),
+      uniqueValues: new Set(audioBuffer).size,
+      hasWebmHeader: audioBuffer.slice(0, 4).toString('hex') === '1a45dfa3',
+      firstBytes: audioBuffer.slice(0, 20).toString('hex'),
+      lastBytes: audioBuffer.slice(-20).toString('hex'),
+      estimatedDuration: Math.round(audioBuffer.length / 16000), // Rough estimate
+      // Additional quality metrics
+      variance: audioBuffer.length > 1 ? audioBuffer.reduce((sum, val, i, arr) => {
+        if (i === 0) return 0;
+        const diff = val - arr[i-1];
+        return sum + (diff * diff);
+      }, 0) / (audioBuffer.length - 1) : 0,
+      entropy: (() => {
+        const freq: { [key: number]: number } = {};
+        audioBuffer.forEach(byte => freq[byte] = (freq[byte] || 0) + 1);
+        return Object.values(freq).reduce((sum, count) => {
+          const p = count / audioBuffer.length;
+          return sum - p * Math.log2(p);
+        }, 0);
+      })()
+    };
+
+    console.log('🔍 Step 5: Comprehensive Audio Buffer Analysis:', bufferAnalysis);
+
+    // More lenient audio validation for debugging
+    if (bufferAnalysis.isAllZeros) {
+      console.warn('⚠️ Audio buffer contains only zeros (complete silence)');
+      return res.json({
+        success: true,
+        data: {
+          transcription: '',
+          confidence: 0,
+          message: 'Audio contains only silence - no speech detected',
+          analysis: 'complete_silence',
+          debugInfo: bufferAnalysis
+        }
+      });
+    }
+
+    const nonZeroPercentage = (bufferAnalysis.nonZeroBytes / bufferAnalysis.size) * 100;
+    console.log('🔍 Step 6: Audio Content Validation:', {
+      nonZeroPercentage: Math.round(nonZeroPercentage * 100) / 100,
+      uniqueValues: bufferAnalysis.uniqueValues,
+      averageValue: Math.round(bufferAnalysis.averageValue * 100) / 100,
+      entropy: Math.round(bufferAnalysis.entropy * 100) / 100,
+      variance: Math.round(bufferAnalysis.variance * 100) / 100
+    });
+
+    // More lenient validation - allow processing even with lower quality for debugging
+    if (nonZeroPercentage < 0.5) {  // Only reject if truly empty
+      console.warn('⚠️ Audio buffer appears to be mostly silence, but proceeding for debugging');
+    }
+
+    if (bufferAnalysis.uniqueValues < 3) {  // Very lenient threshold
+      console.warn('⚠️ Audio has very little variation, but proceeding for debugging');
+    }
+
+    console.log('🔍 Step 7: Audio validation passed, proceeding to Speech-to-Text...');
+
+    // Simplified Speech-to-Text configuration for better compatibility
+    const getOptimalConfig = (quality: string) => {
+      // Use basic, proven configuration that works reliably
+      return {
+        encoding: 'WEBM_OPUS' as const,
+        sampleRateHertz: 48000,
+        languageCode: 'en-US',
+        enableAutomaticPunctuation: true,
+        model: 'default', // Use default model instead of latest_long
+        // Remove complex features that might cause issues
+        speechContexts: [{
+          phrases: [
+            'patient', 'doctor', 'visit', 'medication', 'blood pressure',
+            'checkup', 'appointment', 'treatment', 'symptoms', 'diagnosis'
+          ],
+          boost: 3.0 // Very low boost
+        }]
+      };
+    };
+
+    const config = getOptimalConfig(audioQuality || 'unknown');
+    const request = {
+      audio: { content: audioBuffer },
+      config
+    };
+
+    console.log('🔍 Step 8: Speech-to-Text Request Configuration:', {
+      encoding: config.encoding,
+      sampleRate: config.sampleRateHertz,
+      language: config.languageCode,
+      model: config.model,
+      audioSize: bufferAnalysis.size,
+      audioQuality: audioQuality || 'unknown',
+      medicalContextEnabled: !!config.speechContexts,
+      speechContextPhrases: config.speechContexts?.[0]?.phrases?.length || 0,
+      boost: config.speechContexts?.[0]?.boost || 0,
+      enableAutomaticPunctuation: config.enableAutomaticPunctuation
+    });
+
+    // Perform transcription with detailed retry logic and logging
+    let response;
+    let retryCount = 0;
+    const maxRetries = 2;
+
+    console.log('🔍 Step 9: Starting Speech-to-Text Recognition...');
+
+    while (retryCount <= maxRetries) {
+      try {
+        console.log(`🔍 Transcription attempt ${retryCount + 1}/${maxRetries + 1}:`, {
+          model: request.config.model,
+          audioBufferSize: audioBuffer.length,
+          timestamp: new Date().toISOString()
+        });
+        
+        const recognitionStartTime = Date.now();
+        [response] = await client.recognize(request);
+        const recognitionTime = Date.now() - recognitionStartTime;
+        
+        console.log('🔍 Speech-to-Text API Response Time:', recognitionTime + 'ms');
+        break; // Success, exit retry loop
+      } catch (speechApiError: any) {
+        retryCount++;
+        console.error(`❌ Speech-to-Text API error (attempt ${retryCount}):`, {
+          message: speechApiError?.message || 'Unknown error',
+          code: speechApiError?.code || 'Unknown code',
+          details: speechApiError?.details || 'No details',
+          stack: speechApiError?.stack || 'No stack'
+        });
+
+        if (retryCount > maxRetries) {
+          console.log('🔄 All retries failed, trying fallback configuration...');
+          
+          // Try with very basic configuration
+          request.config = {
+            encoding: 'WEBM_OPUS' as const,
+            sampleRateHertz: 48000,
+            languageCode: 'en-US',
+            enableAutomaticPunctuation: false,
+            model: 'default',
+            speechContexts: [{
+              phrases: ['patient', 'doctor'],
+              boost: 1.0
+            }]
+          };
+          
+          try {
+            console.log('🔍 Trying basic fallback configuration...');
+            [response] = await client.recognize(request);
+            console.log('✅ Basic fallback configuration succeeded');
+            break;
+          } catch (fallbackError) {
+            console.error('❌ Basic fallback configuration also failed:', fallbackError);
+          }
+
+          return res.status(500).json({
+            success: false,
+            error: 'Speech-to-Text API error after all retries: ' + (speechApiError?.message || 'Unknown error'),
+            details: speechApiError?.code || 'Unknown code',
+            retryCount,
+            debugInfo: {
+              audioSize: audioBuffer.length,
+              audioQuality,
+              configUsed: request.config
+            }
+          });
+        }
+
+        // Wait before retry
+        console.log(`🔍 Waiting ${1000 * retryCount}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+      }
+    }
+
+    console.log('🔍 Step 10: Speech-to-Text API call completed successfully');
+
+    // Detailed response analysis with comprehensive logging
+    const responseAnalysis = {
+      resultsCount: response.results?.length || 0,
+      hasResults: !!(response.results && response.results.length > 0),
+      totalAlternatives: response.results?.reduce((sum: number, result: any) =>
+        sum + (result.alternatives?.length || 0), 0) || 0,
+      rawResponse: response
+    };
+
+    console.log('🔍 Step 11: Detailed Speech-to-Text Response Analysis:', responseAnalysis);
+
+    if (!response.results || response.results.length === 0) {
+      console.warn('⚠️ No transcription results from Google Speech-to-Text');
+      console.log('🔍 Full API Response for debugging:', JSON.stringify(response, null, 2));
+
+      return res.json({
+        success: true,
+        data: {
+          transcription: '',
+          confidence: 0,
+          message: 'No speech detected in audio recording',
+          analysis: 'no_results',
+          debugInfo: {
+            bufferAnalysis,
+            apiResponse: response,
+            configUsed: config
+          }
+        }
+      });
+    }
+
+    // Enhanced transcription extraction with detailed logging
+    const transcriptionParts: Array<{text: string, confidence: number, resultIndex: number}> = [];
+    let totalConfidence = 0;
+    let confidenceCount = 0;
+
+    console.log('🔍 Step 12: Processing transcription results...');
+    
+    response.results.forEach((result: any, index: number) => {
+      console.log(`🔍 Processing result ${index + 1}:`, {
+        hasAlternatives: !!(result.alternatives && result.alternatives.length > 0),
+        alternativesCount: result.alternatives?.length || 0,
+        isFinal: result.isFinal,
+        stability: result.stability,
+        languageCode: result.languageCode
+      });
+
+      if (result.alternatives && result.alternatives.length > 0) {
+        result.alternatives.forEach((alternative: any, altIndex: number) => {
+          const confidence = alternative.confidence || 0;
+          const transcript = alternative.transcript || '';
+          
+          console.log(`🔍 Alternative ${altIndex + 1} for result ${index + 1}:`, {
+            transcript: `"${transcript}"`,
+            transcriptLength: transcript.length,
+            confidence: Math.round(confidence * 100) + '%',
+            hasWords: !!(alternative.words && alternative.words.length > 0),
+            wordCount: alternative.words?.length || 0
+          });
+
+          if (altIndex === 0 && transcript && transcript.trim()) { // Only use first alternative
+            transcriptionParts.push({
+              text: transcript.trim(),
+              confidence,
+              resultIndex: index
+            });
+            totalConfidence += confidence;
+            confidenceCount++;
+          }
+        });
+      } else {
+        console.warn(`⚠️ Result ${index + 1} has no alternatives`);
+      }
+    });
+
+    console.log('🔍 Step 13: Transcription Parts Analysis:', {
+      totalParts: transcriptionParts.length,
+      parts: transcriptionParts.map((part, index) => ({
+        partIndex: index,
+        resultIndex: part.resultIndex,
+        text: `"${part.text}"`,
+        textLength: part.text.length,
+        confidence: Math.round(part.confidence * 100) + '%'
+      }))
+    });
+
+    const transcription = transcriptionParts.map(part => part.text).join(' ').trim();
+    const averageConfidence = confidenceCount > 0 ? totalConfidence / confidenceCount : 0;
+
+    console.log('🔍 Step 14: Final Transcription Assembly:', {
+      individualParts: transcriptionParts.map(p => `"${p.text}"`),
+      joinedTranscription: `"${transcription}"`,
+      originalLength: transcriptionParts.map(p => p.text).join(' ').length,
+      trimmedLength: transcription.length,
+      isEmpty: transcription.length === 0,
+      averageConfidence: Math.round(averageConfidence * 100) + '%',
+      partCount: transcriptionParts.length,
+      retryCount
+    });
+
+    // Final validation with detailed logging
+    if (!transcription || transcription.trim().length === 0) {
+      console.warn('⚠️ Empty transcription result despite having API results');
+      console.log('🔍 Debug - Raw transcription parts:', transcriptionParts);
+      console.log('🔍 Debug - Full API response:', JSON.stringify(response, null, 2));
+      
+      return res.json({
+        success: true,
+        data: {
+          transcription: '',
+          confidence: 0,
+          message: 'No recognizable speech detected in audio recording',
+          analysis: 'empty_transcription',
+          debugInfo: {
+            transcriptionParts,
+            apiResponse: response,
+            bufferAnalysis
+          }
+        }
+      });
+    }
+
+    // Success response with comprehensive metadata
+    console.log('🔍 Step 15: Transcription Success!', {
+      finalTranscription: `"${transcription}"`,
+      length: transcription.length,
+      confidence: Math.round(averageConfidence * 100) + '%',
+      preview: transcription.substring(0, 100) + (transcription.length > 100 ? '...' : ''),
+      processingTime: Date.now(),
+      totalProcessingSteps: 15
+    });
+
+    console.log('🔍 === BACKEND TRANSCRIPTION DEBUG END ===');
+
+    res.json({
+      success: true,
+      data: {
+        transcription,
+        confidence: averageConfidence,
+        metadata: {
+          audioAnalysis: bufferAnalysis,
+          processingAttempts: retryCount + 1,
+          configUsed: config.model,
+          partCount: transcriptionParts.length,
+          transcriptionParts: transcriptionParts.map(p => ({
+            text: p.text,
+            confidence: p.confidence,
+            length: p.text.length
+          }))
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Critical error in audio transcription:', error);
+    console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+    
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process audio transcription',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('Unhandled error:', err);
@@ -4280,3 +5039,8 @@ export const api = functions
 		secrets: [sendgridApiKey, googleAIApiKey]
 	})
 	.https.onRequest(app);
+
+// Export new visit recording functions
+export { processVisitUpload } from './visitUploadTrigger';
+export { transcribeAudio } from './workers/speechToTextWorker';
+export { summarizeVisit } from './workers/aiSummarizationWorker';

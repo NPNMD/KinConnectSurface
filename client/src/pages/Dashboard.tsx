@@ -24,12 +24,16 @@ import {
   User,
   Building,
   MapPin,
-  Stethoscope
+  Stethoscope,
+  Mic,
+  CalendarPlus,
+  ExternalLink
 } from 'lucide-react';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import VisitSummaryCard from '@/components/VisitSummaryCard';
+import VisitSummaryForm from '@/components/VisitSummaryForm';
 import type { VisitSummary, MedicationCalendarEvent, MedicalEvent } from '@shared/types';
 
 interface TodaysMedication {
@@ -53,6 +57,22 @@ export default function Dashboard() {
   const [takingMedication, setTakingMedication] = useState<string | null>(null);
   const [selectAllChecked, setSelectAllChecked] = useState(false);
   const [selectedMedications, setSelectedMedications] = useState<Set<string>>(new Set());
+  const [showVisitRecording, setShowVisitRecording] = useState(false);
+  const [actionableEvents, setActionableEvents] = useState<ActionableEvent[]>([]);
+
+  interface ActionableEvent {
+    id: string;
+    type: 'follow_up_appointment' | 'new_medication' | 'stop_medication' | 'action_item';
+    title: string;
+    description: string;
+    dueDate?: Date;
+    source: 'visit_summary';
+    sourceId: string;
+    providerName?: string;
+    urgency: 'low' | 'medium' | 'high' | 'urgent';
+    actionable: boolean;
+    medicationData?: any;
+  }
 
   const handleSignOut = async () => {
     try {
@@ -84,12 +104,177 @@ export default function Dashboard() {
         );
         
         setRecentVisitSummaries(recentSummaries);
+        
+        // Extract actionable events from visit summaries
+        const events = extractActionableEvents(recentSummaries);
+        setActionableEvents(events);
+        
         console.log('✅ Recent visit summaries loaded:', recentSummaries.length);
+        console.log('✅ Actionable events extracted:', events.length);
       }
     } catch (error) {
       console.error('❌ Error fetching recent visit summaries:', error);
     } finally {
       setLoadingVisitSummaries(false);
+    }
+  };
+
+  const extractActionableEvents = (summaries: VisitSummary[]): ActionableEvent[] => {
+    const events: ActionableEvent[] = [];
+    
+    summaries.forEach(summary => {
+      const aiSummary = summary.aiProcessedSummary;
+      if (aiSummary) {
+        // Extract follow-up appointments
+        if (aiSummary.followUpRequired && aiSummary.followUpDate) {
+          events.push({
+            id: `followup-${summary.id}`,
+            type: 'follow_up_appointment',
+            title: 'Follow-up Appointment',
+            description: aiSummary.followUpInstructions || 'Schedule follow-up appointment',
+            dueDate: aiSummary.followUpDate,
+            source: 'visit_summary',
+            sourceId: summary.id,
+            providerName: summary.providerName,
+            urgency: aiSummary.urgencyLevel,
+            actionable: true
+          });
+        }
+
+        // Extract medication changes that need action
+        if (aiSummary.medicationChanges) {
+          aiSummary.medicationChanges.newMedications.forEach(med => {
+            events.push({
+              id: `new-med-${summary.id}-${med.name}`,
+              type: 'new_medication',
+              title: `Start ${med.name}`,
+              description: `New medication: ${med.dosage || ''} ${med.instructions || ''}`,
+              dueDate: med.startDate || new Date(),
+              source: 'visit_summary',
+              sourceId: summary.id,
+              urgency: aiSummary.urgencyLevel,
+              actionable: true,
+              medicationData: med
+            });
+          });
+
+          aiSummary.medicationChanges.stoppedMedications.forEach(med => {
+            events.push({
+              id: `stop-med-${summary.id}-${med.name}`,
+              type: 'stop_medication',
+              title: `Stop ${med.name}`,
+              description: `Discontinue medication: ${med.reason || 'As directed by provider'}`,
+              dueDate: med.stopDate || new Date(),
+              source: 'visit_summary',
+              sourceId: summary.id,
+              urgency: aiSummary.urgencyLevel,
+              actionable: true,
+              medicationData: med
+            });
+          });
+        }
+
+        // Extract general action items
+        aiSummary.actionItems?.forEach((item, index) => {
+          // Try to detect if it's a time-sensitive action
+          const timeMatch = item.match(/in (\d+) (day|week|month)s?/i);
+          let dueDate = new Date();
+          
+          if (timeMatch) {
+            const amount = parseInt(timeMatch[1]);
+            const unit = timeMatch[2].toLowerCase();
+            
+            if (unit === 'day') {
+              dueDate.setDate(dueDate.getDate() + amount);
+            } else if (unit === 'week') {
+              dueDate.setDate(dueDate.getDate() + (amount * 7));
+            } else if (unit === 'month') {
+              dueDate.setMonth(dueDate.getMonth() + amount);
+            }
+          }
+
+          events.push({
+            id: `action-${summary.id}-${index}`,
+            type: 'action_item',
+            title: item.length > 50 ? `${item.substring(0, 50)}...` : item,
+            description: item,
+            dueDate: timeMatch ? dueDate : undefined,
+            source: 'visit_summary',
+            sourceId: summary.id,
+            urgency: aiSummary.urgencyLevel,
+            actionable: !!timeMatch // Only actionable if it has a time component
+          });
+        });
+      }
+    });
+
+    // Sort by urgency and due date
+    return events.sort((a, b) => {
+      // First sort by urgency
+      const urgencyOrder: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1 };
+      const urgencyDiff = (urgencyOrder[b.urgency] || 0) - (urgencyOrder[a.urgency] || 0);
+      if (urgencyDiff !== 0) return urgencyDiff;
+      
+      // Then by due date
+      if (a.dueDate && b.dueDate) {
+        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+      }
+      if (a.dueDate) return -1;
+      if (b.dueDate) return 1;
+      return 0;
+    });
+  };
+
+  const handleAddToCalendar = async (event: ActionableEvent) => {
+    try {
+      if (!event.dueDate) {
+        alert('Cannot add event without a due date');
+        return;
+      }
+
+      const startDate = new Date(event.dueDate);
+      const endDate = new Date(startDate.getTime() + 30 * 60000); // 30 minutes default
+
+      const medicalEventData = {
+        patientId: firebaseUser?.uid,
+        title: event.title,
+        description: event.description,
+        eventType: event.type === 'follow_up_appointment' ? 'follow_up' : 'appointment',
+        priority: event.urgency === 'urgent' ? 'urgent' : event.urgency === 'high' ? 'high' : 'medium',
+        status: 'scheduled',
+        startDateTime: startDate,
+        endDateTime: endDate,
+        duration: 30,
+        isAllDay: false,
+        requiresTransportation: false,
+        responsibilityStatus: 'unassigned',
+        isRecurring: false,
+        reminders: [
+          {
+            id: `reminder-${Date.now()}`,
+            type: 'email',
+            minutesBefore: 60,
+            isActive: true
+          }
+        ],
+        providerName: event.providerName,
+        createdBy: firebaseUser?.uid || ''
+      };
+
+      const response = await apiClient.post<{ success: boolean; data?: any; error?: string }>(
+        API_ENDPOINTS.MEDICAL_EVENT_CREATE,
+        medicalEventData
+      );
+      
+      if (response.success) {
+        alert('Event added to calendar successfully!');
+        await fetchUpcomingAppointments(); // Refresh appointments
+      } else {
+        throw new Error(response.error || 'Failed to add event to calendar');
+      }
+    } catch (error) {
+      console.error('Error adding event to calendar:', error);
+      alert('Failed to add event to calendar. Please try again.');
     }
   };
 
@@ -284,6 +469,17 @@ export default function Dashboard() {
     });
   };
 
+  const handleVisitSummarySubmit = async (summary: any) => {
+    console.log('✅ Visit summary submitted:', summary);
+    setShowVisitRecording(false);
+    // Refresh recent visit summaries to show the new one
+    await fetchRecentVisitSummaries();
+  };
+
+  const handleVisitSummaryCancel = () => {
+    setShowVisitRecording(false);
+  };
+
   useEffect(() => {
     if (firebaseUser) {
       fetchRecentVisitSummaries();
@@ -410,14 +606,23 @@ export default function Dashboard() {
         <div className="mb-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-gray-900">Recent Events</h2>
-            {recentVisitSummaries.length > 0 && (
-              <Link 
-                to="/visit-summaries" 
-                className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setShowVisitRecording(true)}
+                className="flex items-center space-x-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors"
               >
-                View All
-              </Link>
-            )}
+                <Mic className="w-4 h-4" />
+                <span>Record Visit</span>
+              </button>
+              {recentVisitSummaries.length > 0 && (
+                <Link
+                  to="/visit-summaries"
+                  className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                >
+                  View All
+                </Link>
+              )}
+            </div>
           </div>
           
           {loadingVisitSummaries ? (
@@ -427,8 +632,98 @@ export default function Dashboard() {
                 <span className="ml-2 text-gray-600 text-sm">Loading recent events...</span>
               </div>
             </div>
-          ) : recentVisitSummaries.length > 0 ? (
+          ) : recentVisitSummaries.length > 0 || actionableEvents.length > 0 ? (
             <div className="space-y-3">
+              {/* Actionable Events */}
+              {actionableEvents.slice(0, 3).map((event) => (
+                <div key={event.id} className="bg-white rounded-lg p-4 border border-gray-200">
+                  <div className="flex items-start space-x-3">
+                    <div className="flex-shrink-0 mt-1">
+                      <div className={`p-2 rounded-full ${
+                        event.urgency === 'urgent' ? 'bg-red-100' :
+                        event.urgency === 'high' ? 'bg-orange-100' :
+                        'bg-blue-100'
+                      }`}>
+                        {event.type === 'follow_up_appointment' ? (
+                          <Calendar className={`w-4 h-4 ${
+                            event.urgency === 'urgent' ? 'text-red-600' :
+                            event.urgency === 'high' ? 'text-orange-600' :
+                            'text-blue-600'
+                          }`} />
+                        ) : event.type === 'new_medication' || event.type === 'stop_medication' ? (
+                          <Pill className={`w-4 h-4 ${
+                            event.urgency === 'urgent' ? 'text-red-600' :
+                            event.urgency === 'high' ? 'text-orange-600' :
+                            'text-blue-600'
+                          }`} />
+                        ) : (
+                          <AlertCircle className={`w-4 h-4 ${
+                            event.urgency === 'urgent' ? 'text-red-600' :
+                            event.urgency === 'high' ? 'text-orange-600' :
+                            'text-blue-600'
+                          }`} />
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center space-x-2 mb-1">
+                        <h3 className="font-medium text-gray-900 text-sm">
+                          {event.title}
+                        </h3>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                          event.urgency === 'urgent' ? 'bg-red-100 text-red-800' :
+                          event.urgency === 'high' ? 'bg-orange-100 text-orange-800' :
+                          event.urgency === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-blue-100 text-blue-800'
+                        }`}>
+                          {event.urgency}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-2">
+                        {event.description}
+                      </p>
+                      <div className="flex items-center space-x-4 text-xs text-gray-500">
+                        {event.dueDate && (
+                          <span className="flex items-center space-x-1">
+                            <Clock className="w-3 h-3" />
+                            <span>{new Date(event.dueDate).toLocaleDateString()}</span>
+                          </span>
+                        )}
+                        {event.providerName && (
+                          <span className="flex items-center space-x-1">
+                            <User className="w-3 h-3" />
+                            <span>{event.providerName}</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-col space-y-2">
+                      {event.actionable && event.dueDate && (
+                        <button
+                          onClick={() => handleAddToCalendar(event)}
+                          className="flex items-center space-x-1 px-3 py-1 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 transition-colors"
+                          title="Add to calendar"
+                        >
+                          <CalendarPlus className="w-3 h-3" />
+                          <span>Add to Calendar</span>
+                        </button>
+                      )}
+                      {event.type.includes('medication') && (
+                        <Link
+                          to="/medications"
+                          className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white text-xs rounded-md hover:bg-blue-700 transition-colors"
+                          title="Manage medications"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>Manage</span>
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {/* Recent Visit Summaries */}
               {recentVisitSummaries.slice(0, 2).map((summary) => (
                 <div key={summary.id} className="bg-white rounded-lg p-4 border border-gray-200">
                   <div className="flex items-start space-x-3">
@@ -476,7 +771,14 @@ export default function Dashboard() {
           ) : (
             <div className="bg-white rounded-lg p-6 border border-gray-200 text-center">
               <FileText className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-              <p className="text-gray-500 text-sm">Nothing new in the last 30 days</p>
+              <p className="text-gray-500 text-sm mb-3">Nothing new in the last 30 days</p>
+              <button
+                onClick={() => setShowVisitRecording(true)}
+                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors mx-auto"
+              >
+                <Mic className="w-4 h-4" />
+                <span>Record Your First Visit</span>
+              </button>
             </div>
           )}
         </div>
@@ -667,6 +969,23 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+
+        {/* Visit Recording Modal */}
+        {showVisitRecording && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+              <VisitSummaryForm
+                patientId={firebaseUser?.uid || ''}
+                onSubmit={handleVisitSummarySubmit}
+                onCancel={handleVisitSummaryCancel}
+                initialData={{
+                  visitType: 'walk_in', // Default to walk-in since it's not a scheduled appointment
+                  visitDate: new Date()
+                }}
+              />
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Mobile Bottom Navigation */}

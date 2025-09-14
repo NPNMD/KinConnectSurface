@@ -232,6 +232,61 @@ service cloud.firestore {
       );
     }
     
+    // Visit recordings - patients can manage their own visits, family can read based on access level
+    match /visits/{visitId} {
+      allow read: if request.auth != null && (
+        // Patient owns the visit
+        resource.data.uid == request.auth.uid ||
+        // Family member has access to the patient
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.uid)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.uid)).data.permissions.canView == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.uid)).data.status == 'active'
+      );
+      
+      allow create: if request.auth != null && (
+        // Patient creates their own visit
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.patientId == request.auth.uid &&
+        // Validate required fields
+        request.resource.data.keys().hasAll(['uid', 'patientId', 'status', 'metadata'])
+      );
+      
+      allow update: if request.auth != null && (
+        // Patient updates their own visit
+        resource.data.uid == request.auth.uid ||
+        // Cloud Functions can update for processing (validated by server)
+        request.auth.token.firebase.sign_in_provider == 'custom'
+      );
+      
+      allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
+    }
+    
+    // Visit summaries - enhanced access control for processed visit data
+    match /visit_summaries/{summaryId} {
+      allow read: if request.auth != null && (
+        // Patient owns the summary
+        resource.data.patientId == request.auth.uid ||
+        // Family member has appropriate access level
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canViewMedicalDetails == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active' &&
+        // Respect family access level settings
+        (resource.data.familyAccessLevel == 'full' ||
+         resource.data.familyAccessLevel == 'summary_only' ||
+         (resource.data.familyAccessLevel == 'restricted' &&
+          get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.accessLevel == 'full'))
+      );
+      
+      allow create, update: if request.auth != null && (
+        // Patient manages their own summaries
+        request.resource.data.patientId == request.auth.uid ||
+        // Cloud Functions can create/update for processing
+        request.auth.token.firebase.sign_in_provider == 'custom'
+      );
+      
+      allow delete: if request.auth != null && resource.data.patientId == request.auth.uid;
+    }
+    
     // Allow authenticated users to read/write their own data by default (fallback)
     match /{document=**} {
       allow read, write: if request.auth != null;

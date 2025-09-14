@@ -12,6 +12,10 @@
     "lint": "eslint --ext .ts src"
   },
   "dependencies": {
+    "@google-cloud/language": "^6.3.0",
+    "@google-cloud/pubsub": "^4.11.0",
+    "@google-cloud/speech": "^6.0.1",
+    "@google-cloud/storage": "^7.17.1",
     "@google/generative-ai": "^0.2.1",
     "@sendgrid/mail": "^8.1.5",
     "cors": "^2.8.5",
