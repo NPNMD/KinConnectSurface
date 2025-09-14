@@ -34,7 +34,8 @@ import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import VisitSummaryCard from '@/components/VisitSummaryCard';
 import VisitSummaryForm from '@/components/VisitSummaryForm';
-import type { VisitSummary, MedicationCalendarEvent, MedicalEvent } from '@shared/types';
+import UnifiedMedicationView from '@/components/UnifiedMedicationView';
+import type { VisitSummary, MedicationCalendarEvent, MedicalEvent, Medication } from '@shared/types';
 
 interface TodaysMedication {
   id: string;
@@ -52,6 +53,8 @@ export default function Dashboard() {
   const [loadingVisitSummaries, setLoadingVisitSummaries] = useState(false);
   const [todaysMedications, setTodaysMedications] = useState<TodaysMedication[]>([]);
   const [loadingMedications, setLoadingMedications] = useState(false);
+  const [allMedications, setAllMedications] = useState<Medication[]>([]);
+  const [loadingAllMedications, setLoadingAllMedications] = useState(false);
   const [upcomingAppointments, setUpcomingAppointments] = useState<MedicalEvent[]>([]);
   const [loadingAppointments, setLoadingAppointments] = useState(false);
   const [takingMedication, setTakingMedication] = useState<string | null>(null);
@@ -378,6 +381,32 @@ export default function Dashboard() {
     }
   };
 
+  const fetchAllMedications = async () => {
+    try {
+      setLoadingAllMedications(true);
+      const response = await apiClient.get<{ success: boolean; data: Medication[] }>(
+        API_ENDPOINTS.MEDICATIONS
+      );
+      
+      if (response.success && response.data) {
+        // Parse date strings back to Date objects
+        const medicationsWithDates = response.data.map(med => ({
+          ...med,
+          prescribedDate: new Date(med.prescribedDate),
+          startDate: med.startDate ? new Date(med.startDate) : undefined,
+          endDate: med.endDate ? new Date(med.endDate) : undefined,
+          createdAt: new Date(med.createdAt),
+          updatedAt: new Date(med.updatedAt),
+        }));
+        setAllMedications(medicationsWithDates);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching all medications:', error);
+    } finally {
+      setLoadingAllMedications(false);
+    }
+  };
+
   const handleMarkMedicationTaken = async (medicationId: string) => {
     try {
       console.log('🔧 Dashboard: Marking medication as taken:', medicationId);
@@ -484,6 +513,7 @@ export default function Dashboard() {
     if (firebaseUser) {
       fetchRecentVisitSummaries();
       fetchTodaysMedications();
+      fetchAllMedications();
       fetchUpcomingAppointments();
     }
   }, [firebaseUser]);
@@ -493,6 +523,7 @@ export default function Dashboard() {
     const handleScheduleUpdate = () => {
       console.log('🔍 Dashboard: Received schedule update event, refreshing data');
       fetchTodaysMedications();
+      fetchAllMedications();
     };
 
     window.addEventListener('medicationScheduleUpdated', handleScheduleUpdate);
@@ -793,122 +824,49 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Today's Medications Section */}
+        {/* All Medications Section - Unified View */}
         <div className="mb-6">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-gray-900">Today's Medications</h2>
-            <Link 
-              to="/medications" 
+            <h2 className="text-lg font-semibold text-gray-900">Medications</h2>
+            <Link
+              to="/medications"
               className="text-sm text-primary-600 hover:text-primary-700 font-medium"
             >
               Manage
             </Link>
           </div>
           
-          {loadingMedications ? (
+          {loadingAllMedications ? (
             <div className="bg-white rounded-lg p-4 border border-gray-200">
               <div className="flex items-center justify-center py-4">
                 <LoadingSpinner size="sm" />
                 <span className="ml-2 text-gray-600 text-sm">Loading medications...</span>
               </div>
             </div>
-          ) : todaysMedications.length > 0 ? (
-            <div className="bg-white rounded-lg border border-gray-200">
-              {/* Select All Header */}
-              {todaysMedications.length > 1 && (
-                <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectAllChecked}
-                        onChange={handleSelectAll}
-                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                      />
-                      <span className="text-sm font-medium text-gray-700">Select All</span>
-                    </label>
-                    {selectedMedications.size > 0 && (
-                      <button
-                        onClick={handleMarkAllSelectedTaken}
-                        className="px-3 py-1 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition-colors"
-                      >
-                        Mark {selectedMedications.size} as Taken
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-              
-              {/* Medications List */}
-              <div className="divide-y divide-gray-200">
-                {todaysMedications.map((medication) => (
-                  <div key={medication.id} className="p-4">
-                    <div className="flex items-center space-x-3">
-                      {todaysMedications.length > 1 && (
-                        <input
-                          type="checkbox"
-                          checked={selectedMedications.has(medication.id)}
-                          onChange={() => handleMedicationSelect(medication.id)}
-                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                        />
-                      )}
-                      
-                      <div className={`p-2 rounded-full ${
-                        medication.isOverdue ? 'bg-red-100' : 'bg-blue-100'
-                      }`}>
-                        <Pill className={`w-4 h-4 ${
-                          medication.isOverdue ? 'text-red-600' : 'text-blue-600'
-                        }`} />
-                      </div>
-                      
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-medium text-gray-900 text-sm">
-                          {medication.medicationName}
-                        </h3>
-                        <p className="text-sm text-gray-600">
-                          {medication.dosageAmount}
-                        </p>
-                        {medication.instructions && (
-                          <p className="text-xs text-gray-500 mt-1">
-                            {medication.instructions}
-                          </p>
-                        )}
-                        <div className="flex items-center space-x-3 mt-1">
-                          <span className={`flex items-center space-x-1 text-xs ${
-                            medication.isOverdue ? 'text-red-600' : 'text-blue-600'
-                          }`}>
-                            <Clock className="w-3 h-3" />
-                            <span>{formatTime(medication.scheduledDateTime)}</span>
-                          </span>
-                          <span className={`text-xs ${
-                            medication.isOverdue ? 'text-red-500' : 'text-gray-500'
-                          }`}>
-                            {getTimeUntil(medication.scheduledDateTime)}
-                          </span>
-                        </div>
-                      </div>
-                      
-                      <button
-                        onClick={() => handleMarkMedicationTaken(medication.id)}
-                        disabled={takingMedication === medication.id}
-                        className="p-2 text-green-600 hover:text-green-800 hover:bg-green-100 rounded-md disabled:opacity-50 transition-colors"
-                        title="Mark as taken"
-                      >
-                        {takingMedication === medication.id ? (
-                          <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                          <CheckCircle className="w-4 h-4" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+          ) : allMedications.length > 0 ? (
+            <div className="bg-white rounded-lg border border-gray-200 p-4">
+              <UnifiedMedicationView
+                patientId={firebaseUser?.uid || ''}
+                medications={allMedications}
+                maxItems={5}
+                showCreateScheduleButton={true}
+                onScheduleCreated={() => {
+                  fetchTodaysMedications();
+                  fetchAllMedications();
+                }}
+              />
             </div>
           ) : (
             <div className="bg-white rounded-lg p-6 border border-gray-200 text-center">
               <Pill className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-              <p className="text-gray-500 text-sm">No medications scheduled for today</p>
+              <p className="text-gray-500 text-sm mb-3">No medications added yet</p>
+              <Link
+                to="/medications"
+                className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Your First Medication</span>
+              </Link>
             </div>
           )}
         </div>

@@ -23,6 +23,8 @@ import { Medication, NewMedication } from '@shared/types';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import MedicationManager from '@/components/MedicationManager';
 import MedicationReminders from '@/components/MedicationReminders';
+import UnifiedMedicationView from '@/components/UnifiedMedicationView';
+import TimeBucketView from '@/components/TimeBucketView';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
 export default function Medications() {
@@ -32,6 +34,7 @@ export default function Medications() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
   const [showReminders, setShowReminders] = useState(true);
+  const [useTimeBuckets, setUseTimeBuckets] = useState(true); // New enhanced view
 
   // Load medications function
   const loadMedications = async () => {
@@ -204,23 +207,44 @@ export default function Medications() {
 
       {/* Main Content */}
       <main className="px-4 py-4 pb-20">
-        {/* Today's Reminders Section */}
+        {/* Today's Medications Section */}
         {showReminders && (
           <div className="mb-6">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold text-gray-900">Today's Reminders</h2>
-              <button
-                onClick={() => setShowReminders(!showReminders)}
-                className="text-sm text-gray-500 hover:text-gray-700"
-              >
-                {showReminders ? 'Hide' : 'Show'}
-              </button>
+              <h2 className="text-lg font-semibold text-gray-900">Today's Medications</h2>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setUseTimeBuckets(!useTimeBuckets)}
+                  className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-md hover:bg-blue-200 transition-colors"
+                >
+                  {useTimeBuckets ? 'Simple View' : 'Time Buckets'}
+                </button>
+                <button
+                  onClick={() => setShowReminders(!showReminders)}
+                  className="text-sm text-gray-500 hover:text-gray-700"
+                >
+                  {showReminders ? 'Hide' : 'Show'}
+                </button>
+              </div>
             </div>
             <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <MedicationReminders
-                patientId={user?.id || firebaseUser?.uid || ''}
-                maxItems={3}
-              />
+              {useTimeBuckets ? (
+                <TimeBucketView
+                  patientId={user?.id || firebaseUser?.uid || ''}
+                  date={new Date()}
+                  onMedicationAction={(eventId, action) => {
+                    console.log('Medication action performed:', { eventId, action });
+                    // Refresh medications after action
+                    loadMedications();
+                  }}
+                  compactMode={false}
+                />
+              ) : (
+                <MedicationReminders
+                  patientId={user?.id || firebaseUser?.uid || ''}
+                  maxItems={5}
+                />
+              )}
             </div>
           </div>
         )}
@@ -261,6 +285,20 @@ export default function Medications() {
               ))}
             </div>
           </div>
+        </div>
+
+        {/* Unified Medications View with Management */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+          <UnifiedMedicationView
+            patientId={user?.id || firebaseUser?.uid || ''}
+            medications={filteredMedications}
+            showCreateScheduleButton={true}
+            onScheduleCreated={() => {
+              loadMedications();
+              // Dispatch event to notify other components
+              window.dispatchEvent(new CustomEvent('medicationScheduleUpdated'));
+            }}
+          />
         </div>
 
         {/* Medications Manager */}

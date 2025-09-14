@@ -1548,3 +1548,859 @@ export interface NewVoiceTranscription {
   transcriptionService: 'google_speech' | 'azure_speech' | 'aws_transcribe';
   createdBy: string;
 }
+
+// ===== ENHANCED MEDICATION UX TYPES (Phase 1) =====
+
+// Time slot definitions
+export type TimeSlot = 'morning' | 'noon' | 'evening' | 'bedtime';
+export type WorkScheduleType = 'standard' | 'night_shift' | 'custom';
+
+// Patient Medication Preferences for time bucket organization
+export interface PatientMedicationPreferences {
+  id: string;
+  patientId: string;
+  timeSlots: {
+    morning: { start: string; end: string; defaultTime: string; label: string };
+    noon: { start: string; end: string; defaultTime: string; label: string };
+    evening: { start: string; end: string; defaultTime: string; label: string };
+    bedtime: { start: string; end: string; defaultTime: string; label: string };
+  };
+  workSchedule: WorkScheduleType;
+  quietHours: {
+    start: string;
+    end: string;
+    enabled: boolean;
+  };
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface NewPatientMedicationPreferences {
+  patientId: string;
+  timeSlots: {
+    morning: { start: string; end: string; defaultTime: string; label: string };
+    noon: { start: string; end: string; defaultTime: string; label: string };
+    evening: { start: string; end: string; defaultTime: string; label: string };
+    bedtime: { start: string; end: string; defaultTime: string; label: string };
+  };
+  workSchedule: WorkScheduleType;
+  quietHours: {
+    start: string;
+    end: string;
+    enabled: boolean;
+  };
+}
+
+// Default time slot configurations
+export const DEFAULT_TIME_SLOTS = {
+  standard: {
+    morning: { start: '06:00', end: '10:00', defaultTime: '07:00', label: 'Morning' },
+    noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Noon' },
+    evening: { start: '17:00', end: '20:00', defaultTime: '18:00', label: 'Evening' },
+    bedtime: { start: '21:00', end: '23:59', defaultTime: '22:00', label: 'Bedtime' }
+  },
+  night_shift: {
+    morning: { start: '14:00', end: '18:00', defaultTime: '15:00', label: 'Morning' },
+    noon: { start: '19:00', end: '22:00', defaultTime: '20:00', label: 'Noon' },
+    evening: { start: '01:00', end: '04:00', defaultTime: '02:00', label: 'Evening' },
+    bedtime: { start: '05:00', end: '08:00', defaultTime: '06:00', label: 'Bedtime' }
+  }
+} as const;
+
+// Medication Packs for grouped medication management
+export interface MedicationPack {
+  id: string;
+  patientId: string;
+  name: string; // "Morning Pack", "Evening Vitamins", etc.
+  description?: string;
+  timeSlot: TimeSlot | 'custom';
+  customTime?: string; // if timeSlot is 'custom'
+  medications: Array<{
+    medicationId: string;
+    scheduleId: string;
+    dosageOverride?: string; // optional pack-specific dosage
+  }>;
+  isActive: boolean;
+  autoTakeAll: boolean; // if true, "Take All" marks all as taken
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface NewMedicationPack {
+  patientId: string;
+  name: string;
+  description?: string;
+  timeSlot: TimeSlot | 'custom';
+  customTime?: string;
+  medications: Array<{
+    medicationId: string;
+    scheduleId: string;
+    dosageOverride?: string;
+  }>;
+  isActive: boolean;
+  autoTakeAll: boolean;
+}
+
+// Enhanced Medication Calendar Event with action history
+export interface EnhancedMedicationCalendarEvent extends MedicationCalendarEvent {
+  // Pack information
+  packId?: string;
+  packName?: string;
+  isPartOfPack: boolean;
+  packPosition?: number; // order within pack
+  
+  // Action history
+  snoozeCount: number;
+  snoozeHistory: Array<{
+    snoozedAt: Date;
+    snoozeMinutes: number;
+    reason?: string;
+    snoozedBy: string;
+  }>;
+  skipHistory: Array<{
+    skippedAt: Date;
+    reason: 'forgot' | 'felt_sick' | 'ran_out' | 'side_effects' | 'other';
+    notes?: string;
+    skippedBy: string;
+  }>;
+  rescheduleHistory: Array<{
+    originalDateTime: Date;
+    newDateTime: Date;
+    reason: string;
+    isOneTime: boolean; // true = only this dose, false = ongoing schedule change
+    rescheduledAt: Date;
+    rescheduledBy: string;
+  }>;
+  
+  // Time bucket classification
+  timeBucket?: 'now' | 'due_soon' | 'morning' | 'noon' | 'evening' | 'bedtime' | 'overdue';
+  minutesUntilDue?: number; // for "due soon" classification
+  isOverdue?: boolean;
+  minutesOverdue?: number;
+}
+
+// Medication Event Actions for tracking user interactions
+export interface MedicationEventAction {
+  id: string;
+  eventId: string;
+  actionType: 'take' | 'snooze' | 'skip' | 'reschedule';
+  actionData: {
+    // For snooze
+    snoozeMinutes?: number;
+    snoozeUntil?: Date;
+    snoozeReason?: string;
+    
+    // For skip
+    skipReason?: 'forgot' | 'felt_sick' | 'ran_out' | 'side_effects' | 'other';
+    skipNotes?: string;
+    
+    // For reschedule
+    newDateTime?: Date;
+    rescheduleReason?: string;
+    isOneTime?: boolean; // true = only this dose, false = ongoing schedule change
+  };
+  performedBy: string;
+  performedAt: Date;
+}
+
+export interface NewMedicationEventAction {
+  eventId: string;
+  actionType: 'take' | 'snooze' | 'skip' | 'reschedule';
+  actionData: {
+    snoozeMinutes?: number;
+    snoozeUntil?: Date;
+    snoozeReason?: string;
+    skipReason?: 'forgot' | 'felt_sick' | 'ran_out' | 'side_effects' | 'other';
+    skipNotes?: string;
+    newDateTime?: Date;
+    rescheduleReason?: string;
+    isOneTime?: boolean;
+  };
+  performedBy: string;
+}
+
+// Time bucket organization for today's medications
+export interface TodayMedicationBuckets {
+  now: EnhancedMedicationCalendarEvent[];
+  dueSoon: EnhancedMedicationCalendarEvent[]; // due within next 30 minutes
+  morning: EnhancedMedicationCalendarEvent[];
+  noon: EnhancedMedicationCalendarEvent[];
+  evening: EnhancedMedicationCalendarEvent[];
+  bedtime: EnhancedMedicationCalendarEvent[];
+  overdue: EnhancedMedicationCalendarEvent[];
+  patientPreferences: PatientMedicationPreferences;
+  lastUpdated: Date;
+}
+
+// Snooze options for quick actions
+export const SNOOZE_OPTIONS = [
+  { minutes: 10, label: '10 minutes' },
+  { minutes: 30, label: '30 minutes' },
+  { minutes: 60, label: '1 hour' },
+  { minutes: 120, label: '2 hours' },
+  { minutes: 240, label: '4 hours' }
+] as const;
+
+// Skip reasons for tracking
+export const SKIP_REASONS = [
+  { value: 'forgot', label: 'Forgot to take it', icon: '🤔' },
+  { value: 'felt_sick', label: 'Felt sick/nauseous', icon: '🤢' },
+  { value: 'ran_out', label: 'Ran out of medication', icon: '📦' },
+  { value: 'side_effects', label: 'Experiencing side effects', icon: '⚠️' },
+  { value: 'other', label: 'Other reason', icon: '💭' }
+] as const;
+
+export type SkipReason = typeof SKIP_REASONS[number]['value'];
+
+// Medication pack status for display
+export interface MedicationPackStatus {
+  packId: string;
+  packName: string;
+  totalMedications: number;
+  takenMedications: number;
+  pendingMedications: number;
+  overdueMedications: number;
+  nextDueTime?: Date;
+  allTaken: boolean;
+  hasOverdue: boolean;
+}
+
+// ===== PHASE 2: ADVANCED SCHEDULING ENGINE TYPES =====
+
+// Timing types for advanced scheduling
+export type TimingType = 'absolute' | 'meal_relative' | 'sleep_relative' | 'interval';
+export type MealType = 'breakfast' | 'lunch' | 'dinner';
+export type SleepRelativeType = 'bedtime' | 'wake_time';
+
+// Enhanced Patient Medication Preferences with meal and sleep timing
+export interface EnhancedPatientMedicationPreferences extends PatientMedicationPreferences {
+  mealTimes: {
+    breakfast?: string;
+    lunch?: string;
+    dinner?: string;
+    isFlexible: boolean; // if true, use meal logging; if false, use fixed times
+  };
+  sleepSchedule: {
+    bedtime: string;
+    wakeTime: string;
+    isFlexible: boolean;
+  };
+  medicationSeparationRules: Array<{
+    medication1: string; // medication name or active ingredient
+    medication2: string;
+    minimumSeparationMinutes: number;
+    reason: string; // e.g., "Calcium interferes with thyroid absorption"
+    type: 'absorption' | 'interaction' | 'effectiveness';
+  }>;
+}
+
+export interface NewEnhancedPatientMedicationPreferences extends NewPatientMedicationPreferences {
+  mealTimes: {
+    breakfast?: string;
+    lunch?: string;
+    dinner?: string;
+    isFlexible: boolean;
+  };
+  sleepSchedule: {
+    bedtime: string;
+    wakeTime: string;
+    isFlexible: boolean;
+  };
+  medicationSeparationRules: Array<{
+    medication1: string;
+    medication2: string;
+    minimumSeparationMinutes: number;
+    reason: string;
+    type: 'absorption' | 'interaction' | 'effectiveness';
+  }>;
+}
+
+// Meal logging for flexible timing
+export interface MealLog {
+  id: string;
+  patientId: string;
+  date: Date;
+  mealType: MealType;
+  loggedAt: Date;
+  estimatedTime?: Date; // if logged later, estimated actual meal time
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface NewMealLog {
+  patientId: string;
+  date: Date;
+  mealType: MealType;
+  loggedAt: Date;
+  estimatedTime?: Date;
+  notes?: string;
+}
+
+// Enhanced Medication Schedule with relative timing
+export interface EnhancedMedicationSchedule extends MedicationSchedule {
+  timingType: TimingType;
+  
+  // For meal-relative timing
+  mealRelativeTiming?: {
+    mealType: MealType;
+    offsetMinutes: number; // negative = before meal, positive = after meal
+    isFlexible: boolean; // if true, adjust based on actual meal times
+    fallbackTime?: string; // if no meal logged, use this time
+  };
+  
+  // For sleep-relative timing
+  sleepRelativeTiming?: {
+    relativeTo: SleepRelativeType;
+    offsetMinutes: number;
+    fallbackTime?: string;
+  };
+  
+  // For interval-based timing (q4h, q6h, etc.)
+  intervalTiming?: {
+    intervalHours: number;
+    startTime: string; // first dose of the day
+    endTime?: string; // last dose of the day
+    avoidSleepHours: boolean;
+    maxDosesPerDay?: number;
+  };
+  
+  // Complex frequency patterns
+  frequencyPattern?: {
+    type: 'daily' | 'interval' | 'cycling' | 'weekly' | 'monthly' | 'custom';
+    
+    // For cycling patterns
+    cyclingPattern?: {
+      onDays: number; // take for X days
+      offDays: number; // skip for Y days
+      startDate: Date;
+    };
+    
+    // For weekly patterns
+    weeklyPattern?: {
+      daysOfWeek: number[]; // 0-6, Sunday = 0
+      weeksOn?: number; // take for X weeks
+      weeksOff?: number; // skip for Y weeks
+    };
+    
+    // For monthly patterns
+    monthlyPattern?: {
+      dayOfMonth?: number; // specific day (1-31)
+      weekOfMonth?: number; // 1-4
+      dayOfWeek?: number; // 0-6
+      occurrence?: 'first' | 'second' | 'third' | 'fourth' | 'last';
+    };
+    
+    // For custom patterns
+    customPattern?: {
+      rule: string; // human-readable rule
+      dates: Date[]; // specific dates for irregular patterns
+    };
+  };
+  
+  // Short course management
+  courseManagement?: {
+    isShortCourse: boolean;
+    totalDuration?: number; // in days
+    totalDoses?: number;
+    autoStopDate?: Date;
+    completionBadge?: string;
+    taperSchedule?: Array<{
+      startDay: number;
+      dosageAmount: string;
+      frequency: string;
+      instructions?: string;
+    }>;
+  };
+}
+
+export interface NewEnhancedMedicationSchedule extends NewMedicationSchedule {
+  timingType: TimingType;
+  mealRelativeTiming?: {
+    mealType: MealType;
+    offsetMinutes: number;
+    isFlexible: boolean;
+    fallbackTime?: string;
+  };
+  sleepRelativeTiming?: {
+    relativeTo: SleepRelativeType;
+    offsetMinutes: number;
+    fallbackTime?: string;
+  };
+  intervalTiming?: {
+    intervalHours: number;
+    startTime: string;
+    endTime?: string;
+    avoidSleepHours: boolean;
+    maxDosesPerDay?: number;
+  };
+  frequencyPattern?: {
+    type: 'daily' | 'interval' | 'cycling' | 'weekly' | 'monthly' | 'custom';
+    cyclingPattern?: {
+      onDays: number;
+      offDays: number;
+      startDate: Date;
+    };
+    weeklyPattern?: {
+      daysOfWeek: number[];
+      weeksOn?: number;
+      weeksOff?: number;
+    };
+    monthlyPattern?: {
+      dayOfMonth?: number;
+      weekOfMonth?: number;
+      dayOfWeek?: number;
+      occurrence?: 'first' | 'second' | 'third' | 'fourth' | 'last';
+    };
+    customPattern?: {
+      rule: string;
+      dates: Date[];
+    };
+  };
+  courseManagement?: {
+    isShortCourse: boolean;
+    totalDuration?: number;
+    totalDoses?: number;
+    autoStopDate?: Date;
+    completionBadge?: string;
+    taperSchedule?: Array<{
+      startDay: number;
+      dosageAmount: string;
+      frequency: string;
+      instructions?: string;
+    }>;
+  };
+}
+
+// Schedule conflict detection
+export interface ScheduleConflict {
+  type: 'separation_violation' | 'sleep_disruption' | 'meal_conflict' | 'timing_overlap';
+  severity: 'info' | 'warning' | 'error';
+  title: string;
+  description: string;
+  suggestedResolution: string;
+  affectedSchedules: string[];
+  affectedMedications: Array<{
+    medicationId: string;
+    medicationName: string;
+    currentTime: string;
+    suggestedTime?: string;
+  }>;
+}
+
+// Schedule optimization suggestions
+export interface ScheduleOptimization {
+  type: 'timing_adjustment' | 'separation_improvement' | 'consolidation' | 'meal_alignment';
+  title: string;
+  description: string;
+  currentSchedule: MedicationSchedule;
+  suggestedSchedule: Partial<EnhancedMedicationSchedule>;
+  benefits: string[];
+  risks: string[];
+  estimatedImprovementScore: number; // 0-100
+}
+
+// Interval scheduling presets
+export const INTERVAL_PRESETS = [
+  { hours: 4, label: 'Every 4 hours (q4h)', maxDaily: 6, description: 'Around the clock dosing' },
+  { hours: 6, label: 'Every 6 hours (q6h)', maxDaily: 4, description: 'Four times daily' },
+  { hours: 8, label: 'Every 8 hours (q8h)', maxDaily: 3, description: 'Three times daily' },
+  { hours: 12, label: 'Every 12 hours (q12h)', maxDaily: 2, description: 'Twice daily' },
+  { hours: 24, label: 'Every 24 hours (q24h)', maxDaily: 1, description: 'Once daily' }
+] as const;
+
+// Cycling pattern presets
+export const CYCLING_PRESETS = [
+  { onDays: 1, offDays: 1, label: 'Every other day', description: 'Take one day, skip one day' },
+  { onDays: 5, offDays: 2, label: 'Weekdays only', description: 'Monday through Friday' },
+  { onDays: 7, offDays: 7, label: 'Every other week', description: 'One week on, one week off' },
+  { onDays: 21, offDays: 7, label: 'Three weeks on, one off', description: 'Common for some treatments' }
+] as const;
+
+// Monthly pattern presets
+export const MONTHLY_PRESETS = [
+  { type: 'day_of_month', value: 1, label: 'First of the month', description: 'Every month on the 1st' },
+  { type: 'day_of_month', value: 15, label: 'Mid-month', description: 'Every month on the 15th' },
+  { type: 'first_friday', label: 'First Friday', description: 'First Friday of each month' },
+  { type: 'last_day', label: 'Last day of month', description: 'Last day of each month' }
+] as const;
+
+// Meal timing options
+export const MEAL_TIMING_OPTIONS = [
+  { offset: -30, label: '30 minutes before meal', icon: '🍽️⏰' },
+  { offset: -15, label: '15 minutes before meal', icon: '🍽️⏰' },
+  { offset: 0, label: 'With meal', icon: '🍽️' },
+  { offset: 15, label: '15 minutes after meal', icon: '🍽️✅' },
+  { offset: 30, label: '30 minutes after meal', icon: '🍽️✅' },
+  { offset: 60, label: '1 hour after meal', icon: '🍽️✅' },
+  { offset: 120, label: '2 hours after meal', icon: '🍽️✅' }
+] as const;
+
+// Sleep timing options
+export const SLEEP_TIMING_OPTIONS = [
+  { relativeTo: 'bedtime', offset: -60, label: '1 hour before bedtime', icon: '🌙⏰' },
+  { relativeTo: 'bedtime', offset: -30, label: '30 minutes before bedtime', icon: '🌙⏰' },
+  { relativeTo: 'bedtime', offset: 0, label: 'At bedtime', icon: '🌙' },
+  { relativeTo: 'wake_time', offset: 0, label: 'Upon waking', icon: '☀️' },
+  { relativeTo: 'wake_time', offset: 30, label: '30 minutes after waking', icon: '☀️✅' },
+  { relativeTo: 'wake_time', offset: 60, label: '1 hour after waking', icon: '☀️✅' }
+] as const;
+
+// Common medication separation rules
+export const COMMON_SEPARATION_RULES = [
+  {
+    medication1: 'levothyroxine',
+    medication2: 'calcium',
+    minimumSeparationMinutes: 240, // 4 hours
+    reason: 'Calcium interferes with thyroid hormone absorption',
+    type: 'absorption' as const
+  },
+  {
+    medication1: 'levothyroxine',
+    medication2: 'iron',
+    minimumSeparationMinutes: 240, // 4 hours
+    reason: 'Iron interferes with thyroid hormone absorption',
+    type: 'absorption' as const
+  },
+  {
+    medication1: 'bisphosphonate',
+    medication2: 'food',
+    minimumSeparationMinutes: 60, // 1 hour
+    reason: 'Bisphosphonates require empty stomach for absorption',
+    type: 'absorption' as const
+  },
+  {
+    medication1: 'tetracycline',
+    medication2: 'dairy',
+    minimumSeparationMinutes: 120, // 2 hours
+    reason: 'Dairy products reduce tetracycline absorption',
+    type: 'absorption' as const
+  }
+] as const;
+
+
+// ===== PHASE 3: SAFETY & INTELLIGENCE TYPES =====
+
+// Enhanced drug information with safety data
+export interface EnhancedDrugInformation {
+  rxcui: string;
+  name: string;
+  brandNames: string[];
+  genericNames: string[];
+  activeIngredients: Array<{
+    name: string;
+    strength: string;
+    unit: string;
+  }>;
+  
+  // Enhanced OpenFDA data
+  fdaLabelData: {
+    boxedWarnings?: string[];
+    contraindications?: string[];
+    warnings?: string[];
+    precautions?: string[];
+    adverseReactions?: string[];
+    drugInteractions?: string[];
+    dosageAndAdministration?: string;
+    storageInstructions?: string;
+    indicationsAndUsage?: string;
+  };
+  
+  // Interaction data
+  knownInteractions: Array<{
+    interactsWith: string; // medication name or ingredient
+    severity: 'minor' | 'moderate' | 'major' | 'contraindicated';
+    description: string;
+    clinicalEffect: string;
+    management: string;
+    source: string;
+  }>;
+  
+  // Separation rules
+  separationRequirements: Array<{
+    separateFrom: string;
+    minimumHours: number;
+    reason: string;
+    type: 'absorption' | 'interaction' | 'effectiveness';
+  }>;
+}
+
+// Medication safety alerts
+export interface MedicationSafetyAlert {
+  id: string;
+  patientId: string;
+  alertType: 'interaction' | 'duplicate' | 'separation' | 'contraindication' | 'allergy' | 'dosage_concern';
+  severity: 'info' | 'warning' | 'critical';
+  title: string;
+  description: string;
+  affectedMedications: Array<{
+    medicationId: string;
+    medicationName: string;
+    role: 'primary' | 'secondary'; // primary = main medication, secondary = interacting medication
+  }>;
+  recommendations: string[];
+  source: 'openfda' | 'rxnorm' | 'clinical_rules' | 'user_profile';
+  isActive: boolean;
+  acknowledgedBy?: string;
+  acknowledgedAt?: Date;
+  dismissedBy?: string;
+  dismissedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface NewMedicationSafetyAlert {
+  patientId: string;
+  alertType: 'interaction' | 'duplicate' | 'separation' | 'contraindication' | 'allergy' | 'dosage_concern';
+  severity: 'info' | 'warning' | 'critical';
+  title: string;
+  description: string;
+  affectedMedications: Array<{
+    medicationId: string;
+    medicationName: string;
+    role: 'primary' | 'secondary';
+  }>;
+  recommendations: string[];
+  source: 'openfda' | 'rxnorm' | 'clinical_rules' | 'user_profile';
+}
+
+// Patient safety profile
+export interface PatientSafetyProfile {
+  id: string;
+  patientId: string;
+  allergies: Array<{
+    id: string;
+    allergen: string;
+    type: 'drug' | 'ingredient' | 'class';
+    severity: 'mild' | 'moderate' | 'severe' | 'anaphylaxis';
+    symptoms: string[];
+    verifiedBy?: string;
+    verifiedAt?: Date;
+    notes?: string;
+  }>;
+  contraindications: Array<{
+    id: string;
+    medication: string;
+    reason: string;
+    source: 'medical_history' | 'provider_note' | 'drug_label';
+    addedBy: string;
+    addedAt: Date;
+    notes?: string;
+  }>;
+  medicalConditions: Array<{
+    id: string;
+    condition: string;
+    icd10Code?: string;
+    affectsMedications: boolean;
+    notes?: string;
+    diagnosedDate?: Date;
+  }>;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface NewPatientSafetyProfile {
+  patientId: string;
+  allergies: Array<{
+    allergen: string;
+    type: 'drug' | 'ingredient' | 'class';
+    severity: 'mild' | 'moderate' | 'severe' | 'anaphylaxis';
+    symptoms: string[];
+    verifiedBy?: string;
+    verifiedAt?: Date;
+    notes?: string;
+  }>;
+  contraindications: Array<{
+    medication: string;
+    reason: string;
+    source: 'medical_history' | 'provider_note' | 'drug_label';
+    addedBy: string;
+    notes?: string;
+  }>;
+  medicalConditions: Array<{
+    condition: string;
+    icd10Code?: string;
+    affectsMedications: boolean;
+    notes?: string;
+    diagnosedDate?: Date;
+  }>;
+}
+
+// ===== PHASE 4: ADVANCED FEATURES TYPES =====
+
+// PRN medication logging
+export interface PRNMedicationLog {
+  id: string;
+  medicationId: string;
+  patientId: string;
+  takenAt: Date;
+  dosageAmount: string;
+  reason: string;
+  painScoreBefore?: number; // 1-10 scale
+  painScoreAfter?: number; // 1-10 scale, logged later
+  symptoms: string[];
+  effectiveness?: 'very_effective' | 'somewhat_effective' | 'not_effective';
+  sideEffects?: string[];
+  notes?: string;
+  loggedBy: string;
+  followUpReminder?: Date; // remind to log effectiveness
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface NewPRNMedicationLog {
+  medicationId: string;
+  patientId: string;
+  takenAt: Date;
+  dosageAmount: string;
+  reason: string;
+  painScoreBefore?: number;
+  symptoms: string[];
+  notes?: string;
+  loggedBy: string;
+}
+
+// PRN medication tracking and analytics
+export interface PRNMedicationTracking {
+  medicationId: string;
+  patientId: string;
+  dailyLimit?: number;
+  weeklyLimit?: number;
+  monthlyLimit?: number;
+  minimumIntervalHours?: number;
+  
+  // Usage analytics
+  usageStats: {
+    last24Hours: number;
+    last7Days: number;
+    last30Days: number;
+    averageDaily: number;
+    mostCommonReasons: Array<{ reason: string; count: number }>;
+    effectivenessRate: number; // percentage of doses rated as effective
+  };
+  
+  // Alerts
+  overuseAlerts: Array<{
+    date: Date;
+    type: 'daily_limit' | 'frequency_concern' | 'effectiveness_concern';
+    description: string;
+  }>;
+  
+  lastCalculated: Date;
+}
+
+// Medication status management
+export interface MedicationStatusChange {
+  id: string;
+  medicationId: string;
+  patientId: string;
+  changeType: 'hold' | 'resume' | 'discontinue' | 'replace';
+  
+  // For holds
+  holdData?: {
+    reason: string;
+    holdUntil?: Date; // null = indefinite hold
+    autoResumeEnabled: boolean;
+    holdInstructions?: string;
+  };
+  
+  // For discontinuation
+  discontinueData?: {
+    reason: string;
+    stopDate: Date;
+    taperSchedule?: Array<{
+      startDate: Date;
+      endDate: Date;
+      dosageAmount: string;
+      frequency: string;
+      instructions: string;
+    }>;
+    followUpRequired: boolean;
+    followUpInstructions?: string;
+  };
+  
+  // For replacement
+  replacementData?: {
+    reason: string;
+    newMedicationId?: string;
+    transitionPlan?: string;
+    overlapDays?: number; // days to take both medications
+  };
+  
+  performedBy: string;
+  performedAt: Date;
+  approvedBy?: string; // for family access scenarios
+  approvedAt?: Date;
+  notes?: string;
+}
+
+export interface NewMedicationStatusChange {
+  medicationId: string;
+  patientId: string;
+  changeType: 'hold' | 'resume' | 'discontinue' | 'replace';
+  holdData?: {
+    reason: string;
+    holdUntil?: Date;
+    autoResumeEnabled: boolean;
+    holdInstructions?: string;
+  };
+  discontinueData?: {
+    reason: string;
+    stopDate: Date;
+    taperSchedule?: Array<{
+      startDate: Date;
+      endDate: Date;
+      dosageAmount: string;
+      frequency: string;
+      instructions: string;
+    }>;
+    followUpRequired: boolean;
+    followUpInstructions?: string;
+  };
+  replacementData?: {
+    reason: string;
+    newMedicationId?: string;
+    transitionPlan?: string;
+    overlapDays?: number;
+  };
+  performedBy: string;
+  notes?: string;
+}
+
+// Enhanced medication with status history
+export interface MedicationWithHistory extends Medication {
+  statusHistory: MedicationStatusChange[];
+  currentStatus: 'active' | 'held' | 'discontinued' | 'replaced';
+  statusReason?: string;
+  statusChangedAt?: Date;
+  statusChangedBy?: string;
+  safetyAlerts: MedicationSafetyAlert[];
+  prnTracking?: PRNMedicationTracking;
+}
+
+// Common PRN reasons
+export const PRN_REASONS = [
+  { value: 'pain', label: 'Pain', icon: '🩹', requiresPainScore: true },
+  { value: 'headache', label: 'Headache', icon: '🤕', requiresPainScore: true },
+  { value: 'nausea', label: 'Nausea', icon: '🤢', requiresPainScore: false },
+  { value: 'anxiety', label: 'Anxiety', icon: '😰', requiresPainScore: false },
+  { value: 'insomnia', label: 'Trouble sleeping', icon: '😴', requiresPainScore: false },
+  { value: 'fever', label: 'Fever', icon: '🌡️', requiresPainScore: false },
+  { value: 'other', label: 'Other reason', icon: '💭', requiresPainScore: false }
+] as const;
+
+export type PRNReason = typeof PRN_REASONS[number]['value'];
+
+// Pain scale for PRN medications
+export const PAIN_SCALE = [
+  { value: 1, label: 'No pain', description: 'No pain at all', color: 'text-green-600' },
+  { value: 2, label: 'Mild', description: 'Very mild pain', color: 'text-green-500' },
+  { value: 3, label: 'Mild', description: 'Mild pain', color: 'text-yellow-500' },
+  { value: 4, label: 'Moderate', description: 'Moderate pain', color: 'text-yellow-600' },
+  { value: 5, label: 'Moderate', description: 'Moderate pain', color: 'text-orange-500' },
+  { value: 6, label: 'Moderate', description: 'Moderately severe pain', color: 'text-orange-600' },
+  { value: 7, label: 'Severe', description: 'Severe pain', color: 'text-red-500' },
+  { value: 8, label: 'Severe', description: 'Very severe pain', color: 'text-red-600' },
+  { value: 9, label: 'Severe', description: 'Extremely severe pain', color: 'text-red-700' },
+  { value: 10, label: 'Worst', description: 'Worst possible pain', color: 'text-red-800' }
+] as const;

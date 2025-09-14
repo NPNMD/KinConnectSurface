@@ -2200,6 +2200,894 @@ app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req,
 	}
 });
 
+// ===== ENHANCED MEDICATION ACTIONS ROUTES =====
+
+// Snooze a medication
+app.post('/medication-calendar/events/:eventId/snooze', authenticate, async (req, res) => {
+	try {
+		console.log('💤 Snoozing medication event:', req.params.eventId);
+		const { eventId } = req.params;
+		const userId = (req as any).user.uid;
+		const { snoozeMinutes, reason } = req.body;
+		
+		if (!snoozeMinutes || snoozeMinutes < 1 || snoozeMinutes > 480) {
+			return res.status(400).json({
+				success: false,
+				error: 'Snooze minutes must be between 1 and 480 (8 hours)'
+			});
+		}
+		
+		// Get the event document
+		const eventDoc = await firestore.collection('medication_calendar_events').doc(eventId).get();
+		
+		if (!eventDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication event not found'
+			});
+		}
+		
+		const eventData = eventDoc.data();
+		
+		// Check access permissions
+		if (eventData?.patientId !== userId) {
+			const familyAccess = await firestore.collection('family_calendar_access')
+				.where('familyMemberId', '==', userId)
+				.where('patientId', '==', eventData?.patientId)
+				.where('status', '==', 'active')
+				.get();
+			
+			if (familyAccess.empty) {
+				return res.status(403).json({
+					success: false,
+					error: 'Access denied'
+				});
+			}
+		}
+		
+		// Calculate new scheduled time
+		const originalTime = eventData?.scheduledDateTime?.toDate() || new Date();
+		const newScheduledTime = new Date(originalTime.getTime() + (snoozeMinutes * 60 * 1000));
+		
+		// Update event with snooze information
+		const snoozeEntry = {
+			snoozedAt: admin.firestore.Timestamp.now(),
+			snoozeMinutes,
+			reason: reason?.trim() || undefined,
+			snoozedBy: userId
+		};
+		
+		const updateData = {
+			scheduledDateTime: admin.firestore.Timestamp.fromDate(newScheduledTime),
+			snoozeCount: (eventData?.snoozeCount || 0) + 1,
+			snoozeHistory: admin.firestore.FieldValue.arrayUnion(snoozeEntry),
+			updatedAt: admin.firestore.Timestamp.now()
+		};
+		
+		await eventDoc.ref.update(updateData);
+		
+		// Get updated event
+		const updatedDoc = await eventDoc.ref.get();
+		const updatedData = updatedDoc.data();
+		
+		console.log('✅ Medication snoozed successfully:', eventId);
+		
+		res.json({
+			success: true,
+			data: {
+				id: eventId,
+				...updatedData,
+				scheduledDateTime: updatedData?.scheduledDateTime?.toDate(),
+				actualTakenDateTime: updatedData?.actualTakenDateTime?.toDate(),
+				createdAt: updatedData?.createdAt?.toDate(),
+				updatedAt: updatedData?.updatedAt?.toDate()
+			},
+			message: `Medication snoozed for ${snoozeMinutes} minutes`
+		});
+	} catch (error) {
+		console.error('❌ Error snoozing medication:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Skip a medication
+app.post('/medication-calendar/events/:eventId/skip', authenticate, async (req, res) => {
+	try {
+		console.log('⏭️ Skipping medication event:', req.params.eventId);
+		const { eventId } = req.params;
+		const userId = (req as any).user.uid;
+		const { reason, notes } = req.body;
+		
+		if (!reason) {
+			return res.status(400).json({
+				success: false,
+				error: 'Skip reason is required'
+			});
+		}
+		
+		// Get the event document
+		const eventDoc = await firestore.collection('medication_calendar_events').doc(eventId).get();
+		
+		if (!eventDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication event not found'
+			});
+		}
+		
+		const eventData = eventDoc.data();
+		
+		// Check access permissions
+		if (eventData?.patientId !== userId) {
+			const familyAccess = await firestore.collection('family_calendar_access')
+				.where('familyMemberId', '==', userId)
+				.where('patientId', '==', eventData?.patientId)
+				.where('status', '==', 'active')
+				.get();
+			
+			if (familyAccess.empty) {
+				return res.status(403).json({
+					success: false,
+					error: 'Access denied'
+				});
+			}
+		}
+		
+		// Create skip entry
+		const skipEntry = {
+			skippedAt: admin.firestore.Timestamp.now(),
+			reason,
+			notes: notes?.trim() || undefined,
+			skippedBy: userId
+		};
+		
+		const updateData = {
+			status: 'skipped',
+			skipHistory: admin.firestore.FieldValue.arrayUnion(skipEntry),
+			updatedAt: admin.firestore.Timestamp.now()
+		};
+		
+		await eventDoc.ref.update(updateData);
+		
+		// Get updated event
+		const updatedDoc = await eventDoc.ref.get();
+		const updatedData = updatedDoc.data();
+		
+		console.log('✅ Medication skipped successfully:', eventId);
+		
+		res.json({
+			success: true,
+			data: {
+				id: eventId,
+				...updatedData,
+				scheduledDateTime: updatedData?.scheduledDateTime?.toDate(),
+				actualTakenDateTime: updatedData?.actualTakenDateTime?.toDate(),
+				createdAt: updatedData?.createdAt?.toDate(),
+				updatedAt: updatedData?.updatedAt?.toDate()
+			},
+			message: 'Medication skipped successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error skipping medication:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Reschedule a medication
+app.post('/medication-calendar/events/:eventId/reschedule', authenticate, async (req, res) => {
+	try {
+		console.log('🔄 Rescheduling medication event:', req.params.eventId);
+		const { eventId } = req.params;
+		const userId = (req as any).user.uid;
+		const { newDateTime, reason, isOneTime } = req.body;
+		
+		if (!newDateTime || !reason) {
+			return res.status(400).json({
+				success: false,
+				error: 'New date/time and reason are required'
+			});
+		}
+		
+		const newDate = new Date(newDateTime);
+		if (newDate <= new Date()) {
+			return res.status(400).json({
+				success: false,
+				error: 'New date/time must be in the future'
+			});
+		}
+		
+		// Get the event document
+		const eventDoc = await firestore.collection('medication_calendar_events').doc(eventId).get();
+		
+		if (!eventDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication event not found'
+			});
+		}
+		
+		const eventData = eventDoc.data();
+		
+		// Check access permissions
+		if (eventData?.patientId !== userId) {
+			const familyAccess = await firestore.collection('family_calendar_access')
+				.where('familyMemberId', '==', userId)
+				.where('patientId', '==', eventData?.patientId)
+				.where('status', '==', 'active')
+				.get();
+			
+			if (familyAccess.empty) {
+				return res.status(403).json({
+					success: false,
+					error: 'Access denied'
+				});
+			}
+		}
+		
+		// Create reschedule entry
+		const rescheduleEntry = {
+			originalDateTime: eventData?.scheduledDateTime || admin.firestore.Timestamp.now(),
+			newDateTime: admin.firestore.Timestamp.fromDate(newDate),
+			reason: reason.trim(),
+			isOneTime: !!isOneTime,
+			rescheduledAt: admin.firestore.Timestamp.now(),
+			rescheduledBy: userId
+		};
+		
+		const updateData = {
+			scheduledDateTime: admin.firestore.Timestamp.fromDate(newDate),
+			rescheduleHistory: admin.firestore.FieldValue.arrayUnion(rescheduleEntry),
+			updatedAt: admin.firestore.Timestamp.now()
+		};
+		
+		await eventDoc.ref.update(updateData);
+		
+		// If this is not a one-time reschedule, update the medication schedule
+		if (!isOneTime && eventData?.medicationScheduleId) {
+			try {
+				const scheduleDoc = await firestore.collection('medication_schedules').doc(eventData.medicationScheduleId).get();
+				if (scheduleDoc.exists) {
+					const scheduleData = scheduleDoc.data();
+					const newTimeStr = newDate.toTimeString().slice(0, 5); // HH:MM format
+					
+					// Update the schedule times
+					const updatedTimes = scheduleData?.times?.map((time: string, index: number) => {
+						// For simplicity, update the first time slot
+						return index === 0 ? newTimeStr : time;
+					}) || [newTimeStr];
+					
+					await scheduleDoc.ref.update({
+						times: updatedTimes,
+						updatedAt: admin.firestore.Timestamp.now()
+					});
+					
+					console.log('✅ Updated medication schedule times:', eventData.medicationScheduleId);
+				}
+			} catch (scheduleError) {
+				console.warn('⚠️ Failed to update medication schedule:', scheduleError);
+				// Don't fail the reschedule if schedule update fails
+			}
+		}
+		
+		// Get updated event
+		const updatedDoc = await eventDoc.ref.get();
+		const updatedData = updatedDoc.data();
+		
+		console.log('✅ Medication rescheduled successfully:', eventId);
+		
+		res.json({
+			success: true,
+			data: {
+				id: eventId,
+				...updatedData,
+				scheduledDateTime: updatedData?.scheduledDateTime?.toDate(),
+				actualTakenDateTime: updatedData?.actualTakenDateTime?.toDate(),
+				createdAt: updatedData?.createdAt?.toDate(),
+				updatedAt: updatedData?.updatedAt?.toDate()
+			},
+			message: 'Medication rescheduled successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error rescheduling medication:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Get today's medications organized by time buckets
+app.get('/medication-calendar/events/today-buckets', authenticate, async (req, res) => {
+	try {
+		const patientId = (req as any).user.uid;
+		const { date } = req.query;
+		
+		console.log('🗂️ Getting today\'s medication buckets for patient:', patientId);
+		
+		// Parse target date or use today
+		const targetDate = date ? new Date(date as string) : new Date();
+		const startOfDay = new Date(targetDate);
+		startOfDay.setHours(0, 0, 0, 0);
+		const endOfDay = new Date(targetDate);
+		endOfDay.setHours(23, 59, 59, 999);
+		
+		// Get today's medication events
+		const eventsQuery = await firestore.collection('medication_calendar_events')
+			.where('patientId', '==', patientId)
+			.where('scheduledDateTime', '>=', admin.firestore.Timestamp.fromDate(startOfDay))
+			.where('scheduledDateTime', '<=', admin.firestore.Timestamp.fromDate(endOfDay))
+			.orderBy('scheduledDateTime')
+			.get();
+		
+		const events = eventsQuery.docs.map(doc => {
+			const data = doc.data();
+			return {
+				id: doc.id,
+				...data,
+				scheduledDateTime: data.scheduledDateTime?.toDate(),
+				actualTakenDateTime: data.actualTakenDateTime?.toDate(),
+				createdAt: data.createdAt?.toDate(),
+				updatedAt: data.updatedAt?.toDate(),
+				// Initialize enhanced fields if not present
+				status: data.status || 'scheduled',
+				snoozeCount: data.snoozeCount || 0,
+				snoozeHistory: data.snoozeHistory || [],
+				skipHistory: data.skipHistory || [],
+				rescheduleHistory: data.rescheduleHistory || [],
+				isPartOfPack: !!data.packId,
+				packPosition: data.packPosition || 0
+			};
+		});
+		
+		// Get or create patient preferences
+		let preferences: any = {
+			id: patientId,
+			patientId,
+			timeSlots: {
+				morning: { start: '06:00', end: '10:00', defaultTime: '07:00', label: 'Morning' },
+				noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Noon' },
+				evening: { start: '17:00', end: '20:00', defaultTime: '18:00', label: 'Evening' },
+				bedtime: { start: '21:00', end: '23:59', defaultTime: '22:00', label: 'Bedtime' }
+			},
+			workSchedule: 'standard',
+			quietHours: {
+				start: '22:00',
+				end: '07:00',
+				enabled: true
+			},
+			createdAt: new Date(),
+			updatedAt: new Date()
+		};
+		
+		try {
+			const prefsDoc = await firestore.collection('patient_medication_preferences').doc(patientId).get();
+			if (prefsDoc.exists) {
+				const prefsData = prefsDoc.data();
+				if (prefsData) {
+					preferences = {
+						id: prefsDoc.id,
+						...prefsData,
+						createdAt: prefsData.createdAt?.toDate(),
+						updatedAt: prefsData.updatedAt?.toDate()
+					};
+				}
+			} else {
+				// Create default preferences
+				const defaultPrefs = {
+					patientId,
+					timeSlots: {
+						morning: { start: '06:00', end: '10:00', defaultTime: '07:00', label: 'Morning' },
+						noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Noon' },
+						evening: { start: '17:00', end: '20:00', defaultTime: '18:00', label: 'Evening' },
+						bedtime: { start: '21:00', end: '23:59', defaultTime: '22:00', label: 'Bedtime' }
+					},
+					workSchedule: 'standard',
+					quietHours: {
+						start: '22:00',
+						end: '07:00',
+						enabled: true
+					},
+					createdAt: admin.firestore.Timestamp.now(),
+					updatedAt: admin.firestore.Timestamp.now()
+				};
+				
+				await firestore.collection('patient_medication_preferences').doc(patientId).set(defaultPrefs);
+				preferences = {
+					id: patientId,
+					...defaultPrefs,
+					createdAt: defaultPrefs.createdAt.toDate(),
+					updatedAt: defaultPrefs.updatedAt.toDate()
+				};
+			}
+		} catch (prefsError) {
+			console.warn('⚠️ Error getting patient preferences, using defaults:', prefsError);
+			// preferences already set to defaults above
+		}
+		
+		// Organize events into time buckets
+		const now = new Date();
+		const buckets = {
+			now: [] as any[],
+			dueSoon: [] as any[],
+			morning: [] as any[],
+			noon: [] as any[],
+			evening: [] as any[],
+			bedtime: [] as any[],
+			overdue: [] as any[],
+			patientPreferences: preferences,
+			lastUpdated: now
+		};
+		
+		events.forEach(event => {
+			const eventTime = new Date(event.scheduledDateTime);
+			const minutesUntilDue = Math.floor((eventTime.getTime() - now.getTime()) / (1000 * 60));
+			
+			// Skip already taken medications
+			if (event.status === 'taken') {
+				return;
+			}
+			
+			// Enhanced event with time bucket info
+			const enhancedEvent: any = {
+				...event,
+				minutesUntilDue,
+				isOverdue: minutesUntilDue < 0,
+				minutesOverdue: minutesUntilDue < 0 ? Math.abs(minutesUntilDue) : 0,
+				timeBucket: 'morning' // Will be set below
+			};
+			
+			// Classify into buckets
+			if (minutesUntilDue < 0) {
+				enhancedEvent.timeBucket = 'overdue';
+				buckets.overdue.push(enhancedEvent);
+			} else if (minutesUntilDue <= 15) {
+				enhancedEvent.timeBucket = 'now';
+				buckets.now.push(enhancedEvent);
+			} else if (minutesUntilDue <= 60) {
+				enhancedEvent.timeBucket = 'due_soon';
+				buckets.dueSoon.push(enhancedEvent);
+			} else {
+				// Classify by time slot
+				const eventTimeStr = eventTime.toTimeString().slice(0, 5);
+				const timeSlots = preferences.timeSlots;
+				
+				if (timeSlots && eventTimeStr >= timeSlots.morning.start && eventTimeStr <= timeSlots.morning.end) {
+					enhancedEvent.timeBucket = 'morning';
+					buckets.morning.push(enhancedEvent);
+				} else if (timeSlots && eventTimeStr >= timeSlots.noon.start && eventTimeStr <= timeSlots.noon.end) {
+					enhancedEvent.timeBucket = 'noon';
+					buckets.noon.push(enhancedEvent);
+				} else if (timeSlots && eventTimeStr >= timeSlots.evening.start && eventTimeStr <= timeSlots.evening.end) {
+					enhancedEvent.timeBucket = 'evening';
+					buckets.evening.push(enhancedEvent);
+				} else {
+					enhancedEvent.timeBucket = 'bedtime';
+					buckets.bedtime.push(enhancedEvent);
+				}
+			}
+		});
+		
+		console.log('✅ Organized medications into time buckets:', {
+			now: buckets.now.length,
+			dueSoon: buckets.dueSoon.length,
+			morning: buckets.morning.length,
+			noon: buckets.noon.length,
+			evening: buckets.evening.length,
+			bedtime: buckets.bedtime.length,
+			overdue: buckets.overdue.length
+		});
+		
+		res.json({
+			success: true,
+			data: buckets,
+			message: 'Time buckets retrieved successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error getting time buckets:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// ===== PATIENT MEDICATION PREFERENCES ROUTES =====
+
+// Get patient medication timing preferences
+app.get('/patients/preferences/medication-timing', authenticate, async (req, res) => {
+	try {
+		const patientId = (req as any).user.uid;
+		
+		const prefsDoc = await firestore.collection('patient_medication_preferences').doc(patientId).get();
+		
+		if (!prefsDoc.exists) {
+			// Create default preferences
+			const defaultPrefs = {
+				patientId,
+				timeSlots: {
+					morning: { start: '06:00', end: '10:00', defaultTime: '07:00', label: 'Morning' },
+					noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Noon' },
+					evening: { start: '17:00', end: '20:00', defaultTime: '18:00', label: 'Evening' },
+					bedtime: { start: '21:00', end: '23:59', defaultTime: '22:00', label: 'Bedtime' }
+				},
+				workSchedule: 'standard',
+				quietHours: {
+					start: '22:00',
+					end: '07:00',
+					enabled: true
+				},
+				createdAt: admin.firestore.Timestamp.now(),
+				updatedAt: admin.firestore.Timestamp.now()
+			};
+			
+			await prefsDoc.ref.set(defaultPrefs);
+			
+			res.json({
+				success: true,
+				data: {
+					id: patientId,
+					...defaultPrefs,
+					createdAt: defaultPrefs.createdAt.toDate(),
+					updatedAt: defaultPrefs.updatedAt.toDate()
+				}
+			});
+		} else {
+			const prefsData = prefsDoc.data();
+			res.json({
+				success: true,
+				data: {
+					id: prefsDoc.id,
+					...prefsData,
+					createdAt: prefsData?.createdAt?.toDate(),
+					updatedAt: prefsData?.updatedAt?.toDate()
+				}
+			});
+		}
+	} catch (error) {
+		console.error('Error getting patient medication preferences:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Update patient medication timing preferences
+app.put('/patients/preferences/medication-timing', authenticate, async (req, res) => {
+	try {
+		const patientId = (req as any).user.uid;
+		const updateData = req.body;
+		
+		const updatePrefs = {
+			...updateData,
+			patientId,
+			updatedAt: admin.firestore.Timestamp.now()
+		};
+		
+		// Remove fields that shouldn't be updated
+		delete updatePrefs.id;
+		delete updatePrefs.createdAt;
+		
+		await firestore.collection('patient_medication_preferences').doc(patientId).set(updatePrefs, { merge: true });
+		
+		// Get updated preferences
+		const updatedDoc = await firestore.collection('patient_medication_preferences').doc(patientId).get();
+		const updatedData = updatedDoc.data();
+		
+		res.json({
+			success: true,
+			data: {
+				id: patientId,
+				...updatedData,
+				createdAt: updatedData?.createdAt?.toDate(),
+				updatedAt: updatedData?.updatedAt?.toDate()
+			}
+		});
+	} catch (error) {
+		console.error('Error updating patient medication preferences:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Reset patient preferences to defaults
+app.post('/patients/preferences/medication-timing/reset-defaults', authenticate, async (req, res) => {
+	try {
+		const patientId = (req as any).user.uid;
+		const { workSchedule = 'standard' } = req.body;
+		
+		const defaultTimeSlots = workSchedule === 'night_shift' ? {
+			morning: { start: '14:00', end: '18:00', defaultTime: '15:00', label: 'Morning' },
+			noon: { start: '19:00', end: '22:00', defaultTime: '20:00', label: 'Noon' },
+			evening: { start: '01:00', end: '04:00', defaultTime: '02:00', label: 'Evening' },
+			bedtime: { start: '05:00', end: '08:00', defaultTime: '06:00', label: 'Bedtime' }
+		} : {
+			morning: { start: '06:00', end: '10:00', defaultTime: '07:00', label: 'Morning' },
+			noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Noon' },
+			evening: { start: '17:00', end: '20:00', defaultTime: '18:00', label: 'Evening' },
+			bedtime: { start: '21:00', end: '23:59', defaultTime: '22:00', label: 'Bedtime' }
+		};
+		
+		const defaultPrefs = {
+			patientId,
+			timeSlots: defaultTimeSlots,
+			workSchedule,
+			quietHours: {
+				start: '22:00',
+				end: '07:00',
+				enabled: true
+			},
+			createdAt: admin.firestore.Timestamp.now(),
+			updatedAt: admin.firestore.Timestamp.now()
+		};
+		
+		await firestore.collection('patient_medication_preferences').doc(patientId).set(defaultPrefs);
+		
+		res.json({
+			success: true,
+			data: {
+				id: patientId,
+				...defaultPrefs,
+				createdAt: defaultPrefs.createdAt.toDate(),
+				updatedAt: defaultPrefs.updatedAt.toDate()
+			},
+			message: 'Patient preferences reset to defaults'
+		});
+	} catch (error) {
+		console.error('Error resetting patient medication preferences:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// ===== MEAL LOGGING ROUTES =====
+
+// Get meal logs for a patient
+app.get('/meal-logs', authenticate, async (req, res) => {
+	try {
+		const patientId = (req as any).user.uid;
+		const { date, startDate, endDate } = req.query;
+		
+		console.log('🍽️ Getting meal logs for patient:', patientId);
+		
+		let query = firestore.collection('meal_logs')
+			.where('patientId', '==', patientId);
+		
+		// Filter by specific date or date range
+		if (date) {
+			const targetDate = new Date(date as string);
+			const startOfDay = new Date(targetDate);
+			startOfDay.setHours(0, 0, 0, 0);
+			const endOfDay = new Date(targetDate);
+			endOfDay.setHours(23, 59, 59, 999);
+			
+			query = query
+				.where('date', '>=', admin.firestore.Timestamp.fromDate(startOfDay))
+				.where('date', '<=', admin.firestore.Timestamp.fromDate(endOfDay));
+		} else if (startDate && endDate) {
+			query = query
+				.where('date', '>=', admin.firestore.Timestamp.fromDate(new Date(startDate as string)))
+				.where('date', '<=', admin.firestore.Timestamp.fromDate(new Date(endDate as string)));
+		}
+		
+		const mealLogsSnapshot = await query.orderBy('date', 'desc').orderBy('loggedAt', 'desc').get();
+		
+		const mealLogs = mealLogsSnapshot.docs.map(doc => {
+			const data = doc.data();
+			return {
+				id: doc.id,
+				...data,
+				date: data.date?.toDate(),
+				loggedAt: data.loggedAt?.toDate(),
+				estimatedTime: data.estimatedTime?.toDate(),
+				createdAt: data.createdAt?.toDate(),
+				updatedAt: data.updatedAt?.toDate()
+			};
+		});
+		
+		console.log('✅ Found', mealLogs.length, 'meal logs');
+		
+		res.json({
+			success: true,
+			data: mealLogs,
+			message: 'Meal logs retrieved successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error getting meal logs:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Create a new meal log
+app.post('/meal-logs', authenticate, async (req, res) => {
+	try {
+		const patientId = (req as any).user.uid;
+		const { date, mealType, loggedAt, estimatedTime, notes } = req.body;
+		
+		console.log('🍽️ Creating meal log for patient:', patientId);
+		
+		if (!date || !mealType) {
+			return res.status(400).json({
+				success: false,
+				error: 'Date and meal type are required'
+			});
+		}
+		
+		// Check for existing meal log for the same date and meal type
+		const existingQuery = await firestore.collection('meal_logs')
+			.where('patientId', '==', patientId)
+			.where('date', '==', admin.firestore.Timestamp.fromDate(new Date(date)))
+			.where('mealType', '==', mealType)
+			.get();
+		
+		if (!existingQuery.empty) {
+			return res.status(409).json({
+				success: false,
+				error: `${mealType} is already logged for this date. Use PUT to update it.`
+			});
+		}
+		
+		const newMealLog = {
+			patientId,
+			date: admin.firestore.Timestamp.fromDate(new Date(date)),
+			mealType,
+			loggedAt: admin.firestore.Timestamp.fromDate(new Date(loggedAt || new Date())),
+			estimatedTime: estimatedTime ? admin.firestore.Timestamp.fromDate(new Date(estimatedTime)) : null,
+			notes: notes?.trim() || null,
+			createdAt: admin.firestore.Timestamp.now(),
+			updatedAt: admin.firestore.Timestamp.now()
+		};
+		
+		const mealLogRef = await firestore.collection('meal_logs').add(newMealLog);
+		
+		console.log('✅ Meal log created successfully:', mealLogRef.id);
+		
+		res.json({
+			success: true,
+			data: {
+				id: mealLogRef.id,
+				...newMealLog,
+				date: newMealLog.date.toDate(),
+				loggedAt: newMealLog.loggedAt.toDate(),
+				estimatedTime: newMealLog.estimatedTime?.toDate(),
+				createdAt: newMealLog.createdAt.toDate(),
+				updatedAt: newMealLog.updatedAt.toDate()
+			},
+			message: 'Meal log created successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error creating meal log:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Update a meal log
+app.put('/meal-logs/:mealLogId', authenticate, async (req, res) => {
+	try {
+		const { mealLogId } = req.params;
+		const patientId = (req as any).user.uid;
+		const { mealType, loggedAt, estimatedTime, notes } = req.body;
+		
+		console.log('🍽️ Updating meal log:', mealLogId);
+		
+		const mealLogDoc = await firestore.collection('meal_logs').doc(mealLogId).get();
+		
+		if (!mealLogDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Meal log not found'
+			});
+		}
+		
+		const mealLogData = mealLogDoc.data();
+		
+		// Check if user owns this meal log
+		if (mealLogData?.patientId !== patientId) {
+			return res.status(403).json({
+				success: false,
+				error: 'Access denied'
+			});
+		}
+		
+		const updateData: any = {
+			updatedAt: admin.firestore.Timestamp.now()
+		};
+		
+		if (mealType) updateData.mealType = mealType;
+		if (loggedAt) updateData.loggedAt = admin.firestore.Timestamp.fromDate(new Date(loggedAt));
+		if (estimatedTime) updateData.estimatedTime = admin.firestore.Timestamp.fromDate(new Date(estimatedTime));
+		if (notes !== undefined) updateData.notes = notes?.trim() || null;
+		
+		await mealLogDoc.ref.update(updateData);
+		
+		// Get updated meal log
+		const updatedDoc = await mealLogDoc.ref.get();
+		const updatedData = updatedDoc.data();
+		
+		console.log('✅ Meal log updated successfully:', mealLogId);
+		
+		res.json({
+			success: true,
+			data: {
+				id: mealLogId,
+				...updatedData,
+				date: updatedData?.date?.toDate(),
+				loggedAt: updatedData?.loggedAt?.toDate(),
+				estimatedTime: updatedData?.estimatedTime?.toDate(),
+				createdAt: updatedData?.createdAt?.toDate(),
+				updatedAt: updatedData?.updatedAt?.toDate()
+			},
+			message: 'Meal log updated successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error updating meal log:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Delete a meal log
+app.delete('/meal-logs/:mealLogId', authenticate, async (req, res) => {
+	try {
+		const { mealLogId } = req.params;
+		const patientId = (req as any).user.uid;
+		
+		console.log('🗑️ Deleting meal log:', mealLogId);
+		
+		const mealLogDoc = await firestore.collection('meal_logs').doc(mealLogId).get();
+		
+		if (!mealLogDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Meal log not found'
+			});
+		}
+		
+		const mealLogData = mealLogDoc.data();
+		
+		// Check if user owns this meal log
+		if (mealLogData?.patientId !== patientId) {
+			return res.status(403).json({
+				success: false,
+				error: 'Access denied'
+			});
+		}
+		
+		await mealLogDoc.ref.delete();
+		
+		console.log('✅ Meal log deleted successfully:', mealLogId);
+		
+		res.json({
+			success: true,
+			message: 'Meal log deleted successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error deleting meal log:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
 // ===== MEDICATION SCHEDULE ROUTES =====
 
 // Get medication schedules for the current user
@@ -2209,7 +3097,6 @@ app.get('/medication-calendar/schedules', authenticate, async (req, res) => {
 
 		const schedulesQuery = await firestore.collection('medication_schedules')
 			.where('patientId', '==', patientId)
-			.orderBy('createdAt', 'desc')
 			.get();
 
 		const schedules = schedulesQuery.docs.map(doc => {
@@ -5010,6 +5897,559 @@ app.post('/audio/transcribe', authenticate, async (req, res) => {
       timestamp: new Date().toISOString()
     });
   }
+});
+
+// ===== MEDICATION SAFETY ROUTES =====
+
+// Get medication safety alerts for a patient
+app.get('/medications/safety-alerts', authenticate, async (req, res) => {
+	try {
+		const patientId = (req as any).user.uid;
+		
+		console.log('🛡️ Getting safety alerts for patient:', patientId);
+		
+		// For now, return empty array since we haven't implemented full safety checking yet
+		const alerts: any[] = [];
+		
+		res.json({
+			success: true,
+			data: alerts,
+			message: 'Safety alerts retrieved successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error getting safety alerts:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Perform safety check for a medication
+app.post('/medications/safety-check', authenticate, async (req, res) => {
+	try {
+		const patientId = (req as any).user.uid;
+		const { medicationData, existingMedications } = req.body;
+		
+		console.log('🛡️ Performing safety check for medication:', medicationData.name);
+		
+		const safetyAlerts: any[] = [];
+		
+		// Basic duplicate check
+		const duplicates = existingMedications.filter((med: any) =>
+			med.name.toLowerCase() === medicationData.name.toLowerCase() ||
+			med.genericName?.toLowerCase() === medicationData.genericName?.toLowerCase()
+		);
+		
+		if (duplicates.length > 0) {
+			safetyAlerts.push({
+				alertType: 'duplicate',
+				severity: 'warning',
+				title: 'Potential Duplicate Medication',
+				description: `${medicationData.name} appears to be similar to existing medications in your list.`,
+				affectedMedications: [
+					{ medicationId: 'new', medicationName: medicationData.name, role: 'primary' },
+					...duplicates.map((med: any) => ({
+						medicationId: med.id,
+						medicationName: med.name,
+						role: 'secondary'
+					}))
+				],
+				recommendations: [
+					'Verify this is a different medication or dosage',
+					'Consult with your healthcare provider if unsure',
+					'Check if this replaces an existing medication'
+				],
+				source: 'clinical_rules'
+			});
+		}
+		
+		res.json({
+			success: true,
+			data: {
+				alerts: safetyAlerts,
+				riskLevel: safetyAlerts.length > 0 ? 'medium' : 'low',
+				recommendedActions: safetyAlerts.length > 0 ? ['Review alerts before adding medication'] : []
+			},
+			message: 'Safety check completed'
+		});
+	} catch (error) {
+		console.error('❌ Error performing safety check:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// ===== PRN MEDICATION ROUTES =====
+
+// Get PRN logs for a medication
+app.get('/medications/:medicationId/prn-logs', authenticate, async (req, res) => {
+	try {
+		const { medicationId } = req.params;
+		const patientId = (req as any).user.uid;
+		const { limit = '50' } = req.query;
+		
+		console.log('💊 Getting PRN logs for medication:', medicationId);
+		
+		// Verify medication exists and user has access
+		const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+		if (!medicationDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication not found'
+			});
+		}
+		
+		const medicationData = medicationDoc.data();
+		if (medicationData?.patientId !== patientId) {
+			return res.status(403).json({
+				success: false,
+				error: 'Access denied'
+			});
+		}
+		
+		// For now, return empty array since PRN logs collection doesn't exist yet
+		const prnLogs: any[] = [];
+		
+		res.json({
+			success: true,
+			data: prnLogs,
+			message: 'PRN logs retrieved successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error getting PRN logs:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Create a new PRN log
+app.post('/medications/:medicationId/prn-logs', authenticate, async (req, res) => {
+	try {
+		const { medicationId } = req.params;
+		const patientId = (req as any).user.uid;
+		const { takenAt, dosageAmount, reason, painScoreBefore, symptoms, notes } = req.body;
+		
+		console.log('💊 Creating PRN log for medication:', medicationId);
+		
+		// Verify medication exists and user has access
+		const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+		if (!medicationDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication not found'
+			});
+		}
+		
+		const medicationData = medicationDoc.data();
+		if (medicationData?.patientId !== patientId) {
+			return res.status(403).json({
+				success: false,
+				error: 'Access denied'
+			});
+		}
+		
+		if (!dosageAmount || !reason) {
+			return res.status(400).json({
+				success: false,
+				error: 'Dosage amount and reason are required'
+			});
+		}
+		
+		const newPRNLog = {
+			medicationId,
+			patientId,
+			takenAt: admin.firestore.Timestamp.fromDate(new Date(takenAt || new Date())),
+			dosageAmount,
+			reason,
+			painScoreBefore: painScoreBefore || null,
+			symptoms: symptoms || [],
+			notes: notes?.trim() || null,
+			loggedBy: patientId,
+			createdAt: admin.firestore.Timestamp.now(),
+			updatedAt: admin.firestore.Timestamp.now()
+		};
+		
+		const prnLogRef = await firestore.collection('prn_medication_logs').add(newPRNLog);
+		
+		console.log('✅ PRN log created successfully:', prnLogRef.id);
+		
+		res.json({
+			success: true,
+			data: {
+				id: prnLogRef.id,
+				...newPRNLog,
+				takenAt: newPRNLog.takenAt.toDate(),
+				createdAt: newPRNLog.createdAt.toDate(),
+				updatedAt: newPRNLog.updatedAt.toDate()
+			},
+			message: 'PRN log created successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error creating PRN log:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// ===== MEDICATION STATUS MANAGEMENT ROUTES =====
+
+// Hold a medication
+app.post('/medications/:medicationId/hold', authenticate, async (req, res) => {
+	try {
+		const { medicationId } = req.params;
+		const patientId = (req as any).user.uid;
+		const { reason, holdUntil, autoResumeEnabled, holdInstructions } = req.body;
+		
+		console.log('⏸️ Holding medication:', medicationId);
+		
+		// Verify medication exists and user has access
+		const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+		if (!medicationDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication not found'
+			});
+		}
+		
+		const medicationData = medicationDoc.data();
+		if (medicationData?.patientId !== patientId) {
+			return res.status(403).json({
+				success: false,
+				error: 'Access denied'
+			});
+		}
+		
+		if (!reason) {
+			return res.status(400).json({
+				success: false,
+				error: 'Reason is required'
+			});
+		}
+		
+		// Create status change record
+		const statusChange = {
+			medicationId,
+			patientId,
+			changeType: 'hold',
+			holdData: {
+				reason,
+				holdUntil: holdUntil ? admin.firestore.Timestamp.fromDate(new Date(holdUntil)) : null,
+				autoResumeEnabled: !!autoResumeEnabled,
+				holdInstructions: holdInstructions?.trim() || null
+			},
+			performedBy: patientId,
+			performedAt: admin.firestore.Timestamp.now(),
+			notes: `Medication held: ${reason}`
+		};
+		
+		await firestore.collection('medication_status_changes').add(statusChange);
+		
+		// Pause all active schedules for this medication
+		const schedulesQuery = await firestore.collection('medication_schedules')
+			.where('medicationId', '==', medicationId)
+			.where('isActive', '==', true)
+			.get();
+		
+		const batch = firestore.batch();
+		schedulesQuery.docs.forEach(doc => {
+			batch.update(doc.ref, {
+				isPaused: true,
+				pausedUntil: holdUntil ? admin.firestore.Timestamp.fromDate(new Date(holdUntil)) : null,
+				updatedAt: admin.firestore.Timestamp.now()
+			});
+		});
+		await batch.commit();
+		
+		console.log('✅ Medication held successfully:', medicationId);
+		
+		res.json({
+			success: true,
+			message: 'Medication held successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error holding medication:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Resume a held medication
+app.post('/medications/:medicationId/resume', authenticate, async (req, res) => {
+	try {
+		const { medicationId } = req.params;
+		const patientId = (req as any).user.uid;
+		
+		console.log('▶️ Resuming medication:', medicationId);
+		
+		// Verify medication exists and user has access
+		const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+		if (!medicationDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication not found'
+			});
+		}
+		
+		const medicationData = medicationDoc.data();
+		if (medicationData?.patientId !== patientId) {
+			return res.status(403).json({
+				success: false,
+				error: 'Access denied'
+			});
+		}
+		
+		// Create status change record
+		const statusChange = {
+			medicationId,
+			patientId,
+			changeType: 'resume',
+			performedBy: patientId,
+			performedAt: admin.firestore.Timestamp.now(),
+			notes: 'Medication resumed'
+		};
+		
+		await firestore.collection('medication_status_changes').add(statusChange);
+		
+		// Resume all paused schedules for this medication
+		const schedulesQuery = await firestore.collection('medication_schedules')
+			.where('medicationId', '==', medicationId)
+			.where('isPaused', '==', true)
+			.get();
+		
+		const batch = firestore.batch();
+		schedulesQuery.docs.forEach(doc => {
+			batch.update(doc.ref, {
+				isPaused: false,
+				pausedUntil: null,
+				updatedAt: admin.firestore.Timestamp.now()
+			});
+		});
+		await batch.commit();
+		
+		console.log('✅ Medication resumed successfully:', medicationId);
+		
+		res.json({
+			success: true,
+			message: 'Medication resumed successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error resuming medication:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Discontinue a medication
+app.post('/medications/:medicationId/discontinue', authenticate, async (req, res) => {
+	try {
+		const { medicationId } = req.params;
+		const patientId = (req as any).user.uid;
+		const { reason, stopDate, followUpRequired, followUpInstructions } = req.body;
+		
+		console.log('🛑 Discontinuing medication:', medicationId);
+		
+		// Verify medication exists and user has access
+		const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+		if (!medicationDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication not found'
+			});
+		}
+		
+		const medicationData = medicationDoc.data();
+		if (medicationData?.patientId !== patientId) {
+			return res.status(403).json({
+				success: false,
+				error: 'Access denied'
+			});
+		}
+		
+		if (!reason) {
+			return res.status(400).json({
+				success: false,
+				error: 'Reason is required'
+			});
+		}
+		
+		// Create status change record
+		const statusChange = {
+			medicationId,
+			patientId,
+			changeType: 'discontinue',
+			discontinueData: {
+				reason,
+				stopDate: admin.firestore.Timestamp.fromDate(new Date(stopDate || new Date())),
+				followUpRequired: !!followUpRequired,
+				followUpInstructions: followUpInstructions?.trim() || null
+			},
+			performedBy: patientId,
+			performedAt: admin.firestore.Timestamp.now(),
+			notes: `Medication discontinued: ${reason}`
+		};
+		
+		await firestore.collection('medication_status_changes').add(statusChange);
+		
+		// Update medication status
+		await medicationDoc.ref.update({
+			isActive: false,
+			endDate: admin.firestore.Timestamp.fromDate(new Date(stopDate || new Date())),
+			updatedAt: admin.firestore.Timestamp.now()
+		});
+		
+		// Deactivate all schedules for this medication
+		const schedulesQuery = await firestore.collection('medication_schedules')
+			.where('medicationId', '==', medicationId)
+			.where('isActive', '==', true)
+			.get();
+		
+		const batch = firestore.batch();
+		schedulesQuery.docs.forEach(doc => {
+			batch.update(doc.ref, {
+				isActive: false,
+				endDate: admin.firestore.Timestamp.fromDate(new Date(stopDate || new Date())),
+				updatedAt: admin.firestore.Timestamp.now()
+			});
+		});
+		await batch.commit();
+		
+		console.log('✅ Medication discontinued successfully:', medicationId);
+		
+		res.json({
+			success: true,
+			message: 'Medication discontinued successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error discontinuing medication:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Get PRN logs for a medication
+app.get('/medications/:medicationId/prn-logs', authenticate, async (req, res) => {
+	try {
+		const { medicationId } = req.params;
+		const patientId = (req as any).user.uid;
+		
+		console.log('💊 Getting PRN logs for medication:', medicationId);
+		
+		// Verify medication exists and user has access
+		const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+		if (!medicationDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication not found'
+			});
+		}
+		
+		const medicationData = medicationDoc.data();
+		if (medicationData?.patientId !== patientId) {
+			return res.status(403).json({
+				success: false,
+				error: 'Access denied'
+			});
+		}
+		
+		// For now, return empty array since PRN logs collection doesn't exist yet
+		const prnLogs: any[] = [];
+		
+		res.json({
+			success: true,
+			data: prnLogs,
+			message: 'PRN logs retrieved successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error getting PRN logs:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Create a new PRN log
+app.post('/medications/:medicationId/prn-logs', authenticate, async (req, res) => {
+	try {
+		const { medicationId } = req.params;
+		const patientId = (req as any).user.uid;
+		const { takenAt, dosageAmount, reason, painScoreBefore, symptoms, notes } = req.body;
+		
+		console.log('💊 Creating PRN log for medication:', medicationId);
+		
+		// Verify medication exists and user has access
+		const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+		if (!medicationDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication not found'
+			});
+		}
+		
+		const medicationData = medicationDoc.data();
+		if (medicationData?.patientId !== patientId) {
+			return res.status(403).json({
+				success: false,
+				error: 'Access denied'
+			});
+		}
+		
+		if (!dosageAmount || !reason) {
+			return res.status(400).json({
+				success: false,
+				error: 'Dosage amount and reason are required'
+			});
+		}
+		
+		const newPRNLog = {
+			medicationId,
+			patientId,
+			takenAt: admin.firestore.Timestamp.fromDate(new Date(takenAt || new Date())),
+			dosageAmount,
+			reason,
+			painScoreBefore: painScoreBefore || null,
+			symptoms: symptoms || [],
+			notes: notes?.trim() || null,
+			loggedBy: patientId,
+			createdAt: admin.firestore.Timestamp.now(),
+			updatedAt: admin.firestore.Timestamp.now()
+		};
+		
+		const prnLogRef = await firestore.collection('prn_medication_logs').add(newPRNLog);
+		
+		console.log('✅ PRN log created successfully:', prnLogRef.id);
+		
+		res.json({
+			success: true,
+			data: {
+				id: prnLogRef.id,
+				...newPRNLog,
+				takenAt: newPRNLog.takenAt.toDate(),
+				createdAt: newPRNLog.createdAt.toDate(),
+				updatedAt: newPRNLog.updatedAt.toDate()
+			},
+			message: 'PRN log created successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error creating PRN log:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
 });
 
 // Error handling middleware

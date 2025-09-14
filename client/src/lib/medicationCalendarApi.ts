@@ -3,7 +3,12 @@ import type {
   NewMedicationSchedule,
   MedicationCalendarEvent,
   MedicationAdherence,
-  ApiResponse
+  ApiResponse,
+  TodayMedicationBuckets,
+  PatientMedicationPreferences,
+  NewPatientMedicationPreferences,
+  EnhancedMedicationCalendarEvent,
+  SkipReason
 } from '@shared/types';
 import { getIdToken } from './firebase';
 
@@ -274,6 +279,349 @@ class MedicationCalendarApi {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to mark medication as taken'
+      };
+    }
+  }
+
+  // ===== ENHANCED MEDICATION ACTIONS API =====
+
+  // Snooze a medication
+  async snoozeMedication(
+    eventId: string,
+    snoozeMinutes: number,
+    reason?: string
+  ): Promise<ApiResponse<EnhancedMedicationCalendarEvent>> {
+    try {
+      console.log('🔧 MedicationCalendarApi: Snoozing medication:', { eventId, snoozeMinutes, reason });
+      
+      const headers = await getAuthHeaders();
+      const requestBody = {
+        snoozeMinutes,
+        reason: reason?.trim() || undefined
+      };
+      
+      const response = await fetch(`${API_BASE}/medication-calendar/events/${eventId}/snooze`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ MedicationCalendarApi: Snooze HTTP error:', response.status, errorText);
+        return {
+          success: false,
+          error: `HTTP ${response.status}: ${errorText}`
+        };
+      }
+
+      const result = await response.json();
+      console.log('🔧 MedicationCalendarApi: Snooze response:', result);
+      
+      return result;
+    } catch (error) {
+      console.error('❌ MedicationCalendarApi: Error snoozing medication:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to snooze medication'
+      };
+    }
+  }
+
+  // Skip a medication
+  async skipMedication(
+    eventId: string,
+    reason: SkipReason,
+    notes?: string
+  ): Promise<ApiResponse<EnhancedMedicationCalendarEvent>> {
+    try {
+      console.log('🔧 MedicationCalendarApi: Skipping medication:', { eventId, reason, notes });
+      
+      const headers = await getAuthHeaders();
+      const requestBody = {
+        reason,
+        notes: notes?.trim() || undefined
+      };
+      
+      const response = await fetch(`${API_BASE}/medication-calendar/events/${eventId}/skip`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ MedicationCalendarApi: Skip HTTP error:', response.status, errorText);
+        return {
+          success: false,
+          error: `HTTP ${response.status}: ${errorText}`
+        };
+      }
+
+      const result = await response.json();
+      console.log('🔧 MedicationCalendarApi: Skip response:', result);
+      
+      return result;
+    } catch (error) {
+      console.error('❌ MedicationCalendarApi: Error skipping medication:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to skip medication'
+      };
+    }
+  }
+
+  // Reschedule a medication
+  async rescheduleMedication(
+    eventId: string,
+    newDateTime: Date,
+    reason: string,
+    isOneTime: boolean
+  ): Promise<ApiResponse<EnhancedMedicationCalendarEvent>> {
+    try {
+      console.log('🔧 MedicationCalendarApi: Rescheduling medication:', { eventId, newDateTime, reason, isOneTime });
+      
+      const headers = await getAuthHeaders();
+      const requestBody = {
+        newDateTime: newDateTime.toISOString(),
+        reason: reason.trim(),
+        isOneTime
+      };
+      
+      const response = await fetch(`${API_BASE}/medication-calendar/events/${eventId}/reschedule`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ MedicationCalendarApi: Reschedule HTTP error:', response.status, errorText);
+        return {
+          success: false,
+          error: `HTTP ${response.status}: ${errorText}`
+        };
+      }
+
+      const result = await response.json();
+      console.log('🔧 MedicationCalendarApi: Reschedule response:', result);
+      
+      return result;
+    } catch (error) {
+      console.error('❌ MedicationCalendarApi: Error rescheduling medication:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to reschedule medication'
+      };
+    }
+  }
+
+  // ===== TIME BUCKET ORGANIZATION API =====
+
+  // Get today's medications organized by time buckets
+  async getTodayMedicationBuckets(date?: Date): Promise<ApiResponse<TodayMedicationBuckets>> {
+    try {
+      const targetDate = date || new Date();
+      const headers = await getAuthHeaders();
+      
+      const params = new URLSearchParams();
+      params.append('date', targetDate.toISOString().split('T')[0]);
+      
+      const response = await fetch(`${API_BASE}/medication-calendar/events/today-buckets?${params}`, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ MedicationCalendarApi: Time buckets HTTP error:', response.status, errorText);
+        return {
+          success: false,
+          error: `HTTP ${response.status}: ${errorText}`
+        };
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('❌ MedicationCalendarApi: Error fetching time buckets:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to fetch time buckets'
+      };
+    }
+  }
+
+  // ===== PATIENT PREFERENCES API =====
+
+  // Get patient medication timing preferences
+  async getPatientMedicationPreferences(): Promise<ApiResponse<PatientMedicationPreferences>> {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/patients/preferences/medication-timing`, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+      });
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching patient medication preferences:', error);
+      return {
+        success: false,
+        error: 'Failed to fetch patient medication preferences'
+      };
+    }
+  }
+
+  // Update patient medication timing preferences
+  async updatePatientMedicationPreferences(
+    preferences: Partial<NewPatientMedicationPreferences>
+  ): Promise<ApiResponse<PatientMedicationPreferences>> {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/patients/preferences/medication-timing`, {
+        method: 'PUT',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify(preferences),
+      });
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error updating patient medication preferences:', error);
+      return {
+        success: false,
+        error: 'Failed to update patient medication preferences'
+      };
+    }
+  }
+
+  // Reset patient preferences to defaults
+  async resetPatientMedicationPreferences(
+    workSchedule: 'standard' | 'night_shift' = 'standard'
+  ): Promise<ApiResponse<PatientMedicationPreferences>> {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/patients/preferences/medication-timing/reset-defaults`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({ workSchedule }),
+      });
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error resetting patient medication preferences:', error);
+      return {
+        success: false,
+        error: 'Failed to reset patient medication preferences'
+      };
+    }
+  }
+
+  // ===== MEAL LOGGING API =====
+
+  // Get meal logs for a date or date range
+  async getMealLogs(options: {
+    date?: Date;
+    startDate?: Date;
+    endDate?: Date;
+  } = {}): Promise<ApiResponse<any[]>> {
+    try {
+      const params = new URLSearchParams();
+      
+      if (options.date) {
+        params.append('date', options.date.toISOString().split('T')[0]);
+      }
+      if (options.startDate) {
+        params.append('startDate', options.startDate.toISOString().split('T')[0]);
+      }
+      if (options.endDate) {
+        params.append('endDate', options.endDate.toISOString().split('T')[0]);
+      }
+
+      const queryString = params.toString();
+      const url = `${API_BASE}/meal-logs${queryString ? `?${queryString}` : ''}`;
+
+      const headers = await getAuthHeaders();
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+      });
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching meal logs:', error);
+      return {
+        success: false,
+        error: 'Failed to fetch meal logs'
+      };
+    }
+  }
+
+  // Create a new meal log
+  async createMealLog(mealLogData: any): Promise<ApiResponse<any>> {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/meal-logs`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify(mealLogData),
+      });
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error creating meal log:', error);
+      return {
+        success: false,
+        error: 'Failed to create meal log'
+      };
+    }
+  }
+
+  // Update a meal log
+  async updateMealLog(mealLogId: string, updates: any): Promise<ApiResponse<any>> {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/meal-logs/${mealLogId}`, {
+        method: 'PUT',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify(updates),
+      });
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error updating meal log:', error);
+      return {
+        success: false,
+        error: 'Failed to update meal log'
+      };
+    }
+  }
+
+  // Delete a meal log
+  async deleteMealLog(mealLogId: string): Promise<ApiResponse<void>> {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/meal-logs/${mealLogId}`, {
+        method: 'DELETE',
+        headers,
+        credentials: 'include',
+      });
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error deleting meal log:', error);
+      return {
+        success: false,
+        error: 'Failed to delete meal log'
       };
     }
   }
