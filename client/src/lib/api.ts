@@ -1,5 +1,5 @@
 import { getIdToken } from './firebase';
-import { rateLimitedFetch, RateLimitedAPI } from './rateLimiter';
+import { rateLimitedFetch } from './rateLimiter';
 
 // Always use the production Firebase Functions URL
 const API_BASE_URL = 'https://us-central1-claritystream-uldp9.cloudfunctions.net/api';
@@ -354,13 +354,22 @@ class ApiClient {
 
     // Special handling for family invitations
     if (endpoint === '/invitations/send') {
-      return this.requestWithFallback<T>(endpoint, {
-        method: 'POST',
-        body: data ? JSON.stringify(data) : undefined,
-      }, async () => {
-        console.warn('Family invitation API unavailable');
+      try {
+        return await this.request<T>(endpoint, {
+          method: 'POST',
+          body: data ? JSON.stringify(data) : undefined,
+        });
+      } catch (error: any) {
+        // Preserve client errors (4xx) - these are user/data issues, not service issues
+        if (error.status >= 400 && error.status < 500) {
+          console.log('🔍 Client error for invitation, preserving original error:', error.status, error.message);
+          throw error; // Don't use fallback for client errors
+        }
+        
+        // Only use fallback for server errors (5xx) or network issues
+        console.warn('Family invitation API server error, using fallback:', error.message);
         throw new Error('Unable to send invitation at this time. Please try again later.');
-      });
+      }
     }
 
     return this.request<T>(endpoint, {
@@ -461,6 +470,7 @@ export const API_ENDPOINTS = {
   PENDING_INVITATIONS: '/invitations/pending',
   ACCEPT_INVITATION: (token: string) => `/invitations/accept/${token}`,
   DECLINE_INVITATION: (token: string) => `/invitations/decline/${token}`,
+  INVITATION_DETAILS: (token: string) => `/invitations/${token}`,
   
   // Visit Summaries
   VISIT_SUMMARIES: (patientId: string) => `/visit-summaries/${patientId}`,

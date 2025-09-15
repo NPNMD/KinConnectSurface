@@ -215,7 +215,15 @@ class RateLimiter {
       // Handle other HTTP errors
       if (!response.ok) {
         const endpoint = this.getEndpointFromUrl(config.url);
-        this.recordFailure(endpoint);
+        
+        // Only record failure for server errors (5xx) and some 4xx errors
+        // Don't record failure for client errors like 409 (Conflict) that shouldn't trigger circuit breaker
+        const shouldRecordFailure = response.status >= 500 ||
+          (response.status >= 400 && response.status !== 409 && response.status !== 400 && response.status !== 404);
+        
+        if (shouldRecordFailure) {
+          this.recordFailure(endpoint);
+        }
         
         let errorMessage = `HTTP error! status: ${response.status}`;
         try {
@@ -240,11 +248,18 @@ class RateLimiter {
             errorMessage = 'Access denied';
           } else if (response.status === 404) {
             errorMessage = 'Resource not found';
+          } else if (response.status === 409) {
+            errorMessage = 'Conflict - resource already exists or is in use';
           } else if (response.status >= 500) {
             errorMessage = 'Internal server error';
           }
         }
-        throw new Error(errorMessage);
+        
+        // Create error with status code for better handling upstream
+        const error = new Error(errorMessage) as any;
+        error.status = response.status;
+        error.statusCode = response.status;
+        throw error;
       }
       
       // Success - reset circuit breaker
@@ -369,10 +384,20 @@ class RateLimiter {
    * Check if error should trigger a retry
    */
   private shouldRetry(error: any): boolean {
-    if (error.message?.includes('429')) return true;
-    if (error.message?.includes('Network error')) return true;
-    if (error.message?.includes('fetch')) return true;
-    if (error.message?.includes('Internal server error')) return true;
+    // Don't retry client errors that indicate user/data issues
+    if (error.status === 409 || error.statusCode === 409) return false; // Conflict - duplicate invitation
+    if (error.status === 400 || error.statusCode === 400) return false; // Bad request
+    if (error.status === 401 || error.statusCode === 401) return false; // Unauthorized
+    if (error.status === 403 || error.statusCode === 403) return false; // Forbidden
+    if (error.status === 404 || error.statusCode === 404) return false; // Not found
+    
+    // Retry these errors
+    if (error.message?.includes('429')) return true; // Rate limited
+    if (error.message?.includes('Network error')) return true; // Network issues
+    if (error.message?.includes('fetch')) return true; // Fetch failures
+    if (error.message?.includes('Internal server error')) return true; // Server errors
+    if (error.status >= 500 || error.statusCode >= 500) return true; // Server errors
+    
     return false;
   }
 

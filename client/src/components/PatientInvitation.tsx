@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import LoadingSpinner from './LoadingSpinner';
 import { useAuth } from '@/contexts/AuthContext';
-import { apiClient, type ApiResponse } from '@/lib/api';
+import { apiClient, type ApiResponse, API_ENDPOINTS } from '@/lib/api';
 
 interface PatientInvitationProps {
   onInvitationSent?: () => void;
@@ -17,12 +17,14 @@ export const PatientInvitation: React.FC<PatientInvitationProps> = ({ onInvitati
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [isDuplicateError, setIsDuplicateError] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
     setSuccess(null);
+    setIsDuplicateError(false);
 
     try {
       // Check authentication first
@@ -31,7 +33,7 @@ export const PatientInvitation: React.FC<PatientInvitationProps> = ({ onInvitati
       }
 
       console.log('🚀 Sending invitation request:', formData);
-      const result = await apiClient.post<ApiResponse<any>>('/invitations/send', formData);
+      const result = await apiClient.post<ApiResponse<any>>(API_ENDPOINTS.SEND_INVITATION, formData);
       console.log('📨 Invitation response:', result);
 
       if (!result.success) {
@@ -47,8 +49,34 @@ export const PatientInvitation: React.FC<PatientInvitationProps> = ({ onInvitati
 
     } catch (err: any) {
       console.error('❌ Invitation error:', err);
-      const errorMessage = err?.message || err?.details || 'Failed to send invitation';
-      setError(`Failed to send invitation: ${errorMessage}`);
+      
+      // Handle specific error types for better user experience
+      let errorMessage = err?.message || err?.details || 'Failed to send invitation';
+      
+      // Check for 409 duplicate invitation error
+      if (errorMessage.includes('already pending') || errorMessage.includes('409') || err?.status === 409 || err?.statusCode === 409) {
+        setIsDuplicateError(true);
+        setError('An invitation is already pending for this email address. The invitation will expire in 7 days if not accepted.');
+      } else if (errorMessage.includes('already has active access')) {
+        setError('This family member already has access to your medical calendar. Check your Family Access settings.');
+      } else if (errorMessage.includes('cannot invite yourself')) {
+        setError('You cannot invite yourself to your own medical calendar. Please use a different email address.');
+      } else if (errorMessage.includes('Invalid email format')) {
+        setError('Please enter a valid email address.');
+      } else if (errorMessage.includes('Email and patient name are required')) {
+        setError('Please fill in both the email address and family member name.');
+      } else if (errorMessage.includes('Authentication required') || errorMessage.includes('sign in')) {
+        setError('Please sign in to send invitations to family members.');
+      } else if (errorMessage.includes('Network error') || errorMessage.includes('fetch')) {
+        setError('Network error - please check your internet connection and try again.');
+      } else if (errorMessage.includes('Too many requests')) {
+        setError('Too many requests - please wait a moment and try again.');
+      } else if (errorMessage.includes('Service temporarily unavailable') || errorMessage.includes('Circuit breaker')) {
+        setError('Service temporarily unavailable - please try again in a few moments.');
+      } else {
+        // Generic error with more helpful context
+        setError(`Unable to send invitation: ${errorMessage}. Please try again or contact support if the problem persists.`);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -120,8 +148,30 @@ export const PatientInvitation: React.FC<PatientInvitationProps> = ({ onInvitati
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
-            {error}
+          <div className={`border px-4 py-3 rounded-md ${
+            isDuplicateError
+              ? 'bg-yellow-50 border-yellow-200 text-yellow-800'
+              : 'bg-red-50 border-red-200 text-red-700'
+          }`}>
+            <div className="flex items-start">
+              <div className="flex-1">
+                <p className="font-medium mb-1">
+                  {isDuplicateError ? 'Invitation Already Pending' : 'Invitation Failed'}
+                </p>
+                <p className="text-sm">{error}</p>
+              </div>
+            </div>
+            {isDuplicateError && (
+              <div className="mt-3 pt-3 border-t border-yellow-200">
+                <p className="text-sm font-medium mb-2">What you can do:</p>
+                <ul className="text-sm space-y-1">
+                  <li>• Wait for them to check their email and accept the invitation</li>
+                  <li>• Ask them to check their spam/junk folder</li>
+                  <li>• The invitation will automatically expire in 7 days</li>
+                  <li>• Contact support if you need to cancel the pending invitation</li>
+                </ul>
+              </div>
+            )}
           </div>
         )}
 

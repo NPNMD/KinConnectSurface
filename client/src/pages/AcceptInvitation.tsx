@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Heart, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import { apiClient, API_ENDPOINTS } from '@/lib/api';
 
 interface InvitationData {
   id: string;
@@ -35,23 +36,18 @@ export default function AcceptInvitation() {
 
   const fetchInvitation = async () => {
     try {
-      const response = await fetch(
-        `https://us-central1-claritystream-uldp9.cloudfunctions.net/api/api/invitations/${invitationToken}`
+      if (!invitationToken) return;
+      const result = await apiClient.get<{ success: boolean; data: any }>(
+        API_ENDPOINTS.INVITATION_DETAILS(invitationToken)
       );
-      
-      const result = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to load invitation');
-      }
-      
+
       setInvitation({
         ...result.data,
         createdAt: new Date(result.data.createdAt),
         expiresAt: new Date(result.data.expiresAt),
       });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load invitation');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load invitation');
     } finally {
       setLoading(false);
     }
@@ -67,32 +63,17 @@ export default function AcceptInvitation() {
     setError(null);
 
     try {
-      const token = await firebaseUser.getIdToken();
-      
-      const response = await fetch(
-        `https://us-central1-claritystream-uldp9.cloudfunctions.net/api/api/invitations/accept/${invitationToken}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          }
-        }
+      if (!invitationToken) return;
+      const result = await apiClient.post<{ success: boolean; data: any; message?: string }>(
+        API_ENDPOINTS.ACCEPT_INVITATION(invitationToken)
       );
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to accept invitation');
-      }
 
       setSuccess(true);
       setTimeout(() => {
         navigate('/dashboard');
       }, 3000);
-
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to accept invitation');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to accept invitation');
     } finally {
       setAccepting(false);
     }
