@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Heart } from 'lucide-react';
+import { ArrowLeft, Heart, Pill, Calendar, User, Users } from 'lucide-react';
 import { PatientInvitation } from '@/components/PatientInvitation';
 
 export default function InvitePatient() {
@@ -82,6 +82,51 @@ export default function InvitePatient() {
           </div>
         </div>
       </main>
+
+      {/* Mobile Bottom Navigation */}
+      <nav className="mobile-nav-container">
+        <div className="flex items-center justify-around">
+          <Link
+            to="/dashboard"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <Heart className="w-5 h-5" />
+            <span className="text-xs">Home</span>
+          </Link>
+          
+          <Link
+            to="/medications"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <Pill className="w-5 h-5" />
+            <span className="text-xs">Medications</span>
+          </Link>
+          
+          <Link
+            to="/calendar"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <Calendar className="w-5 h-5" />
+            <span className="text-xs">Calendar</span>
+          </Link>
+          
+          <Link
+            to="/profile"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <User className="w-5 h-5" />
+            <span className="text-xs">Profile</span>
+          </Link>
+          
+          <Link
+            to="/family/invite"
+            className="flex flex-col items-center space-y-1 p-2 text-primary-600"
+          >
+            <Users className="w-5 h-5" />
+            <span className="text-xs font-medium">Family</span>
+          </Link>
+        </div>
+      </nav>
     </div>
   );
 }

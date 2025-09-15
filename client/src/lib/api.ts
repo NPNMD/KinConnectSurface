@@ -1,4 +1,5 @@
 import { getIdToken } from './firebase';
+import { rateLimitedFetch, RateLimitedAPI } from './rateLimiter';
 
 // Always use the production Firebase Functions URL
 const API_BASE_URL = 'https://us-central1-claritystream-uldp9.cloudfunctions.net/api';
@@ -97,42 +98,107 @@ class ApiClient {
     console.log('🔧 Headers:', headers);
 
     try {
-      const response = await fetch(url, config);
+      // Use rate-limited fetch instead of direct fetch
+      const data = await rateLimitedFetch<T>(url, config, {
+        priority: this.getRequestPriority(endpoint, options.method || 'GET'),
+        cacheKey: this.getCacheKey(endpoint, options.method || 'GET'),
+        cacheTTL: this.getCacheTTL(endpoint)
+      });
       
-      if (!response.ok) {
-        let errorMessage = `HTTP error! status: ${response.status}`;
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorMessage;
-        } catch {
-          // If we can't parse error response, use status-based message
-          if (response.status === 401) {
-            errorMessage = 'Authentication required';
-          } else if (response.status === 403) {
-            errorMessage = 'Access denied';
-          } else if (response.status === 404) {
-            errorMessage = 'Resource not found';
-          } else if (response.status >= 500) {
-            errorMessage = 'Internal server error';
-          }
-        }
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
       return data;
     } catch (error) {
       console.error(`❌ API request failed for ${endpoint}:`, error);
       console.error(`❌ Full URL: ${url}`);
       console.error(`❌ Request config:`, config);
       
-      // Add more context to network errors
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        throw new Error('Network error - please check your internet connection');
+      // Enhanced error handling for rate limiting
+      if (error instanceof Error) {
+        if (error.message.includes('429') || error.message.includes('Too many requests')) {
+          throw new Error('Too many requests - please wait a moment and try again');
+        }
+        
+        if (error.message.includes('Circuit breaker is open')) {
+          throw new Error('Service temporarily unavailable - please try again in a few moments');
+        }
+        
+        if (error.message.includes('fetch')) {
+          throw new Error('Network error - please check your internet connection');
+        }
       }
       
       throw error;
     }
+  }
+
+  /**
+   * Determine request priority based on endpoint and method
+   */
+  private getRequestPriority(endpoint: string, method: string): 'high' | 'medium' | 'low' {
+    // High priority for user actions
+    if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
+      return 'high';
+    }
+    
+    // High priority for critical data
+    if (endpoint.includes('/medication-calendar/events/') && endpoint.includes('/taken')) {
+      return 'high';
+    }
+    
+    if (endpoint.includes('/today-buckets') || endpoint.includes('/auth/profile')) {
+      return 'high';
+    }
+    
+    // Medium priority for dashboard data
+    if (endpoint.includes('/medications') || endpoint.includes('/visit-summaries')) {
+      return 'medium';
+    }
+    
+    // Low priority for background data
+    return 'low';
+  }
+
+  /**
+   * Generate cache key for GET requests
+   */
+  private getCacheKey(endpoint: string, method: string): string | undefined {
+    if (method !== 'GET') return undefined;
+    
+    // Cache certain endpoints
+    if (endpoint.includes('/medications') && !endpoint.includes('calendar')) {
+      return `medications_${endpoint}`;
+    }
+    
+    if (endpoint.includes('/auth/profile')) {
+      return `profile_${endpoint}`;
+    }
+    
+    if (endpoint.includes('/healthcare/providers')) {
+      return `providers_${endpoint}`;
+    }
+    
+    return undefined;
+  }
+
+  /**
+   * Get cache TTL based on endpoint
+   */
+  private getCacheTTL(endpoint: string): number {
+    // Short cache for frequently changing data
+    if (endpoint.includes('/medication-calendar/events')) {
+      return 30000; // 30 seconds
+    }
+    
+    // Medium cache for semi-static data
+    if (endpoint.includes('/medications')) {
+      return 120000; // 2 minutes
+    }
+    
+    // Long cache for static data
+    if (endpoint.includes('/auth/profile') || endpoint.includes('/healthcare/providers')) {
+      return 300000; // 5 minutes
+    }
+    
+    return 60000; // 1 minute default
   }
 
   // GET request with fallback

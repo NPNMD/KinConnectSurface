@@ -7,7 +7,6 @@ import {
   AlertTriangle, 
   CheckCircle,
   Bell,
-  BellOff,
   Package,
   ChevronDown,
   ChevronUp
@@ -15,12 +14,12 @@ import {
 import type { 
   EnhancedMedicationCalendarEvent, 
   TodayMedicationBuckets, 
-  PatientMedicationPreferences,
-  TimeSlot 
+  PatientMedicationPreferences
 } from '@shared/types';
 import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
+import { createSmartRefresh } from '@/lib/requestDebouncer';
 import LoadingSpinner from './LoadingSpinner';
-import QuickActionButtons from './QuickActionButtons';
+import QuickActionButtons from '@/components/QuickActionButtons';
 
 interface TimeBucketViewProps {
   patientId: string;
@@ -52,11 +51,45 @@ export default function TimeBucketView({
   const [expandedBuckets, setExpandedBuckets] = useState<Set<string>>(new Set(['now', 'overdue']));
   const [processingAction, setProcessingAction] = useState<string | null>(null);
 
+  // Create smart refresh function with shorter interval for user actions
+  const smartLoadTodaysBuckets = createSmartRefresh(
+    async () => {
+      try {
+        setIsLoading(true);
+        
+        // Use the new time buckets API endpoint
+        const bucketsResult = await medicationCalendarApi.getTodayMedicationBuckets(date);
+
+        if (!bucketsResult.success || !bucketsResult.data) {
+          console.error('Failed to load medication buckets:', bucketsResult.error);
+          return;
+        }
+
+        setBuckets(bucketsResult.data);
+        
+      } catch (error) {
+        console.error('Error loading today\'s medication buckets:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    5000, // 5 seconds minimum between refreshes (shorter for user actions)
+    `today_buckets_${patientId}_${date.toISOString().split('T')[0]}`
+  );
+
+  const loadTodaysBuckets = async () => {
+    const result = await smartLoadTodaysBuckets();
+    // If smart refresh skipped the call, don't change loading state
+    if (result === null && buckets) {
+      console.log('🚫 Skipped redundant bucket refresh');
+    }
+  };
+
   useEffect(() => {
     loadTodaysBuckets();
     
-    // Refresh every minute to keep "now" and "due soon" accurate
-    const interval = setInterval(loadTodaysBuckets, 60000);
+    // Refresh every 5 minutes instead of every minute to reduce API calls
+    const interval = setInterval(loadTodaysBuckets, 300000); // 5 minutes
     return () => clearInterval(interval);
   }, [patientId, date]);
 
@@ -67,27 +100,6 @@ export default function TimeBucketView({
       loadTodaysBuckets();
     }
   }, [refreshTrigger]);
-
-  const loadTodaysBuckets = async () => {
-    try {
-      setIsLoading(true);
-      
-      // Use the new time buckets API endpoint
-      const bucketsResult = await medicationCalendarApi.getTodayMedicationBuckets(date);
-
-      if (!bucketsResult.success || !bucketsResult.data) {
-        console.error('Failed to load medication buckets:', bucketsResult.error);
-        return;
-      }
-
-      setBuckets(bucketsResult.data);
-      
-    } catch (error) {
-      console.error('Error loading today\'s medication buckets:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleMedicationAction = async (
     eventId: string,
@@ -128,10 +140,43 @@ export default function TimeBucketView({
       if (result && result.success) {
         console.log(`✅ ${action} action successful for event:`, eventId);
         
-        // Force refresh buckets after successful action
+        // Optimistically remove event from current buckets
+        setBuckets(prev => {
+          if (!prev) return prev;
+          const removeFrom = (arr: EnhancedMedicationCalendarEvent[]) => arr.filter(e => e.id !== eventId);
+          return {
+            ...prev,
+            overdue: removeFrom(prev.overdue),
+            now: removeFrom(prev.now),
+            dueSoon: removeFrom(prev.dueSoon),
+            morning: removeFrom(prev.morning),
+            noon: removeFrom(prev.noon),
+            evening: removeFrom(prev.evening),
+            bedtime: removeFrom(prev.bedtime),
+            lastUpdated: new Date()
+          } as TodayMedicationBuckets;
+        });
+
+        // Force immediate refresh by bypassing smart refresh cache
         setTimeout(async () => {
-          await loadTodaysBuckets();
-        }, 500); // Small delay to ensure backend is updated
+          try {
+            setIsLoading(true);
+            console.log('🔄 Force refreshing buckets after medication action');
+            
+            // Directly call the API without smart refresh to ensure fresh data
+            const bucketsResult = await medicationCalendarApi.getTodayMedicationBuckets(date, { forceFresh: true });
+            if (bucketsResult.success && bucketsResult.data) {
+              setBuckets(bucketsResult.data);
+              console.log('✅ Buckets refreshed successfully after action');
+            } else {
+              console.error('❌ Failed to refresh buckets:', bucketsResult.error);
+            }
+          } catch (error) {
+            console.error('❌ Error refreshing after action:', error);
+          } finally {
+            setIsLoading(false);
+          }
+        }, 500); // Reduced delay to 500ms for faster UI response
         
         onMedicationAction?.(eventId, action);
       } else {

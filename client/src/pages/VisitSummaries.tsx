@@ -7,6 +7,7 @@ import {
   FileText,
   Calendar,
   User,
+  Users,
   Building,
   Clock,
   AlertCircle,
@@ -17,7 +18,9 @@ import {
   Plus,
   Mic,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Heart,
+  Pill
 } from 'lucide-react';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import VisitSummaryCard from '@/components/VisitSummaryCard';
@@ -393,6 +396,51 @@ export default function VisitSummaries() {
           </div>
         )}
       </main>
+
+      {/* Mobile Bottom Navigation */}
+      <nav className="mobile-nav-container">
+        <div className="flex items-center justify-around">
+          <Link
+            to="/dashboard"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <Heart className="w-5 h-5" />
+            <span className="text-xs">Home</span>
+          </Link>
+          
+          <Link
+            to="/medications"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <Pill className="w-5 h-5" />
+            <span className="text-xs">Medications</span>
+          </Link>
+          
+          <Link
+            to="/calendar"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <Calendar className="w-5 h-5" />
+            <span className="text-xs">Calendar</span>
+          </Link>
+          
+          <Link
+            to="/profile"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <User className="w-5 h-5" />
+            <span className="text-xs">Profile</span>
+          </Link>
+          
+          <Link
+            to="/family/invite"
+            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <Users className="w-5 h-5" />
+            <span className="text-xs">Family</span>
+          </Link>
+        </div>
+      </nav>
     </div>
   );
 }

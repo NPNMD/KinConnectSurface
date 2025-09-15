@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="KinConnect - Family care coordination platform for managing patient medical information" />
     <meta name="keywords" content="healthcare, family, coordination, patient, medical" />
     <meta name="author" content="KinConnect Team" />
@@ -11,9 +11,14 @@
     <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#2563eb" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="KinConnect" />
+    
+    <!-- Android specific meta tags for better navigation bar handling -->
+    <meta name="mobile-web-app-status-bar-style" content="default" />
+    <meta name="format-detection" content="telephone=no" />
     
     <!-- Preconnect to external domains -->
     <link rel="preconnect" href="https://fonts.googleapis.com">

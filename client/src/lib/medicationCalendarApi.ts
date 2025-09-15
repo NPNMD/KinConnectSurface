@@ -11,6 +11,8 @@ import type {
   SkipReason
 } from '@shared/types';
 import { getIdToken } from './firebase';
+import { rateLimitedFetch, RateLimitedAPI } from './rateLimiter';
+import { requestDebouncer } from './requestDebouncer';
 
 const API_BASE = 'https://us-central1-claritystream-uldp9.cloudfunctions.net/api';
 
@@ -38,13 +40,20 @@ class MedicationCalendarApi {
   async getMedicationSchedules(): Promise<ApiResponse<MedicationSchedule[]>> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/medication-calendar/schedules`, {
-        method: 'GET',
-        headers,
-        credentials: 'include',
-      });
-
-      return await response.json();
+      
+      return await rateLimitedFetch<ApiResponse<MedicationSchedule[]>>(
+        `${API_BASE}/medication-calendar/schedules`,
+        {
+          method: 'GET',
+          headers,
+          credentials: 'include',
+        },
+        {
+          priority: 'medium',
+          cacheKey: 'medication_schedules',
+          cacheTTL: 120000 // 2 minutes
+        }
+      );
     } catch (error) {
       console.error('Error fetching medication schedules:', error);
       return {
@@ -188,6 +197,7 @@ class MedicationCalendarApi {
     endDate?: Date;
     medicationId?: string;
     status?: string;
+    forceFresh?: boolean;
   } = {}): Promise<ApiResponse<MedicationCalendarEvent[]>> {
     try {
       const params = new URLSearchParams();
@@ -207,15 +217,35 @@ class MedicationCalendarApi {
 
       const queryString = params.toString();
       const url = `${API_BASE}/medication-calendar/events${queryString ? `?${queryString}` : ''}`;
-
       const headers = await getAuthHeaders();
-      const response = await fetch(url, {
-        method: 'GET',
-        headers,
-        credentials: 'include',
-      });
 
-      return await response.json();
+      if (options.forceFresh) {
+        return await rateLimitedFetch<ApiResponse<MedicationCalendarEvent[]>>(
+          url,
+          {
+            method: 'GET',
+            headers,
+            credentials: 'include',
+          },
+          {
+            priority: 'high'
+          }
+        );
+      }
+      
+      return await rateLimitedFetch<ApiResponse<MedicationCalendarEvent[]>>(
+        url,
+        {
+          method: 'GET',
+          headers,
+          credentials: 'include',
+        },
+        {
+          priority: 'medium',
+          cacheKey: `calendar_events_${queryString}`,
+          cacheTTL: 60000 // 1 minute cache
+        }
+      );
     } catch (error) {
       console.error('Error fetching medication calendar events:', error);
       return {
@@ -251,27 +281,38 @@ class MedicationCalendarApi {
       
       console.log('🔧 MedicationCalendarApi: Request body (cleaned):', requestBody);
       
-      const response = await fetch(`${API_BASE}/medication-calendar/events/${eventId}/taken`, {
-        method: 'POST',
-        headers,
-        credentials: 'include',
-        body: JSON.stringify(requestBody),
-      });
+      const result = await RateLimitedAPI.urgent<ApiResponse<MedicationCalendarEvent>>(
+        `${API_BASE}/medication-calendar/events/${eventId}/taken`,
+        {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: JSON.stringify(requestBody),
+        }
+      );
 
-      console.log('🔧 MedicationCalendarApi: Response status:', response.status);
-      console.log('🔧 MedicationCalendarApi: Response ok:', response.ok);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ MedicationCalendarApi: HTTP error:', response.status, errorText);
-        return {
-          success: false,
-          error: `HTTP ${response.status}: ${errorText}`
-        };
-      }
-
-      const result = await response.json();
       console.log('🔧 MedicationCalendarApi: Mark taken response:', result);
+      
+      // If successful, clear relevant caches to force refresh
+      if (result.success) {
+        console.log('🗑️ Clearing medication caches after successful mark taken');
+        RateLimitedAPI.clearCache('today_buckets');
+        RateLimitedAPI.clearCache('calendar_events');
+        RateLimitedAPI.clearCache('medication_schedules');
+        // Temporarily suppress cache sets for freshly invalidated keys
+        try {
+          // @ts-ignore access helper
+          rateLimiter.suppressCacheFor?.('today_buckets', 2000);
+          // @ts-ignore access helper
+          rateLimiter.suppressCacheFor?.('calendar_events', 2000);
+        } catch {}
+        
+        // Also reset the request debouncer for today's buckets to allow immediate refresh
+        const today = new Date().toISOString().split('T')[0];
+        requestDebouncer.reset();
+        
+        console.log('✅ Caches cleared, UI should refresh immediately');
+      }
       
       return result;
     } catch (error) {
@@ -300,24 +341,25 @@ class MedicationCalendarApi {
         reason: reason?.trim() || undefined
       };
       
-      const response = await fetch(`${API_BASE}/medication-calendar/events/${eventId}/snooze`, {
-        method: 'POST',
-        headers,
-        credentials: 'include',
-        body: JSON.stringify(requestBody),
-      });
+      const result = await RateLimitedAPI.urgent<ApiResponse<EnhancedMedicationCalendarEvent>>(
+        `${API_BASE}/medication-calendar/events/${eventId}/snooze`,
+        {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: JSON.stringify(requestBody),
+        }
+      );
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ MedicationCalendarApi: Snooze HTTP error:', response.status, errorText);
-        return {
-          success: false,
-          error: `HTTP ${response.status}: ${errorText}`
-        };
-      }
-
-      const result = await response.json();
       console.log('🔧 MedicationCalendarApi: Snooze response:', result);
+      
+      // If successful, clear relevant caches to force refresh
+      if (result.success) {
+        console.log('🗑️ Clearing medication caches after successful snooze');
+        RateLimitedAPI.clearCache('today_buckets');
+        RateLimitedAPI.clearCache('calendar_events');
+        requestDebouncer.reset();
+      }
       
       return result;
     } catch (error) {
@@ -344,24 +386,25 @@ class MedicationCalendarApi {
         notes: notes?.trim() || undefined
       };
       
-      const response = await fetch(`${API_BASE}/medication-calendar/events/${eventId}/skip`, {
-        method: 'POST',
-        headers,
-        credentials: 'include',
-        body: JSON.stringify(requestBody),
-      });
+      const result = await RateLimitedAPI.urgent<ApiResponse<EnhancedMedicationCalendarEvent>>(
+        `${API_BASE}/medication-calendar/events/${eventId}/skip`,
+        {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: JSON.stringify(requestBody),
+        }
+      );
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ MedicationCalendarApi: Skip HTTP error:', response.status, errorText);
-        return {
-          success: false,
-          error: `HTTP ${response.status}: ${errorText}`
-        };
-      }
-
-      const result = await response.json();
       console.log('🔧 MedicationCalendarApi: Skip response:', result);
+      
+      // If successful, clear relevant caches to force refresh
+      if (result.success) {
+        console.log('🗑️ Clearing medication caches after successful skip');
+        RateLimitedAPI.clearCache('today_buckets');
+        RateLimitedAPI.clearCache('calendar_events');
+        requestDebouncer.reset();
+      }
       
       return result;
     } catch (error) {
@@ -390,24 +433,25 @@ class MedicationCalendarApi {
         isOneTime
       };
       
-      const response = await fetch(`${API_BASE}/medication-calendar/events/${eventId}/reschedule`, {
-        method: 'POST',
-        headers,
-        credentials: 'include',
-        body: JSON.stringify(requestBody),
-      });
+      const result = await RateLimitedAPI.urgent<ApiResponse<EnhancedMedicationCalendarEvent>>(
+        `${API_BASE}/medication-calendar/events/${eventId}/reschedule`,
+        {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: JSON.stringify(requestBody),
+        }
+      );
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ MedicationCalendarApi: Reschedule HTTP error:', response.status, errorText);
-        return {
-          success: false,
-          error: `HTTP ${response.status}: ${errorText}`
-        };
-      }
-
-      const result = await response.json();
       console.log('🔧 MedicationCalendarApi: Reschedule response:', result);
+      
+      // If successful, clear relevant caches to force refresh
+      if (result.success) {
+        console.log('🗑️ Clearing medication caches after successful reschedule');
+        RateLimitedAPI.clearCache('today_buckets');
+        RateLimitedAPI.clearCache('calendar_events');
+        requestDebouncer.reset();
+      }
       
       return result;
     } catch (error) {
@@ -422,30 +466,47 @@ class MedicationCalendarApi {
   // ===== TIME BUCKET ORGANIZATION API =====
 
   // Get today's medications organized by time buckets
-  async getTodayMedicationBuckets(date?: Date): Promise<ApiResponse<TodayMedicationBuckets>> {
+  async getTodayMedicationBuckets(
+    date?: Date,
+    options?: { forceFresh?: boolean }
+  ): Promise<ApiResponse<TodayMedicationBuckets>> {
     try {
       const targetDate = date || new Date();
       const headers = await getAuthHeaders();
       
       const params = new URLSearchParams();
       params.append('date', targetDate.toISOString().split('T')[0]);
-      
-      const response = await fetch(`${API_BASE}/medication-calendar/events/today-buckets?${params}`, {
-        method: 'GET',
-        headers,
-        credentials: 'include',
-      });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ MedicationCalendarApi: Time buckets HTTP error:', response.status, errorText);
-        return {
-          success: false,
-          error: `HTTP ${response.status}: ${errorText}`
-        };
+      const url = `${API_BASE}/medication-calendar/events/today-buckets?${params}`;
+
+      // Allow bypassing cache for immediate post-action refreshes
+      if (options?.forceFresh) {
+        return await rateLimitedFetch<ApiResponse<TodayMedicationBuckets>>(
+          url,
+          {
+            method: 'GET',
+            headers,
+            credentials: 'include',
+          },
+          {
+            priority: 'high'
+          }
+        );
       }
 
-      return await response.json();
+      return await rateLimitedFetch<ApiResponse<TodayMedicationBuckets>>(
+        url,
+        {
+          method: 'GET',
+          headers,
+          credentials: 'include',
+        },
+        {
+          priority: 'high', // High priority for today's medications
+          cacheKey: `today_buckets_${targetDate.toISOString().split('T')[0]}`,
+          cacheTTL: 30000 // 30 seconds cache for today's data
+        }
+      );
     } catch (error) {
       console.error('❌ MedicationCalendarApi: Error fetching time buckets:', error);
       return {

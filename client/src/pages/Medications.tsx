@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Medication, NewMedication } from '@shared/types';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
+import { createSmartRefresh, createDebouncedFunction } from '@/lib/requestDebouncer';
 import MedicationManager from '@/components/MedicationManager';
 import MedicationReminders from '@/components/MedicationReminders';
 import UnifiedMedicationView from '@/components/UnifiedMedicationView';
@@ -37,30 +38,42 @@ export default function Medications() {
   const [useTimeBuckets, setUseTimeBuckets] = useState(true); // New enhanced view
   const [refreshTrigger, setRefreshTrigger] = useState(0); // Trigger for TimeBucketView refresh
 
-  // Load medications function
-  const loadMedications = async () => {
-    try {
-      setIsLoadingMedications(true);
-      const response = await apiClient.get<{ success: boolean; data: Medication[] }>(
-        API_ENDPOINTS.MEDICATIONS
-      );
-      
-      if (response.success && response.data) {
-        // Parse date strings back to Date objects
-        const medicationsWithDates = response.data.map(med => ({
-          ...med,
-          prescribedDate: new Date(med.prescribedDate),
-          startDate: med.startDate ? new Date(med.startDate) : undefined,
-          endDate: med.endDate ? new Date(med.endDate) : undefined,
-          createdAt: new Date(med.createdAt),
-          updatedAt: new Date(med.updatedAt),
-        }));
-        setMedications(medicationsWithDates);
+  // Create smart refresh function for medications
+  const smartLoadMedications = createSmartRefresh(
+    async () => {
+      try {
+        setIsLoadingMedications(true);
+        const response = await apiClient.get<{ success: boolean; data: Medication[] }>(
+          API_ENDPOINTS.MEDICATIONS
+        );
+        
+        if (response.success && response.data) {
+          // Parse date strings back to Date objects
+          const medicationsWithDates = response.data.map(med => ({
+            ...med,
+            prescribedDate: new Date(med.prescribedDate),
+            startDate: med.startDate ? new Date(med.startDate) : undefined,
+            endDate: med.endDate ? new Date(med.endDate) : undefined,
+            createdAt: new Date(med.createdAt),
+            updatedAt: new Date(med.updatedAt),
+          }));
+          setMedications(medicationsWithDates);
+        }
+      } catch (error) {
+        console.error('Error loading medications:', error);
+      } finally {
+        setIsLoadingMedications(false);
       }
-    } catch (error) {
-      console.error('Error loading medications:', error);
-    } finally {
-      setIsLoadingMedications(false);
+    },
+    60000, // 1 minute minimum between calls
+    'medications_list'
+  );
+
+  // Load medications function with smart refresh
+  const loadMedications = async () => {
+    const result = await smartLoadMedications();
+    if (result === null && medications.length > 0) {
+      console.log('🚫 Skipped redundant medications refresh');
     }
   };
 
@@ -71,17 +84,27 @@ export default function Medications() {
     }
   }, [user?.id]);
 
-  // Listen for medication schedule updates
+  // Listen for medication schedule updates with debounced refresh
   useEffect(() => {
+    const debouncedRefresh = createDebouncedFunction(
+      async () => {
+        console.log('🔍 Medications: Refreshing medications after schedule update');
+        await loadMedications();
+      },
+      2000, // 2 second debounce
+      'medications_schedule_update'
+    );
+
     const handleScheduleUpdate = () => {
-      console.log('🔍 Medications: Received schedule update event, refreshing medications');
-      loadMedications();
+      console.log('🔍 Medications: Received schedule update event');
+      debouncedRefresh();
     };
 
     window.addEventListener('medicationScheduleUpdated', handleScheduleUpdate);
     
     return () => {
       window.removeEventListener('medicationScheduleUpdated', handleScheduleUpdate);
+      debouncedRefresh.cancel();
     };
   }, []);
 
@@ -235,9 +258,11 @@ export default function Medications() {
                   date={new Date()}
                   onMedicationAction={(eventId, action) => {
                     console.log('Medication action performed:', { eventId, action });
-                    // Refresh medications and trigger TimeBucketView refresh
-                    loadMedications();
-                    setRefreshTrigger(prev => prev + 1);
+                    // Refresh medications and trigger TimeBucketView refresh with debouncing
+                    setTimeout(() => {
+                      loadMedications();
+                      setRefreshTrigger(prev => prev + 1);
+                    }, 1000); // 1 second delay to batch updates
                   }}
                   compactMode={false}
                   refreshTrigger={refreshTrigger}
@@ -297,9 +322,11 @@ export default function Medications() {
             medications={filteredMedications}
             showCreateScheduleButton={true}
             onScheduleCreated={() => {
-              loadMedications();
-              // Dispatch event to notify other components
-              window.dispatchEvent(new CustomEvent('medicationScheduleUpdated'));
+              // Use debounced refresh and dispatch event
+              setTimeout(() => {
+                loadMedications();
+                window.dispatchEvent(new CustomEvent('medicationScheduleUpdated'));
+              }, 1000); // 1 second delay to batch updates
             }}
           />
         </div>
@@ -330,7 +357,7 @@ export default function Medications() {
       </main>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-2 z-50">
+      <nav className="mobile-nav-container">
         <div className="flex items-center justify-around">
           <Link
             to="/dashboard"

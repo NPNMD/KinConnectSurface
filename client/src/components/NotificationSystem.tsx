@@ -135,8 +135,8 @@ export default function NotificationSystem({ events, patientId }: NotificationSy
 
     generateNotifications();
     
-    // Update notifications every minute
-    const interval = setInterval(generateNotifications, 60000);
+    // Update notifications every 5 minutes to reduce API calls
+    const interval = setInterval(generateNotifications, 300000); // 5 minutes
     return () => clearInterval(interval);
   }, [events]);
 

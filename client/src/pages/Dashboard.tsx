@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
+import { createSmartRefresh, createDebouncedFunction } from '@/lib/requestDebouncer';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import VisitSummaryCard from '@/components/VisitSummaryCard';
 import VisitSummaryForm from '@/components/VisitSummaryForm';
@@ -509,27 +510,63 @@ export default function Dashboard() {
     setShowVisitRecording(false);
   };
 
+  // Create smart refresh functions with shorter intervals for better UX
+  const smartFetchVisitSummaries = createSmartRefresh(
+    fetchRecentVisitSummaries,
+    30000, // 30 seconds minimum between calls
+    'dashboard_visit_summaries'
+  );
+
+  const smartFetchTodaysMedications = createSmartRefresh(
+    fetchTodaysMedications,
+    10000, // 10 seconds minimum between calls (shorter for medication actions)
+    'dashboard_todays_medications'
+  );
+
+  const smartFetchAllMedications = createSmartRefresh(
+    fetchAllMedications,
+    30000, // 30 seconds minimum between calls
+    'dashboard_all_medications'
+  );
+
+  const smartFetchUpcomingAppointments = createSmartRefresh(
+    fetchUpcomingAppointments,
+    120000, // 2 minutes minimum between calls
+    'dashboard_appointments'
+  );
+
   useEffect(() => {
     if (firebaseUser) {
-      fetchRecentVisitSummaries();
-      fetchTodaysMedications();
-      fetchAllMedications();
-      fetchUpcomingAppointments();
+      // Use smart refresh functions to prevent rapid API calls
+      smartFetchVisitSummaries();
+      smartFetchTodaysMedications();
+      smartFetchAllMedications();
+      smartFetchUpcomingAppointments();
     }
   }, [firebaseUser]);
 
-  // Listen for medication schedule updates
+  // Listen for medication schedule updates with debounced refresh
   useEffect(() => {
+    const debouncedRefresh = createDebouncedFunction(
+      async () => {
+        console.log('🔍 Dashboard: Refreshing data after schedule update');
+        await smartFetchTodaysMedications();
+        await smartFetchAllMedications();
+      },
+      2000, // 2 second debounce
+      'dashboard_schedule_update'
+    );
+
     const handleScheduleUpdate = () => {
-      console.log('🔍 Dashboard: Received schedule update event, refreshing data');
-      fetchTodaysMedications();
-      fetchAllMedications();
+      console.log('🔍 Dashboard: Received schedule update event');
+      debouncedRefresh();
     };
 
     window.addEventListener('medicationScheduleUpdated', handleScheduleUpdate);
     
     return () => {
       window.removeEventListener('medicationScheduleUpdated', handleScheduleUpdate);
+      debouncedRefresh.cancel();
     };
   }, []);
 
@@ -957,7 +994,7 @@ export default function Dashboard() {
       </main>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-2 z-50">
+      <nav className="mobile-nav-container">
         <div className="flex items-center justify-around">
           <Link
             to="/dashboard"

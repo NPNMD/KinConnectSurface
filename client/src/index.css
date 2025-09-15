@@ -66,6 +66,26 @@
     padding-bottom: env(safe-area-inset-bottom);
   }
   
+  /* Android navigation bar support */
+  .mobile-nav-safe {
+    padding-bottom: max(env(safe-area-inset-bottom), 20px);
+    margin-bottom: env(keyboard-inset-height, 0px);
+  }
+  
+  /* Ensure mobile navigation is always visible above system UI */
+  .mobile-nav-container {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: white;
+    border-top: 1px solid #e5e7eb;
+    z-index: 9999;
+    padding: 8px 16px;
+    padding-bottom: max(env(safe-area-inset-bottom), 20px);
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+  }
+  
   /* Mobile touch targets */
   .touch-target {
     min-height: 44px;

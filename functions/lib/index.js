@@ -83,10 +83,10 @@ app.use((0, cors_1.default)({
 }));
 app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '10mb' }));
-// Rate limiting - configured for Firebase Functions
+// Rate limiting - configured for Firebase Functions with more permissive limits
 const limiter = (0, express_rate_limit_1.default)({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 300, // Increased from 100 to 300 requests per 15 minutes
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => {
@@ -96,6 +96,15 @@ const limiter = (0, express_rate_limit_1.default)({
     skip: (req) => {
         // Skip rate limiting for health checks
         return req.path === '/api/health';
+    },
+    handler: (req, res) => {
+        // Custom handler for rate limit exceeded
+        console.log('⚠️ Rate limit exceeded for:', req.ip, req.path);
+        res.status(429).json({
+            success: false,
+            error: 'Too many requests, please try again later.',
+            retryAfter: 60 // Fixed retry after 60 seconds
+        });
     }
 });
 app.use(limiter); // Apply to all routes, not just /api/
@@ -1875,7 +1884,7 @@ app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req,
             updateData.notes = notes.trim();
         }
         // Do not add notes field at all if it's undefined, null, or empty
-        // Calculate if taken on time (within 30 minutes of scheduled time)
+        // Calculate if taken on time and record lateness as metadata
         updateData.isOnTime = true; // Default to true
         try {
             if (eventData.scheduledDateTime && updateData.actualTakenDateTime) {
@@ -1883,15 +1892,11 @@ app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req,
                 const takenTime = updateData.actualTakenDateTime.toDate();
                 const timeDiffMinutes = Math.abs((takenTime.getTime() - scheduledTime.getTime()) / (1000 * 60));
                 updateData.isOnTime = timeDiffMinutes <= 30;
-                // 🔥 FIX: Always mark as 'taken' when user explicitly marks it
-                // Only set to 'late' if it's extremely late (more than 4 hours) for tracking purposes
-                if (timeDiffMinutes > 240) { // 4 hours instead of 30 minutes
-                    updateData.status = 'late';
+                // Always keep status as 'taken' for UI logic; record lateness separately
+                updateData.status = 'taken';
+                if (timeDiffMinutes > 0) {
                     updateData.minutesLate = Math.round(timeDiffMinutes);
-                }
-                else {
-                    // Keep status as 'taken' for reasonable delays
-                    updateData.status = 'taken';
+                    updateData.wasLate = timeDiffMinutes > 240; // extremely late flag
                 }
                 console.log('⏰ Time calculation:', {
                     scheduledTime: scheduledTime.toISOString(),
@@ -2299,7 +2304,7 @@ app.get('/medication-calendar/events/today-buckets', authenticate, async (req, r
                 createdAt: data.createdAt?.toDate(),
                 updatedAt: data.updatedAt?.toDate(),
                 // Initialize enhanced fields if not present
-                status: data.status || 'scheduled',
+                status: data.status,
                 snoozeCount: data.snoozeCount || 0,
                 snoozeHistory: data.snoozeHistory || [],
                 skipHistory: data.skipHistory || [],
@@ -2388,8 +2393,9 @@ app.get('/medication-calendar/events/today-buckets', authenticate, async (req, r
         events.forEach(event => {
             const eventTime = new Date(event.scheduledDateTime);
             const minutesUntilDue = Math.floor((eventTime.getTime() - now.getTime()) / (1000 * 60));
-            // Skip already taken medications
-            if (event.status === 'taken') {
+            // Skip non-actionable medications
+            const nonActionableStatuses = ['taken', 'late', 'skipped', 'missed', 'cancelled', 'paused', 'completed'];
+            if (nonActionableStatuses.includes(event.status)) {
                 return;
             }
             // Enhanced event with time bucket info

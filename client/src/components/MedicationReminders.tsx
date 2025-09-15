@@ -36,8 +36,8 @@ export default function MedicationReminders({
   useEffect(() => {
     loadReminders();
     
-    // Set up interval to refresh reminders every minute
-    const interval = setInterval(loadReminders, 60000);
+    // Set up interval to refresh reminders every 5 minutes to reduce API calls
+    const interval = setInterval(loadReminders, 300000); // 5 minutes
     return () => clearInterval(interval);
   }, [patientId]);
 
@@ -106,7 +106,30 @@ export default function MedicationReminders({
       );
 
       if (result.success) {
-        await loadReminders();
+        // Optimistically remove from local lists
+        setUpcomingEvents(prev => prev.filter(e => e.id !== event.id));
+        setOverdueEvents(prev => prev.filter(e => e.id !== event.id));
+
+        // Then refresh from server in background (force fresh to avoid stale cache)
+        const now = new Date();
+        const endOfDay = new Date(now); endOfDay.setHours(23,59,59,999);
+        const startOfDay = new Date(now); startOfDay.setHours(0,0,0,0);
+        const refreshed = await medicationCalendarApi.getMedicationCalendarEvents({ startDate: startOfDay, endDate: endOfDay, forceFresh: true });
+        if (refreshed.success && refreshed.data) {
+          const events = refreshed.data;
+          const upcoming: MedicationCalendarEvent[] = [];
+          const overdue: MedicationCalendarEvent[] = [];
+          events.forEach(ev => {
+            if (ev.status === 'scheduled') {
+              const t = new Date(ev.scheduledDateTime);
+              if (t > now) upcoming.push(ev); else overdue.push(ev);
+            }
+          });
+          upcoming.sort((a, b) => new Date(a.scheduledDateTime).getTime() - new Date(b.scheduledDateTime).getTime());
+          overdue.sort((a, b) => new Date(b.scheduledDateTime).getTime() - new Date(a.scheduledDateTime).getTime());
+          setUpcomingEvents(upcoming.slice(0, maxItems));
+          setOverdueEvents(overdue.slice(0, maxItems));
+        }
         setNotes('');
         setShowNotes(null);
       } else {
