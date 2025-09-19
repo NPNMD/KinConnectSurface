@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useFamily } from '@/contexts/FamilyContext';
 import { signOutUser } from '@/lib/firebase';
 import {
   Heart,
@@ -36,6 +37,8 @@ import LoadingSpinner from '@/components/LoadingSpinner';
 import VisitSummaryCard from '@/components/VisitSummaryCard';
 import VisitSummaryForm from '@/components/VisitSummaryForm';
 import UnifiedMedicationView from '@/components/UnifiedMedicationView';
+import PatientSwitcher from '@/components/PatientSwitcher';
+import { CreatePermissionWrapper, EditPermissionWrapper } from '@/components/PermissionWrapper';
 import type { VisitSummary, MedicationCalendarEvent, MedicalEvent, Medication } from '@shared/types';
 
 interface TodaysMedication {
@@ -50,6 +53,13 @@ interface TodaysMedication {
 
 export default function Dashboard() {
   const { user, firebaseUser } = useAuth();
+  const {
+    userRole,
+    activePatientAccess,
+    getEffectivePatientId,
+    hasPermission,
+    isLoading: familyLoading
+  } = useFamily();
   const [recentVisitSummaries, setRecentVisitSummaries] = useState<VisitSummary[]>([]);
   const [loadingVisitSummaries, setLoadingVisitSummaries] = useState(false);
   const [todaysMedications, setTodaysMedications] = useState<TodaysMedication[]>([]);
@@ -89,13 +99,13 @@ export default function Dashboard() {
   const fetchRecentVisitSummaries = async () => {
     try {
       setLoadingVisitSummaries(true);
-      const userId = firebaseUser?.uid;
-      if (!userId) return;
+      const effectivePatientId = getEffectivePatientId();
+      if (!effectivePatientId) return;
 
-      console.log('🔍 Fetching recent visit summaries for user:', userId);
+      console.log('🔍 Fetching recent visit summaries for patient:', effectivePatientId);
       
       const response = await apiClient.get<{ success: boolean; data: VisitSummary[] }>(
-        `${API_ENDPOINTS.VISIT_SUMMARIES(userId)}?limit=3&offset=0`
+        `${API_ENDPOINTS.VISIT_SUMMARIES(effectivePatientId)}?limit=3&offset=0`
       );
       
       if (response.success && response.data) {
@@ -240,7 +250,7 @@ export default function Dashboard() {
       const endDate = new Date(startDate.getTime() + 30 * 60000); // 30 minutes default
 
       const medicalEventData = {
-        patientId: firebaseUser?.uid,
+        patientId: getEffectivePatientId(),
         title: event.title,
         description: event.description,
         eventType: event.type === 'follow_up_appointment' ? 'follow_up' : 'appointment',
@@ -295,7 +305,8 @@ export default function Dashboard() {
 
       const result = await medicationCalendarApi.getMedicationCalendarEvents({
         startDate: startOfDay,
-        endDate: endOfDay
+        endDate: endOfDay,
+        patientId: getEffectivePatientId() || undefined
       });
 
       console.log('🔍 Dashboard: Medication events result:', result);
@@ -345,11 +356,11 @@ export default function Dashboard() {
   const fetchUpcomingAppointments = async () => {
     try {
       setLoadingAppointments(true);
-      const userId = firebaseUser?.uid;
-      if (!userId) return;
+      const effectivePatientId = getEffectivePatientId();
+      if (!effectivePatientId) return;
 
       const response = await apiClient.get<{ success: boolean; data: MedicalEvent[] }>(
-        API_ENDPOINTS.MEDICAL_EVENTS(userId)
+        API_ENDPOINTS.MEDICAL_EVENTS(effectivePatientId)
       );
 
       if (response.success && response.data) {
@@ -385,9 +396,14 @@ export default function Dashboard() {
   const fetchAllMedications = async () => {
     try {
       setLoadingAllMedications(true);
-      const response = await apiClient.get<{ success: boolean; data: Medication[] }>(
-        API_ENDPOINTS.MEDICATIONS
-      );
+      const effectivePatientId = getEffectivePatientId();
+      if (!effectivePatientId) return;
+      
+      const endpoint = userRole === 'family_member'
+        ? API_ENDPOINTS.MEDICATIONS_FOR_PATIENT(effectivePatientId)
+        : API_ENDPOINTS.MEDICATIONS;
+      
+      const response = await apiClient.get<{ success: boolean; data: Medication[] }>(endpoint);
       
       if (response.success && response.data) {
         // Parse date strings back to Date objects
@@ -536,14 +552,14 @@ export default function Dashboard() {
   );
 
   useEffect(() => {
-    if (firebaseUser) {
+    if (firebaseUser && !familyLoading && getEffectivePatientId()) {
       // Use smart refresh functions to prevent rapid API calls
       smartFetchVisitSummaries();
       smartFetchTodaysMedications();
       smartFetchAllMedications();
       smartFetchUpcomingAppointments();
     }
-  }, [firebaseUser]);
+  }, [firebaseUser, familyLoading, getEffectivePatientId()]);
 
   // Listen for medication schedule updates with debounced refresh
   useEffect(() => {
@@ -633,6 +649,11 @@ export default function Dashboard() {
               <span className="text-lg font-bold text-gray-900">KinConnect</span>
             </div>
             
+            {/* Patient Switcher for Family Members */}
+            <div className="flex-1 flex justify-center">
+              <PatientSwitcher />
+            </div>
+            
             <div className="flex items-center space-x-2">
               <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
                 <Bell className="w-5 h-5" />
@@ -663,10 +684,18 @@ export default function Dashboard() {
         {/* Welcome Section */}
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900 mb-1">
-            Welcome back, {user?.name?.split(' ')[0] || 'there'}! 👋
+            {userRole === 'family_member' && activePatientAccess ? (
+              <>Welcome back, {user?.name?.split(' ')[0] || 'there'}! 👋</>
+            ) : (
+              <>Welcome back, {user?.name?.split(' ')[0] || 'there'}! 👋</>
+            )}
           </h1>
           <p className="text-gray-600 text-sm">
-            Here's your health overview for today
+            {userRole === 'family_member' && activePatientAccess ? (
+              <>Viewing {activePatientAccess.patientName}'s health overview for today</>
+            ) : (
+              <>Here's your health overview for today</>
+            )}
           </p>
         </div>
 
@@ -675,13 +704,15 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-gray-900">Recent Events</h2>
             <div className="flex items-center space-x-2">
-              <button
-                onClick={() => setShowVisitRecording(true)}
-                className="flex items-center space-x-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors"
-              >
-                <Mic className="w-4 h-4" />
-                <span>Record Visit</span>
-              </button>
+              <CreatePermissionWrapper>
+                <button
+                  onClick={() => setShowVisitRecording(true)}
+                  className="flex items-center space-x-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors"
+                >
+                  <Mic className="w-4 h-4" />
+                  <span>Record Visit</span>
+                </button>
+              </CreatePermissionWrapper>
               {recentVisitSummaries.length > 0 && (
                 <Link
                   to="/visit-summaries"
@@ -766,11 +797,10 @@ export default function Dashboard() {
                       </div>
                     </div>
                     <div className="flex flex-col space-y-2">
-                      {event.actionable && event.dueDate && (
+                      {event.actionable && event.dueDate && hasPermission('canCreate') && (
                         <button
                           onClick={() => handleAddToCalendar(event)}
                           className="flex items-center space-x-1 px-3 py-1 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 transition-colors"
-                          title="Add to calendar"
                         >
                           <CalendarPlus className="w-3 h-3" />
                           <span>Add to Calendar</span>
@@ -850,13 +880,20 @@ export default function Dashboard() {
             <div className="bg-white rounded-lg p-6 border border-gray-200 text-center">
               <FileText className="w-8 h-8 text-gray-300 mx-auto mb-2" />
               <p className="text-gray-500 text-sm mb-3">Nothing new in the last 30 days</p>
-              <button
-                onClick={() => setShowVisitRecording(true)}
-                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors mx-auto"
-              >
-                <Mic className="w-4 h-4" />
-                <span>Record Your First Visit</span>
-              </button>
+              <CreatePermissionWrapper>
+                <button
+                  onClick={() => setShowVisitRecording(true)}
+                  className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors mx-auto"
+                >
+                  <Mic className="w-4 h-4" />
+                  <span>
+                    {userRole === 'family_member' && activePatientAccess
+                      ? `Record Visit for ${activePatientAccess.patientName}`
+                      : 'Record Your First Visit'
+                    }
+                  </span>
+                </button>
+              </CreatePermissionWrapper>
             </div>
           )}
         </div>
@@ -881,30 +918,42 @@ export default function Dashboard() {
               </div>
             </div>
           ) : allMedications.length > 0 ? (
-            <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <UnifiedMedicationView
-                patientId={firebaseUser?.uid || ''}
-                medications={allMedications}
-                maxItems={5}
-                showCreateScheduleButton={true}
-                onScheduleCreated={() => {
-                  fetchTodaysMedications();
-                  fetchAllMedications();
-                }}
-              />
-            </div>
+           <div className="bg-white rounded-lg border border-gray-200 p-4">
+             <UnifiedMedicationView
+               patientId={getEffectivePatientId() || ''}
+               medications={allMedications}
+               maxItems={5}
+               showCreateScheduleButton={hasPermission('canCreate')}
+               onScheduleCreated={() => {
+                 fetchTodaysMedications();
+                 fetchAllMedications();
+               }}
+             />
+           </div>
           ) : (
             <div className="bg-white rounded-lg p-6 border border-gray-200 text-center">
-              <Pill className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-              <p className="text-gray-500 text-sm mb-3">No medications added yet</p>
-              <Link
-                to="/medications"
-                className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Add Your First Medication</span>
-              </Link>
-            </div>
+             <Pill className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+             <p className="text-gray-500 text-sm mb-3">
+               {userRole === 'family_member' && activePatientAccess
+                 ? `${activePatientAccess.patientName} has no medications added yet`
+                 : 'No medications added yet'
+               }
+             </p>
+             <CreatePermissionWrapper>
+               <Link
+                 to="/medications"
+                 className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors"
+               >
+                 <Plus className="w-4 h-4" />
+                 <span>
+                   {userRole === 'family_member' && activePatientAccess
+                     ? `Add Medication for ${activePatientAccess.patientName}`
+                     : 'Add Your First Medication'
+                   }
+                 </span>
+               </Link>
+             </CreatePermissionWrapper>
+           </div>
           )}
         </div>
 
@@ -980,7 +1029,7 @@ export default function Dashboard() {
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
               <VisitSummaryForm
-                patientId={firebaseUser?.uid || ''}
+                patientId={getEffectivePatientId() || ''}
                 onSubmit={handleVisitSummarySubmit}
                 onCancel={handleVisitSummaryCancel}
                 initialData={{

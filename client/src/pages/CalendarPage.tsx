@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useFamily } from '@/contexts/FamilyContext';
 import {
   Heart,
   ArrowLeft,
@@ -11,9 +12,10 @@ import {
   Settings
 } from 'lucide-react';
 import CalendarIntegration from '@/components/CalendarIntegration';
+import PatientSwitcher from '@/components/PatientSwitcher';
 
 export default function CalendarPage() {
-  const { user, firebaseUser } = useAuth();
+  const { getEffectivePatientId, userRole, activePatientAccess } = useFamily();
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -30,8 +32,18 @@ export default function CalendarPage() {
               </Link>
               <div className="flex items-center space-x-2">
                 <Calendar className="w-6 h-6 text-primary-600" />
-                <span className="text-lg font-bold text-gray-900">Calendar</span>
+                <span className="text-lg font-bold text-gray-900">
+                  {userRole === 'family_member' && activePatientAccess
+                    ? `${activePatientAccess.patientName}'s Calendar`
+                    : 'Calendar'
+                  }
+                </span>
               </div>
+            </div>
+            
+            {/* Patient Switcher for Family Members */}
+            <div className="flex-1 flex justify-center">
+              <PatientSwitcher />
             </div>
             
             <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
@@ -44,7 +56,7 @@ export default function CalendarPage() {
       {/* Main Content */}
       <main className="px-4 py-4 pb-20">
         <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <CalendarIntegration patientId={user?.id || firebaseUser?.uid || ''} />
+          <CalendarIntegration patientId={getEffectivePatientId() || ''} />
         </div>
       </main>
 

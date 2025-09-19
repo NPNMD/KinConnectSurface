@@ -232,7 +232,7 @@ class ApiClient {
     }
 
     // Special handling for medications
-    if (endpoint === '/medications') {
+    if (endpoint === '/medications' || endpoint.includes('/medications?patientId=')) {
       return this.requestWithFallback<T>(endpoint, { method: 'GET' }, async () => {
         const medications = this.getLocalStorageData(STORAGE_KEYS.MEDICATIONS, []);
         return { success: true, data: medications } as T;
@@ -430,6 +430,7 @@ export const API_ENDPOINTS = {
   
   // Medications
   MEDICATIONS: '/medications',
+  MEDICATIONS_FOR_PATIENT: (patientId: string) => `/medications?patientId=${patientId}`,
   MEDICATION_BY_ID: (id: string) => `/medications/${id}`,
   PATIENT_MEDICATIONS: (patientId: string) => `/patients/${patientId}/medications`,
   MEDICATION_LOGS: '/medication-logs',

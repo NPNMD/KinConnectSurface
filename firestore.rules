@@ -155,7 +155,11 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
         get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canManageFamily == true &&
         get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active' ||
-        // Family member accepting their own invitation
+        // Family member accepting their own invitation - ENHANCED PERMISSIONS
+        resource.data.familyMemberEmail == request.auth.email &&
+        resource.data.status == 'pending' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['familyMemberId', 'status', 'acceptedAt', 'lastAccessAt', 'updatedAt']) ||
+        // Family member updating their existing active access
         resource.data.familyMemberId == request.auth.uid &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acceptedAt', 'lastAccessAt', 'updatedAt'])
       );

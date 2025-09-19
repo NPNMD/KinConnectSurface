@@ -127,6 +127,22 @@ async function testFamilyRelationshipFixes() {
     console.log(`   - Self-referential relationships: ${selfReferentialCount}`);
     console.log(`   - Duplicate relationships: ${duplicateCount}`);
     console.log(`   - Total family access records: ${familyAccessQuery.size}`);
+
+    // New: Spot-check reciprocal links for a few active relations
+    const sample = familyAccessQuery.docs.slice(0, 5);
+    for (const d of sample) {
+      const data = d.data();
+      if (!data.patientId || !data.familyMemberId) continue;
+      const [patientDoc, fmDoc] = await Promise.all([
+        firestore.collection('users').doc(data.patientId).get(),
+        firestore.collection('users').doc(data.familyMemberId).get(),
+      ]);
+      const patient = patientDoc.data() || {};
+      const fm = fmDoc.data() || {};
+      const patientHas = Array.isArray(patient.familyMemberIds) && patient.familyMemberIds.includes(d.data().familyMemberId);
+      const fmHas = Array.isArray(fm.linkedPatientIds) && fm.linkedPatientIds.includes(d.data().patientId);
+      console.log(`   - Check ${d.id}: patientHas=${patientHas}, familyMemberHas=${fmHas}, primaryPatientId=${fm.primaryPatientId || 'n/a'}`);
+    }
     
     if (selfReferentialCount > 0 || duplicateCount > 0) {
       console.log('\n🔧 RECOMMENDED ACTIONS:');

@@ -3,6 +3,7 @@ import { authenticateToken } from '../middleware/auth';
 import { familyAccessService } from '../services/familyAccessService';
 import { patientService } from '../services/patientService';
 import { userService } from '../services/userService';
+import { adminDb } from '../firebase-admin';
 import type { FamilyCalendarAccess } from '@shared/types';
 
 const router = Router();
@@ -250,33 +251,51 @@ router.post('/decline/:token', authenticateToken, async (req, res) => {
   }
 });
 
-// Get family access for current user (both as patient and family member)
+// Enhanced family access endpoint with comprehensive fallbacks
 router.get('/family-access', authenticateToken, async (req, res) => {
   try {
     const userId = req.user!.uid;
+    const userEmail = req.user!.email;
     
-    // Get family access where user is a family member
-    const familyMemberAccess = await familyAccessService.getFamilyAccessByMemberId(userId);
+    console.log('🔍 Enhanced Family Access API: Starting comprehensive query', {
+      userId,
+      userEmail
+    });
     
-    // Get user's patient profile to check for family members who have access to them
-    const userPatient = await patientService.getPatientByUserId(userId);
-    let patientFamilyAccess: { success: boolean; data?: FamilyCalendarAccess[] } = { success: true, data: [] };
+    // Use enhanced service with fallbacks
+    const familyMemberAccess = await familyAccessService.getFamilyAccessWithFallbacks(
+      userId,
+      userEmail
+    );
     
-    if (userPatient.success && userPatient.data) {
-      patientFamilyAccess = await familyAccessService.getFamilyAccessByPatientId(userPatient.data.id);
-    }
-
-    // Combine and format the data
+    console.log('📊 Enhanced Family Access Result:', {
+      success: familyMemberAccess.success,
+      recordCount: familyMemberAccess.data?.length || 0,
+      error: familyMemberAccess.error
+    });
+    
+    // Process and format patient access data
     const patientsIHaveAccessTo = [];
-    const familyMembersWithAccessToMe = [];
-
-    // Process patients the user has access to as a family member
+    
     if (familyMemberAccess.success && familyMemberAccess.data) {
       for (const access of familyMemberAccess.data) {
-        // Get patient info
-        const patientUser = await userService.getUserById(access.createdBy);
+        // Get patient user info with multiple fallback strategies
+        let patientUser = await userService.getUserById(access.createdBy);
+        
+        // Fallback 1: try patientUserId if createdBy fails
+        if (!patientUser.success && (access as any).patientUserId) {
+          console.log('🔄 Trying patientUserId fallback');
+          patientUser = await userService.getUserById((access as any).patientUserId);
+        }
+        
+        // Fallback 2: try patientId directly
+        if (!patientUser.success) {
+          console.log('🔄 Trying patientId fallback');
+          patientUser = await userService.getUserById(access.patientId);
+        }
+        
         if (patientUser.success && patientUser.data) {
-          patientsIHaveAccessTo.push({
+          const patientAccess = {
             id: access.id,
             patientId: access.patientId,
             patientName: patientUser.data.name,
@@ -285,51 +304,123 @@ router.get('/family-access', authenticateToken, async (req, res) => {
             permissions: access.permissions,
             status: access.status,
             acceptedAt: access.acceptedAt,
-            relationship: 'family_member' // User is a family member of this patient
-          });
+            lastAccessAt: access.lastAccessAt,
+            isEmergencyAccess: access.emergencyAccess || false,
+            connectionVerified: (access as any).connectionVerified || false,
+            relationship: 'family_member'
+          };
+          
+          patientsIHaveAccessTo.push(patientAccess);
+          console.log(`✅ Added patient access: ${patientUser.data.name}`);
+        } else {
+          console.log(`❌ Failed to resolve patient info for access: ${access.id}`);
         }
       }
     }
-
-    // Process family members who have access to the current user as a patient
-    if (patientFamilyAccess.success && patientFamilyAccess.data) {
-      for (const access of patientFamilyAccess.data.filter(a => a.status === 'active')) {
-        // Get family member info
-        if (access.familyMemberId) {
-          const familyMemberUser = await userService.getUserById(access.familyMemberId);
-          if (familyMemberUser.success && familyMemberUser.data) {
-            familyMembersWithAccessToMe.push({
-              id: access.id,
-              familyMemberId: access.familyMemberId,
-              familyMemberName: familyMemberUser.data.name,
-              familyMemberEmail: familyMemberUser.data.email,
-              accessLevel: access.accessLevel,
-              permissions: access.permissions,
-              status: access.status,
-              acceptedAt: access.acceptedAt,
-              relationship: 'patient' // User is the patient, this person is their family member
-            });
-          }
-        }
-      }
+    
+    // Update user's family member metadata if we found patient access
+    if (patientsIHaveAccessTo.length > 0) {
+      await updateUserFamilyMetadata(userId, patientsIHaveAccessTo);
     }
-
-    res.json({
+    
+    // Get family members who have access to current user (existing logic)
+    const familyMembersWithAccessToMe = await getFamilyMembersWithAccessToMe(userId);
+    
+    const result = {
       success: true,
       data: {
         patientsIHaveAccessTo,
         familyMembersWithAccessToMe,
-        totalConnections: patientsIHaveAccessTo.length + familyMembersWithAccessToMe.length
+        totalConnections: patientsIHaveAccessTo.length + familyMembersWithAccessToMe.length,
+        debugInfo: {
+          userId,
+          userEmail,
+          queryMethod: familyMemberAccess.data?.[0]?.repairReason || 'primary_query',
+          timestamp: new Date().toISOString()
+        }
       }
+    };
+    
+    console.log('✅ Enhanced Family Access API: Final result:', {
+      patientsIHaveAccessTo: patientsIHaveAccessTo.length,
+      familyMembersWithAccessToMe: familyMembersWithAccessToMe.length,
+      totalConnections: result.data.totalConnections
     });
-
+    
+    res.json(result);
+    
   } catch (error) {
-    console.error('Error getting family access:', error);
+    console.error('❌ Enhanced Family Access API: Critical error:', error);
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: 'Internal server error',
+      debugInfo: {
+        timestamp: new Date().toISOString(),
+        errorMessage: error instanceof Error ? error.message : 'Unknown error'
+      }
     });
   }
 });
+
+// Helper function to update user family metadata
+async function updateUserFamilyMetadata(
+  userId: string,
+  patientsWithAccess: any[]
+): Promise<void> {
+  try {
+    const userRef = adminDb.collection('users').doc(userId);
+    const updateData = {
+      familyMemberOf: patientsWithAccess.map(p => p.patientId),
+      primaryPatientId: patientsWithAccess[0]?.patientId,
+      lastFamilyAccessCheck: new Date(),
+      updatedAt: new Date()
+    };
+    
+    await userRef.update(updateData);
+    console.log('✅ Updated user family metadata:', userId);
+  } catch (error) {
+    console.error('❌ Failed to update user family metadata:', error);
+  }
+}
+
+// Helper function to get family members with access to current user
+async function getFamilyMembersWithAccessToMe(userId: string): Promise<any[]> {
+  try {
+    const familyMembersWithAccessToMe = [];
+    
+    // Get user's patient profile to check for family members who have access to them
+    const userPatient = await patientService.getPatientByUserId(userId);
+    
+    if (userPatient.success && userPatient.data) {
+      const patientFamilyAccess = await familyAccessService.getFamilyAccessByPatientId(userPatient.data.id);
+      
+      if (patientFamilyAccess.success && patientFamilyAccess.data) {
+        for (const access of patientFamilyAccess.data.filter(a => a.status === 'active')) {
+          if (access.familyMemberId) {
+            const familyMemberUser = await userService.getUserById(access.familyMemberId);
+            if (familyMemberUser.success && familyMemberUser.data) {
+              familyMembersWithAccessToMe.push({
+                id: access.id,
+                familyMemberId: access.familyMemberId,
+                familyMemberName: familyMemberUser.data.name,
+                familyMemberEmail: familyMemberUser.data.email,
+                accessLevel: access.accessLevel,
+                permissions: access.permissions,
+                status: access.status,
+                acceptedAt: access.acceptedAt,
+                relationship: 'patient'
+              });
+            }
+          }
+        }
+      }
+    }
+    
+    return familyMembersWithAccessToMe;
+  } catch (error) {
+    console.error('❌ Error getting family members with access:', error);
+    return [];
+  }
+}
 
 export default router;

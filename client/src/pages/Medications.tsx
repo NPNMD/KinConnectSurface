@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useFamily } from '@/contexts/FamilyContext';
 import {
   Heart,
   ArrowLeft,
@@ -27,9 +28,16 @@ import MedicationReminders from '@/components/MedicationReminders';
 import UnifiedMedicationView from '@/components/UnifiedMedicationView';
 import TimeBucketView from '@/components/TimeBucketView';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import PatientSwitcher from '@/components/PatientSwitcher';
+import { CreatePermissionWrapper, EditPermissionWrapper } from '@/components/PermissionWrapper';
 
 export default function Medications() {
-  const { user, firebaseUser } = useAuth();
+  const {
+    getEffectivePatientId,
+    userRole,
+    activePatientAccess,
+    hasPermission
+  } = useFamily();
   const [medications, setMedications] = useState<Medication[]>([]);
   const [isLoadingMedications, setIsLoadingMedications] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -43,9 +51,14 @@ export default function Medications() {
     async () => {
       try {
         setIsLoadingMedications(true);
-        const response = await apiClient.get<{ success: boolean; data: Medication[] }>(
-          API_ENDPOINTS.MEDICATIONS
-        );
+        const effectivePatientId = getEffectivePatientId();
+        if (!effectivePatientId) return;
+        
+        const endpoint = userRole === 'family_member'
+          ? API_ENDPOINTS.MEDICATIONS_FOR_PATIENT(effectivePatientId)
+          : API_ENDPOINTS.MEDICATIONS;
+        
+        const response = await apiClient.get<{ success: boolean; data: Medication[] }>(endpoint);
         
         if (response.success && response.data) {
           // Parse date strings back to Date objects
@@ -79,10 +92,11 @@ export default function Medications() {
 
   // Load medications on component mount
   useEffect(() => {
-    if (user?.id) {
+    const effectivePatientId = getEffectivePatientId();
+    if (effectivePatientId) {
       loadMedications();
     }
-  }, [user?.id]);
+  }, [getEffectivePatientId()]);
 
   // Listen for medication schedule updates with debounced refresh
   useEffect(() => {
@@ -254,7 +268,7 @@ export default function Medications() {
             <div className="bg-white rounded-lg border border-gray-200 p-4">
               {useTimeBuckets ? (
                 <TimeBucketView
-                  patientId={user?.id || firebaseUser?.uid || ''}
+                  patientId={getEffectivePatientId() || ''}
                   date={new Date()}
                   onMedicationAction={(eventId, action) => {
                     console.log('Medication action performed:', { eventId, action });
@@ -269,7 +283,7 @@ export default function Medications() {
                 />
               ) : (
                 <MedicationReminders
-                  patientId={user?.id || firebaseUser?.uid || ''}
+                  patientId={getEffectivePatientId() || ''}
                   maxItems={5}
                 />
               )}
@@ -318,9 +332,9 @@ export default function Medications() {
         {/* Unified Medications View with Management */}
         <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
           <UnifiedMedicationView
-            patientId={user?.id || firebaseUser?.uid || ''}
+            patientId={getEffectivePatientId() || ''}
             medications={filteredMedications}
-            showCreateScheduleButton={true}
+            showCreateScheduleButton={hasPermission('canCreate')}
             onScheduleCreated={() => {
               // Use debounced refresh and dispatch event
               setTimeout(() => {
@@ -332,16 +346,29 @@ export default function Medications() {
         </div>
 
         {/* Medications Manager */}
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <MedicationManager
-            patientId={user?.id || ''}
-            medications={filteredMedications}
-            onAddMedication={handleAddMedication}
-            onUpdateMedication={handleUpdateMedication}
-            onDeleteMedication={handleDeleteMedication}
-            isLoading={isLoadingMedications}
-          />
-        </div>
+        {hasPermission('canEdit') ? (
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <MedicationManager
+              patientId={getEffectivePatientId() || ''}
+              medications={filteredMedications}
+              onAddMedication={handleAddMedication}
+              onUpdateMedication={handleUpdateMedication}
+              onDeleteMedication={handleDeleteMedication}
+              isLoading={isLoadingMedications}
+            />
+          </div>
+        ) : (
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="text-center py-8">
+              <Pill className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">View-Only Access</h3>
+              <p className="text-gray-600 text-sm">
+                You have view-only access to {activePatientAccess?.patientName}'s medications.
+                Contact them to request edit permissions if needed.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Quick Stats */}
         <div className="mt-6 grid grid-cols-2 gap-4">

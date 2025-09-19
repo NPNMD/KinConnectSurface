@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Heart, Pill, Calendar, User, Users } from 'lucide-react';
-import { PatientInvitation } from '@/components/PatientInvitation';
+import UnifiedFamilyInvitation from '@/components/UnifiedFamilyInvitation';
 
 export default function InvitePatient() {
   return (
@@ -36,7 +36,8 @@ export default function InvitePatient() {
         </div>
 
         <div className="flex justify-center">
-          <PatientInvitation 
+          <UnifiedFamilyInvitation
+            mode="simple"
             onInvitationSent={() => {
               // Could redirect or show success message
               console.log('Invitation sent successfully!');

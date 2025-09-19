@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Heart, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useFamily } from '@/contexts/FamilyContext';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
 
@@ -21,6 +22,7 @@ export default function AcceptInvitation() {
   const { invitationId: invitationToken } = useParams<{ invitationId: string }>();
   const navigate = useNavigate();
   const { isAuthenticated, firebaseUser } = useAuth();
+  const { refreshFamilyAccess } = useFamily();
   
   const [invitation, setInvitation] = useState<InvitationData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,6 +71,10 @@ export default function AcceptInvitation() {
       );
 
       setSuccess(true);
+      
+      // Refresh family access to get the new patient relationship
+      await refreshFamilyAccess();
+      
       setTimeout(() => {
         navigate('/dashboard');
       }, 3000);
@@ -112,8 +118,8 @@ export default function AcceptInvitation() {
           <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Welcome to the Family!</h1>
           <p className="text-gray-600 mb-6">
-            You've successfully joined {invitation?.inviterName}'s care network. 
-            Redirecting to your dashboard...
+            You've successfully joined {invitation?.inviterName}'s care network.
+            Redirecting to {invitation?.patientName}'s dashboard...
           </p>
           <LoadingSpinner />
         </div>
@@ -201,7 +207,7 @@ export default function AcceptInvitation() {
                 Please sign in to accept this invitation and join the care network.
               </p>
               <button
-                onClick={() => navigate('/')}
+                onClick={() => navigate(`/family-invite/${invitationToken}`)}
                 className="bg-blue-600 text-white px-8 py-3 rounded-md hover:bg-blue-700 font-medium"
               >
                 Sign In to Accept
@@ -266,7 +272,7 @@ export default function AcceptInvitation() {
               <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
                 <span className="text-blue-600 font-bold text-xs">3</span>
               </div>
-              <p>Access your personalized dashboard to manage your health information</p>
+              <p>Access {invitation?.patientName}'s dashboard to view and manage their health information</p>
             </div>
           </div>
         </div>

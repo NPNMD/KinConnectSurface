@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { FamilyProvider } from '@/contexts/FamilyContext';
 import Landing from '@/pages/Landing';
 import Dashboard from '@/pages/Dashboard';
 import PatientProfile from '@/pages/PatientProfile';
@@ -9,6 +10,8 @@ import Medications from '@/pages/Medications';
 import CalendarPage from '@/pages/CalendarPage';
 import InvitePatient from '@/pages/InvitePatient';
 import AcceptInvitation from '@/pages/AcceptInvitation';
+import FamilyMemberAuth from '@/pages/FamilyMemberAuth';
+import TestFamilyInviteFlow from '@/pages/TestFamilyInviteFlow';
 import VisitSummaryDetail from '@/pages/VisitSummaryDetail';
 import VisitSummaries from '@/pages/VisitSummaries';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -98,6 +101,7 @@ function AppRoutes() {
       {/* Development test routes - bypass authentication */}
       <Route path="/test-dashboard" element={<Dashboard />} />
       <Route path="/test-landing" element={<Landing />} />
+      <Route path="/test-family-invite-flow" element={<TestFamilyInviteFlow />} />
       
       {/* Protected routes */}
       <Route path="/dashboard" element={
@@ -143,7 +147,8 @@ function AppRoutes() {
         </ProtectedRoute>
       } />
       
-      {/* Public invitation acceptance route */}
+      {/* Family member invitation routes */}
+      <Route path="/family-invite/:invitationId" element={<FamilyMemberAuth />} />
       <Route path="/invitation/:invitationId" element={<AcceptInvitation />} />
       
       {/* Legacy invitation route - redirect to new format */}
@@ -164,12 +169,14 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <Router>
-          <div className="min-h-screen bg-gray-50">
-            <AppRoutes />
-            <ServiceWorkerUpdate />
-          </div>
-        </Router>
+        <FamilyProvider>
+          <Router>
+            <div className="min-h-screen bg-gray-50">
+              <AppRoutes />
+              <ServiceWorkerUpdate />
+            </div>
+          </Router>
+        </FamilyProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

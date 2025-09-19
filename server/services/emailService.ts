@@ -174,7 +174,7 @@ export class EmailService {
     invitationToken: string;
     permissions: string[];
   }): EmailTemplate {
-    const acceptUrl = `${process.env.VITE_API_URL || 'https://claritystream-uldp9.web.app'}/invitation/${invitation.invitationToken}`;
+    const acceptUrl = `${process.env.VITE_API_URL || 'https://claritystream-uldp9.web.app'}/family-invite/${invitation.invitationToken}`;
     
     const subject = `${invitation.patientName} has invited you to access their medical calendar`;
     

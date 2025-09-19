@@ -5,6 +5,24 @@ export interface User {
   name: string;
   profilePicture?: string;
   userType: 'patient' | 'family_member' | 'caregiver' | 'healthcare_provider';
+  
+  // Enhanced family member fields
+  primaryPatientId?: string;           // Primary patient this family member manages
+  familyMemberOf?: string[];           // Array of all patient IDs they have access to
+  
+  // Family member metadata
+  familyRole?: 'primary_caregiver' | 'family_member' | 'emergency_contact';
+  preferredPatientId?: string;         // Last active patient for quick switching
+  
+  // Debugging and monitoring
+  lastFamilyAccessCheck?: Date;        // Last successful family access query
+  familyAccessIssues?: string[];       // Array of recent access issues
+  invitationHistory?: {                // Track invitation acceptance history
+    invitationId: string;
+    acceptedAt: Date;
+    patientId: string;
+  }[];
+  
   createdAt: Date;
   updatedAt: Date;
 }
@@ -1032,6 +1050,18 @@ export interface FamilyCalendarAccess {
   // Invitation System
   invitationToken?: string; // Token for accepting invitations
   invitationExpiresAt?: Date; // When invitation expires
+  
+  // Enhanced fields for reliability and debugging
+  patientUserId?: string;              // Direct reference to patient's user ID
+  repairedAt?: Date;                   // When auto-repair was performed
+  repairReason?: string;               // Why repair was needed
+  repairCount?: number;                // Number of times repaired
+  lastQueryAt?: Date;                  // Last time this record was queried
+  queryFailures?: number;              // Count of failed queries
+  connectionVerified?: boolean;        // Whether connection has been verified
+  lastVerificationAt?: Date;           // Last verification timestamp
+  rollbackAt?: Date;                   // When rollback was performed
+  rollbackReason?: string;             // Why rollback was needed
   
   // Status and Audit
   status: 'active' | 'suspended' | 'revoked' | 'pending' | 'expired';

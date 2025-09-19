@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Calendar, Plus, Clock, MapPin, User, Stethoscope, AlertCircle, CheckCircle, Users, Car, Settings, ChevronLeft, ChevronRight, Search, Filter, Download, Share2, BarChart3, FileText } from 'lucide-react';
 import HealthcareProviderSearch from './HealthcareProviderSearch';
-import FamilyAccessControls from './FamilyAccessControls';
+import UnifiedFamilyInvitation from './UnifiedFamilyInvitation';
 import FamilyResponsibilityDashboard from './FamilyResponsibilityDashboard';
 import NotificationSystem from './NotificationSystem';
 import CalendarAnalytics from './CalendarAnalytics';
@@ -488,7 +488,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
       };
 
       // Save event to API
-      const response = await apiClient.post<{ success: boolean; data: MedicalEvent }>(
+      const response = await apiClient.post<{ success: boolean; data: MedicalEvent; message?: string }>(
         API_ENDPOINTS.MEDICAL_EVENT_CREATE,
         eventData
       );
@@ -2186,9 +2186,14 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
-              <FamilyAccessControls
+              <UnifiedFamilyInvitation
+                mode="advanced"
                 patientId={patientId}
                 onClose={() => setShowFamilyControls(false)}
+                onInvitationSent={() => {
+                  console.log('Family invitation sent from calendar');
+                  setShowFamilyControls(false);
+                }}
               />
             </div>
           </div>

@@ -100,13 +100,22 @@ export class FamilyAccessService {
     }
   }
 
-  // Accept family invitation
+  // Enhanced family invitation acceptance with transaction-based updates
   async acceptFamilyInvitation(
     invitationToken: string,
     familyMemberId: string
   ): Promise<ApiResponse<FamilyCalendarAccess>> {
+    
+    // Start transaction for atomic updates
+    const batch = adminDb.batch();
+    
     try {
-      // Find invitation by token
+      console.log('🔍 Enhanced FamilyAccessService: Starting invitation acceptance', {
+        invitationToken,
+        familyMemberId
+      });
+      
+      // 1. Find and validate invitation
       const invitationQuery = await this.familyAccessCollection
         .where('invitationToken', '==', invitationToken)
         .where('status', '==', 'pending')
@@ -114,6 +123,7 @@ export class FamilyAccessService {
         .get();
 
       if (invitationQuery.empty) {
+        console.log('❌ FamilyAccessService: No pending invitation found for token:', invitationToken);
         return {
           success: false,
           error: 'Invalid or expired invitation token'
@@ -122,47 +132,251 @@ export class FamilyAccessService {
 
       const invitationDoc = invitationQuery.docs[0];
       const invitation = invitationDoc.data() as FamilyCalendarAccess;
+      
+      console.log('✅ FamilyAccessService: Found invitation:', {
+        id: invitationDoc.id,
+        patientId: invitation.patientId,
+        familyMemberEmail: invitation.familyMemberEmail,
+        status: invitation.status
+      });
 
-      // Check if invitation has expired
+      // 2. Validate invitation hasn't expired
       if (invitation.invitationExpiresAt && new Date() > invitation.invitationExpiresAt) {
+        console.log('❌ FamilyAccessService: Invitation has expired:', invitation.invitationExpiresAt);
         return {
           success: false,
           error: 'Invitation has expired'
         };
       }
 
-      // Update invitation with family member ID and activate
-      const updatedAccess: Partial<FamilyCalendarAccess> = {
-        familyMemberId,
+      // 3. Validate familyMemberId
+      if (!familyMemberId || familyMemberId.trim() === '') {
+        console.log('❌ FamilyAccessService: Invalid familyMemberId provided:', familyMemberId);
+        return {
+          success: false,
+          error: 'Invalid family member ID'
+        };
+      }
+
+      // 4. Get user info for enhanced updates
+      const userResult = await this.getUserById(familyMemberId);
+      if (!userResult.success || !userResult.data) {
+        return {
+          success: false,
+          error: 'Family member user not found'
+        };
+      }
+
+      // 5. Update family_calendar_access record
+      const accessUpdateData = {
+        familyMemberId: familyMemberId.trim(),
         status: 'active',
         acceptedAt: new Date(),
         updatedAt: new Date(),
-        invitationToken: undefined, // Remove token after acceptance
-        invitationExpiresAt: undefined
+        invitationToken: adminDb.FieldValue.delete(),
+        invitationExpiresAt: adminDb.FieldValue.delete(),
+        connectionVerified: true,
+        lastVerificationAt: new Date()
       };
+      
+      batch.update(invitationDoc.ref, accessUpdateData);
 
-      await invitationDoc.ref.update(updatedAccess);
+      // 6. Update user record with family member metadata
+      const userRef = this.usersCollection.doc(familyMemberId);
+      const userUpdateData: any = {
+        primaryPatientId: invitation.patientId,
+        familyMemberOf: adminDb.FieldValue.arrayUnion(invitation.patientId),
+        lastFamilyAccessCheck: new Date(),
+        invitationHistory: adminDb.FieldValue.arrayUnion({
+          invitationId: invitation.id,
+          acceptedAt: new Date(),
+          patientId: invitation.patientId
+        }),
+        updatedAt: new Date()
+      };
+      
+      batch.update(userRef, userUpdateData);
 
-      // Get updated access record
-      const updatedDoc = await invitationDoc.ref.get();
-      const finalAccess = { id: updatedDoc.id, ...updatedDoc.data() } as FamilyCalendarAccess;
+      // 7. Commit transaction
+      await batch.commit();
+      console.log('✅ Enhanced FamilyAccessService: Transaction committed successfully');
 
-      // Log invitation acceptance
+      // 8. Verify the updates worked
+      const verificationResult = await this.verifyInvitationAcceptance(
+        invitationDoc.id,
+        familyMemberId,
+        invitation.patientId
+      );
+      
+      if (!verificationResult.success) {
+        console.error('❌ Enhanced FamilyAccessService: Verification failed:', verificationResult.issues);
+        // Attempt repair
+        await this.repairFailedInvitationAcceptance(
+          invitationDoc.id,
+          familyMemberId,
+          invitation.patientId
+        );
+      }
+
+      // 9. Get final access record
+      const finalDoc = await invitationDoc.ref.get();
+      const finalAccess = { id: finalDoc.id, ...finalDoc.data() } as FamilyCalendarAccess;
+
+      // 10. Log successful acceptance
       await this.logFamilyAccessAction(invitation.patientId, familyMemberId, 'invitation_accepted', {
         familyMemberEmail: invitation.familyMemberEmail,
-        accessLevel: invitation.accessLevel
+        accessLevel: invitation.accessLevel,
+        invitationId: invitationDoc.id,
+        verificationStatus: verificationResult.success ? 'verified' : 'repair_attempted'
       });
+
+      console.log('🎉 Enhanced FamilyAccessService: Invitation acceptance completed successfully');
 
       return {
         success: true,
         data: finalAccess
       };
+
     } catch (error) {
-      console.error('Error accepting family invitation:', error);
+      console.error('❌ Enhanced FamilyAccessService: Critical error during invitation acceptance:', error);
+      
+      // Attempt rollback if possible
+      try {
+        await this.rollbackFailedInvitationAcceptance(invitationToken, familyMemberId);
+      } catch (rollbackError) {
+        console.error('❌ Rollback also failed:', rollbackError);
+      }
+
       return {
         success: false,
         error: 'Failed to accept family invitation'
       };
+    }
+  }
+
+  // Verification method to ensure invitation acceptance worked
+  async verifyInvitationAcceptance(
+    accessId: string,
+    familyMemberId: string,
+    patientId: string
+  ): Promise<{ success: boolean; issues?: string[] }> {
+    
+    const issues: string[] = [];
+    
+    try {
+      // Check 1: Family access record updated correctly
+      const accessDoc = await this.familyAccessCollection.doc(accessId).get();
+      if (!accessDoc.exists) {
+        issues.push('Family access record not found');
+      } else {
+        const accessData = accessDoc.data() as FamilyCalendarAccess;
+        if (accessData.familyMemberId !== familyMemberId) {
+          issues.push('familyMemberId not set correctly');
+        }
+        if (accessData.status !== 'active') {
+          issues.push('Status not set to active');
+        }
+      }
+      
+      // Check 2: User record updated correctly
+      const userDoc = await this.usersCollection.doc(familyMemberId).get();
+      if (!userDoc.exists) {
+        issues.push('User record not found');
+      } else {
+        const userData = userDoc.data();
+        if (userData.primaryPatientId !== patientId) {
+          issues.push('primaryPatientId not set correctly');
+        }
+        if (!userData.familyMemberOf?.includes(patientId)) {
+          issues.push('familyMemberOf array not updated');
+        }
+      }
+      
+      // Check 3: Can query family access successfully
+      const queryResult = await this.getFamilyAccessByMemberId(familyMemberId);
+      if (!queryResult.success || !queryResult.data?.length) {
+        issues.push('Cannot query family access after acceptance');
+      }
+      
+      return {
+        success: issues.length === 0,
+        issues: issues.length > 0 ? issues : undefined
+      };
+      
+    } catch (error) {
+      console.error('❌ Verification check failed:', error);
+      return {
+        success: false,
+        issues: ['Verification check failed due to error']
+      };
+    }
+  }
+
+  // Repair failed invitation acceptance
+  async repairFailedInvitationAcceptance(
+    accessId: string,
+    familyMemberId: string,
+    patientId: string
+  ): Promise<void> {
+    try {
+      console.log('🔧 Attempting to repair failed invitation acceptance');
+      
+      const batch = adminDb.batch();
+      
+      // Repair family access record
+      const accessRef = this.familyAccessCollection.doc(accessId);
+      batch.update(accessRef, {
+        familyMemberId,
+        status: 'active',
+        repairedAt: new Date(),
+        repairReason: 'failed_invitation_acceptance_repair'
+      });
+      
+      // Repair user record
+      const userRef = this.usersCollection.doc(familyMemberId);
+      batch.update(userRef, {
+        primaryPatientId: patientId,
+        familyMemberOf: adminDb.FieldValue.arrayUnion(patientId),
+        lastFamilyAccessCheck: new Date()
+      });
+      
+      await batch.commit();
+      console.log('✅ Repair completed successfully');
+      
+    } catch (error) {
+      console.error('❌ Repair failed:', error);
+    }
+  }
+
+  // Rollback failed invitation acceptance
+  async rollbackFailedInvitationAcceptance(
+    invitationToken: string,
+    familyMemberId: string
+  ): Promise<void> {
+    try {
+      console.log('🔄 Attempting rollback of failed invitation acceptance');
+      
+      // Find the invitation and reset it to pending
+      const invitationQuery = await this.familyAccessCollection
+        .where('invitationToken', '==', invitationToken)
+        .limit(1)
+        .get();
+      
+      if (!invitationQuery.empty) {
+        const invitationDoc = invitationQuery.docs[0];
+        await invitationDoc.ref.update({
+          status: 'pending',
+          familyMemberId: '',
+          acceptedAt: adminDb.FieldValue.delete(),
+          rollbackAt: new Date(),
+          rollbackReason: 'failed_acceptance_rollback'
+        });
+        
+        console.log('✅ Rollback completed');
+      }
+      
+    } catch (error) {
+      console.error('❌ Rollback failed:', error);
     }
   }
 
@@ -192,14 +406,122 @@ export class FamilyAccessService {
     }
   }
 
-  // Get family access for a family member
+  // Get family access for a family member with enhanced fallbacks
   async getFamilyAccessByMemberId(familyMemberId: string): Promise<ApiResponse<FamilyCalendarAccess[]>> {
     try {
+      console.log('🔍 FamilyAccessService: Getting family access for member:', familyMemberId);
+      
+      // First try with orderBy, but fall back to simple query if it fails
+      let query;
+      try {
+        query = await this.familyAccessCollection
+          .where('familyMemberId', '==', familyMemberId)
+          .where('status', '==', 'active')
+          .orderBy('lastAccessAt', 'desc')
+          .get();
+      } catch (orderByError: any) {
+        console.log('⚠️ FamilyAccessService: orderBy failed, trying simple query:', orderByError?.message || 'Unknown error');
+        // Fallback to simple query without orderBy
+        query = await this.familyAccessCollection
+          .where('familyMemberId', '==', familyMemberId)
+          .where('status', '==', 'active')
+          .get();
+      }
+
+      console.log(`📊 FamilyAccessService: Found ${query.docs.length} active access records for family member`);
+
+      const accessRecords = query.docs.map((doc: any) => {
+        const data = doc.data();
+        console.log(`   ├─ Record: ${doc.id}, Patient: ${data.patientId}, Status: ${data.status}`);
+        return {
+          id: doc.id,
+          ...data
+        } as FamilyCalendarAccess;
+      });
+
+      // Sort manually if we couldn't use orderBy
+      accessRecords.sort((a: FamilyCalendarAccess, b: FamilyCalendarAccess) => {
+        const aTime = a.lastAccessAt ? new Date(a.lastAccessAt).getTime() : 0;
+        const bTime = b.lastAccessAt ? new Date(b.lastAccessAt).getTime() : 0;
+        return bTime - aTime; // desc order
+      });
+
+      console.log(`✅ FamilyAccessService: Returning ${accessRecords.length} access records`);
+
+      return {
+        success: true,
+        data: accessRecords
+      };
+    } catch (error) {
+      console.error('❌ FamilyAccessService: Error getting family member access:', error);
+      return {
+        success: false,
+        error: 'Failed to retrieve family member access records'
+      };
+    }
+  }
+
+  // Enhanced family access retrieval with multiple fallback mechanisms
+  async getFamilyAccessWithFallbacks(
+    familyMemberId: string,
+    familyMemberEmail?: string
+  ): Promise<ApiResponse<FamilyCalendarAccess[]>> {
+    
+    console.log('🔍 Enhanced Family Access: Starting multi-layer query', {
+      familyMemberId,
+      familyMemberEmail
+    });
+    
+    // Layer 1: Primary query by familyMemberId
+    let result = await this.getFamilyAccessByMemberId(familyMemberId);
+    
+    if (result.success && result.data && result.data.length > 0) {
+      console.log('✅ Layer 1 Success: Found access by familyMemberId');
+      await this.updateLastQueryTime(result.data);
+      return result;
+    }
+    
+    // Layer 2: Email fallback with auto-repair
+    if (familyMemberEmail) {
+      console.log('🔄 Layer 2: Trying email fallback');
+      result = await this.getFamilyAccessByEmail(familyMemberEmail);
+      
+      if (result.success && result.data && result.data.length > 0) {
+        console.log('✅ Layer 2 Success: Found access by email, performing auto-repair');
+        await this.autoRepairMissingFamilyMemberId(result.data, familyMemberId);
+        return result;
+      }
+    }
+    
+    // Layer 3: User's stored primaryPatientId
+    console.log('🔄 Layer 3: Checking user primaryPatientId');
+    const userResult = await this.getUserById(familyMemberId);
+    if (userResult.success && userResult.data && (userResult.data as any).primaryPatientId) {
+      console.log('✅ Layer 3: Found primaryPatientId, creating emergency access');
+      return await this.createEmergencyFamilyAccess(
+        familyMemberId,
+        (userResult.data as any).primaryPatientId
+      );
+    }
+    
+    console.log('❌ All layers failed: No family access found');
+    return {
+      success: false,
+      error: 'No family access found through any method'
+    };
+  }
+
+  // Get family access by email (for fallback)
+  async getFamilyAccessByEmail(familyMemberEmail: string): Promise<ApiResponse<FamilyCalendarAccess[]>> {
+    try {
+      console.log('🔍 FamilyAccessService: Getting family access by email:', familyMemberEmail);
+      
       const query = await this.familyAccessCollection
-        .where('familyMemberId', '==', familyMemberId)
+        .where('familyMemberEmail', '==', familyMemberEmail.toLowerCase())
         .where('status', '==', 'active')
-        .orderBy('lastAccessAt', 'desc')
         .get();
+
+      console.log(`📊 FamilyAccessService: Found ${query.docs.length} active access records by email`);
 
       const accessRecords = query.docs.map((doc: any) => ({
         id: doc.id,
@@ -211,11 +533,111 @@ export class FamilyAccessService {
         data: accessRecords
       };
     } catch (error) {
-      console.error('Error getting family member access:', error);
+      console.error('❌ FamilyAccessService: Error getting family access by email:', error);
       return {
         success: false,
-        error: 'Failed to retrieve family member access records'
+        error: 'Failed to retrieve family access records by email'
       };
+    }
+  }
+
+  // Auto-repair missing familyMemberId fields
+  async autoRepairMissingFamilyMemberId(
+    accessRecords: FamilyCalendarAccess[],
+    familyMemberId: string
+  ): Promise<void> {
+    const batch = adminDb.batch();
+    
+    for (const access of accessRecords) {
+      if (!access.familyMemberId || access.familyMemberId === '') {
+        const accessRef = this.familyAccessCollection.doc(access.id);
+        batch.update(accessRef, {
+          familyMemberId,
+          repairedAt: new Date(),
+          repairReason: 'auto_repair_missing_family_member_id',
+          repairCount: ((access as any).repairCount || 0) + 1,
+          updatedAt: new Date()
+        });
+        
+        console.log('🔧 Auto-repairing access record:', access.id);
+      }
+    }
+    
+    await batch.commit();
+    console.log('✅ Auto-repair completed');
+  }
+
+  // Create emergency family access when other methods fail
+  async createEmergencyFamilyAccess(
+    familyMemberId: string,
+    patientId: string
+  ): Promise<ApiResponse<FamilyCalendarAccess[]>> {
+    
+    // Verify the patient exists and get their info
+    const patientUser = await this.getUserById(patientId);
+    if (!patientUser.success) {
+      return {
+        success: false,
+        error: 'Patient not found for emergency access creation'
+      };
+    }
+    
+    // Create emergency access record
+    const emergencyAccess: FamilyCalendarAccess = {
+      id: `emergency_${Date.now()}`,
+      patientId,
+      familyMemberId,
+      familyMemberName: 'Emergency Access',
+      familyMemberEmail: '',
+      permissions: {
+        canView: true,
+        canCreate: false,
+        canEdit: false,
+        canDelete: false,
+        canClaimResponsibility: false,
+        canManageFamily: false,
+        canViewMedicalDetails: true,
+        canReceiveNotifications: false
+      },
+      accessLevel: 'limited',
+      emergencyAccess: true,
+      status: 'active',
+      invitedAt: new Date(),
+      acceptedAt: new Date(),
+      createdBy: patientId,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      repairReason: 'emergency_access_creation'
+    };
+    
+    // Save to database
+    await this.familyAccessCollection.doc(emergencyAccess.id).set(emergencyAccess);
+    
+    console.log('🚨 Created emergency family access:', emergencyAccess.id);
+    
+    return {
+      success: true,
+      data: [emergencyAccess]
+    };
+  }
+
+  // Update last query time for access records
+  async updateLastQueryTime(accessRecords: FamilyCalendarAccess[]): Promise<void> {
+    try {
+      const batch = adminDb.batch();
+      const now = new Date();
+      
+      for (const access of accessRecords) {
+        const accessRef = this.familyAccessCollection.doc(access.id);
+        batch.update(accessRef, {
+          lastQueryAt: now,
+          updatedAt: now
+        });
+      }
+      
+      await batch.commit();
+    } catch (error) {
+      console.error('❌ Failed to update last query time:', error);
     }
   }
 

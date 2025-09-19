@@ -36,13 +36,17 @@ async function getAuthHeaders(): Promise<HeadersInit> {
 class MedicationCalendarApi {
   // ===== MEDICATION SCHEDULE API =====
 
-  // Get medication schedules for the current user
-  async getMedicationSchedules(): Promise<ApiResponse<MedicationSchedule[]>> {
+  // Get medication schedules for a specific patient (or current user if no patientId provided)
+  async getMedicationSchedules(patientId?: string): Promise<ApiResponse<MedicationSchedule[]>> {
     try {
       const headers = await getAuthHeaders();
       
+      const url = patientId
+        ? `${API_BASE}/medication-calendar/schedules?patientId=${patientId}`
+        : `${API_BASE}/medication-calendar/schedules`;
+      
       return await rateLimitedFetch<ApiResponse<MedicationSchedule[]>>(
-        `${API_BASE}/medication-calendar/schedules`,
+        url,
         {
           method: 'GET',
           headers,
@@ -50,7 +54,7 @@ class MedicationCalendarApi {
         },
         {
           priority: 'medium',
-          cacheKey: 'medication_schedules',
+          cacheKey: `medication_schedules_${patientId || 'current'}`,
           cacheTTL: 120000 // 2 minutes
         }
       );
@@ -198,6 +202,7 @@ class MedicationCalendarApi {
     medicationId?: string;
     status?: string;
     forceFresh?: boolean;
+    patientId?: string;
   } = {}): Promise<ApiResponse<MedicationCalendarEvent[]>> {
     try {
       const params = new URLSearchParams();
@@ -213,6 +218,9 @@ class MedicationCalendarApi {
       }
       if (options.status) {
         params.append('status', options.status);
+      }
+      if (options.patientId) {
+        params.append('patientId', options.patientId);
       }
 
       const queryString = params.toString();
@@ -242,7 +250,7 @@ class MedicationCalendarApi {
         },
         {
           priority: 'medium',
-          cacheKey: `calendar_events_${queryString}`,
+          cacheKey: `calendar_events_${options.patientId || 'current'}_${queryString}`,
           cacheTTL: 60000 // 1 minute cache
         }
       );
@@ -468,7 +476,7 @@ class MedicationCalendarApi {
   // Get today's medications organized by time buckets
   async getTodayMedicationBuckets(
     date?: Date,
-    options?: { forceFresh?: boolean }
+    options?: { forceFresh?: boolean; patientId?: string }
   ): Promise<ApiResponse<TodayMedicationBuckets>> {
     try {
       const targetDate = date || new Date();
@@ -476,6 +484,10 @@ class MedicationCalendarApi {
       
       const params = new URLSearchParams();
       params.append('date', targetDate.toISOString().split('T')[0]);
+      
+      if (options?.patientId) {
+        params.append('patientId', options.patientId);
+      }
 
       const url = `${API_BASE}/medication-calendar/events/today-buckets?${params}`;
 
@@ -503,7 +515,7 @@ class MedicationCalendarApi {
         },
         {
           priority: 'high', // High priority for today's medications
-          cacheKey: `today_buckets_${targetDate.toISOString().split('T')[0]}`,
+          cacheKey: `today_buckets_${options?.patientId || 'current'}_${targetDate.toISOString().split('T')[0]}`,
           cacheTTL: 30000 // 30 seconds cache for today's data
         }
       );
@@ -519,10 +531,15 @@ class MedicationCalendarApi {
   // ===== PATIENT PREFERENCES API =====
 
   // Get patient medication timing preferences
-  async getPatientMedicationPreferences(): Promise<ApiResponse<PatientMedicationPreferences>> {
+  async getPatientMedicationPreferences(patientId?: string): Promise<ApiResponse<PatientMedicationPreferences>> {
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_BASE}/patients/preferences/medication-timing`, {
+      
+      const url = patientId
+        ? `${API_BASE}/patients/preferences/medication-timing?patientId=${patientId}`
+        : `${API_BASE}/patients/preferences/medication-timing`;
+      
+      const response = await fetch(url, {
         method: 'GET',
         headers,
         credentials: 'include',
