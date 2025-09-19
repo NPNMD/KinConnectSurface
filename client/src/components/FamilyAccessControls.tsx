@@ -52,6 +52,21 @@ export default function FamilyAccessControls({ patientId, onClose }: FamilyAcces
     loadFamilyMembers();
   }, [patientId]);
 
+  // Listen for family member added events
+  useEffect(() => {
+    const handleFamilyMemberAdded = (event: CustomEvent) => {
+      console.log('🎉 Family member added event received:', event.detail);
+      // Refresh the family members list
+      loadFamilyMembers();
+    };
+
+    window.addEventListener('familyMemberAdded', handleFamilyMemberAdded as EventListener);
+    
+    return () => {
+      window.removeEventListener('familyMemberAdded', handleFamilyMemberAdded as EventListener);
+    };
+  }, []);
+
   const loadFamilyMembers = async () => {
     try {
       setLoading(true);

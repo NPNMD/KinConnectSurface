@@ -552,13 +552,43 @@ export default function Dashboard() {
   );
 
   useEffect(() => {
-    if (firebaseUser && !familyLoading && getEffectivePatientId()) {
+    const effectivePatientId = getEffectivePatientId();
+    console.log('🔍 Dashboard useEffect triggered:', {
+      hasFirebaseUser: !!firebaseUser,
+      familyLoading,
+      effectivePatientId,
+      userRole
+    });
+
+    if (firebaseUser && !familyLoading && effectivePatientId) {
+      console.log('✅ Dashboard: All conditions met, fetching data...');
       // Use smart refresh functions to prevent rapid API calls
       smartFetchVisitSummaries();
       smartFetchTodaysMedications();
       smartFetchAllMedications();
       smartFetchUpcomingAppointments();
+    } else {
+      console.log('⏳ Dashboard: Waiting for conditions to be met');
     }
+  }, [firebaseUser, familyLoading, getEffectivePatientId(), userRole]);
+
+  // Additional effect to handle navigation refresh issues
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && firebaseUser && !familyLoading && getEffectivePatientId()) {
+        console.log('🔄 Dashboard: Page became visible, refreshing data...');
+        smartFetchVisitSummaries();
+        smartFetchTodaysMedications();
+        smartFetchAllMedications();
+        smartFetchUpcomingAppointments();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [firebaseUser, familyLoading, getEffectivePatientId()]);
 
   // Listen for medication schedule updates with debounced refresh

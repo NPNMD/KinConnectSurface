@@ -1,9 +1,15 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Heart, Pill, Calendar, User, Users } from 'lucide-react';
+import { ArrowLeft, Heart, Pill, Calendar, User, Users, Plus } from 'lucide-react';
 import UnifiedFamilyInvitation from '@/components/UnifiedFamilyInvitation';
+import FamilyAccessControls from '@/components/FamilyAccessControls';
+import { useFamily } from '@/contexts/FamilyContext';
 
 export default function InvitePatient() {
+  const { getEffectivePatientId } = useFamily();
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const effectivePatientId = getEffectivePatientId();
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -27,23 +33,51 @@ export default function InvitePatient() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Invite Family Members
-          </h1>
-          <p className="text-gray-600">
-            Send an invitation to family members to help manage your medical care on KinConnect.
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                Family Members
+              </h1>
+              <p className="text-gray-600">
+                Manage your family care network and send invitations to new members.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowInviteForm(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Invite Family Member</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex justify-center">
-          <UnifiedFamilyInvitation
-            mode="simple"
-            onInvitationSent={() => {
-              // Could redirect or show success message
-              console.log('Invitation sent successfully!');
-            }}
-          />
-        </div>
+        {/* Current Family Members */}
+        {effectivePatientId && (
+          <div className="mb-8">
+            <FamilyAccessControls
+              patientId={effectivePatientId}
+            />
+          </div>
+        )}
+
+        {/* Invitation Form Modal */}
+        {showInviteForm && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6">
+                <UnifiedFamilyInvitation
+                  mode="simple"
+                  onInvitationSent={() => {
+                    setShowInviteForm(false);
+                    console.log('Invitation sent successfully!');
+                  }}
+                  onClose={() => setShowInviteForm(false)}
+                />
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Information Section */}
         <div className="mt-12 max-w-4xl mx-auto">

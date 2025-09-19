@@ -75,6 +75,17 @@ export default function AcceptInvitation() {
       // Refresh family access to get the new patient relationship
       await refreshFamilyAccess();
       
+      // Also trigger a refresh for any patients who might be viewing their family list
+      // This ensures the patient sees the new family member immediately
+      window.dispatchEvent(new CustomEvent('familyMemberAdded', {
+        detail: {
+          familyMemberId: firebaseUser.uid,
+          familyMemberName: firebaseUser.displayName || firebaseUser.email,
+          familyMemberEmail: firebaseUser.email,
+          invitationId: invitationToken
+        }
+      }));
+      
       setTimeout(() => {
         navigate('/dashboard');
       }, 3000);

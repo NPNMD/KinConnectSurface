@@ -383,39 +383,75 @@ async function updateUserFamilyMetadata(
   }
 }
 
-// Helper function to get family members with access to current user
+// Enhanced helper function to get family members with access to current user
 async function getFamilyMembersWithAccessToMe(userId: string): Promise<any[]> {
   try {
     const familyMembersWithAccessToMe = [];
     
-    // Get user's patient profile to check for family members who have access to them
-    const userPatient = await patientService.getPatientByUserId(userId);
+    console.log('🔍 Getting family members with access to user:', userId);
     
-    if (userPatient.success && userPatient.data) {
-      const patientFamilyAccess = await familyAccessService.getFamilyAccessByPatientId(userPatient.data.id);
+    // Method 1: Check user's familyMembers array (new approach)
+    const userDoc = await adminDb.collection('users').doc(userId).get();
+    if (userDoc.exists) {
+      const userData = userDoc.data();
+      const familyMembers = userData.familyMembers || [];
       
-      if (patientFamilyAccess.success && patientFamilyAccess.data) {
-        for (const access of patientFamilyAccess.data.filter(a => a.status === 'active')) {
-          if (access.familyMemberId) {
-            const familyMemberUser = await userService.getUserById(access.familyMemberId);
-            if (familyMemberUser.success && familyMemberUser.data) {
-              familyMembersWithAccessToMe.push({
-                id: access.id,
-                familyMemberId: access.familyMemberId,
-                familyMemberName: familyMemberUser.data.name,
-                familyMemberEmail: familyMemberUser.data.email,
-                accessLevel: access.accessLevel,
-                permissions: access.permissions,
-                status: access.status,
-                acceptedAt: access.acceptedAt,
-                relationship: 'patient'
-              });
+      console.log(`📊 Found ${familyMembers.length} family members in user record`);
+      
+      for (const fm of familyMembers) {
+        // Get full user details for the family member
+        const familyMemberUser = await userService.getUserById(fm.familyMemberId);
+        if (familyMemberUser.success && familyMemberUser.data) {
+          familyMembersWithAccessToMe.push({
+            id: `user_record_${fm.familyMemberId}`,
+            familyMemberId: fm.familyMemberId,
+            familyMemberName: familyMemberUser.data.name,
+            familyMemberEmail: familyMemberUser.data.email,
+            accessLevel: fm.accessLevel,
+            permissions: {}, // Will be filled from family_calendar_access if needed
+            status: 'active',
+            acceptedAt: fm.acceptedAt,
+            relationship: fm.relationship || 'family_member',
+            source: 'user_record'
+          });
+        }
+      }
+    }
+    
+    // Method 2: Fallback to family_calendar_access collection (original approach)
+    if (familyMembersWithAccessToMe.length === 0) {
+      console.log('🔄 No family members found in user record, checking family_calendar_access...');
+      
+      const userPatient = await patientService.getPatientByUserId(userId);
+      
+      if (userPatient.success && userPatient.data) {
+        const patientFamilyAccess = await familyAccessService.getFamilyAccessByPatientId(userPatient.data.id);
+        
+        if (patientFamilyAccess.success && patientFamilyAccess.data) {
+          for (const access of patientFamilyAccess.data.filter(a => a.status === 'active')) {
+            if (access.familyMemberId) {
+              const familyMemberUser = await userService.getUserById(access.familyMemberId);
+              if (familyMemberUser.success && familyMemberUser.data) {
+                familyMembersWithAccessToMe.push({
+                  id: access.id,
+                  familyMemberId: access.familyMemberId,
+                  familyMemberName: familyMemberUser.data.name,
+                  familyMemberEmail: familyMemberUser.data.email,
+                  accessLevel: access.accessLevel,
+                  permissions: access.permissions,
+                  status: access.status,
+                  acceptedAt: access.acceptedAt,
+                  relationship: 'family_member',
+                  source: 'family_calendar_access'
+                });
+              }
             }
           }
         }
       }
     }
     
+    console.log(`✅ Returning ${familyMembersWithAccessToMe.length} family members with access`);
     return familyMembersWithAccessToMe;
   } catch (error) {
     console.error('❌ Error getting family members with access:', error);

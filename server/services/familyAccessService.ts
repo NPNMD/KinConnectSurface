@@ -197,15 +197,33 @@ export class FamilyAccessService {
       
       batch.update(userRef, userUpdateData);
 
-      // 7. Commit transaction
+      // 7. Update patient's user record to include new family member
+      const patientUserRef = this.usersCollection.doc(invitation.createdBy);
+      const patientUpdateData: any = {
+        familyMembers: adminDb.FieldValue.arrayUnion({
+          familyMemberId: familyMemberId.trim(),
+          familyMemberName: userResult.data.name,
+          familyMemberEmail: userResult.data.email,
+          accessLevel: invitation.accessLevel,
+          acceptedAt: new Date(),
+          relationship: 'family_member'
+        }),
+        lastFamilyUpdate: new Date(),
+        updatedAt: new Date()
+      };
+      
+      batch.update(patientUserRef, patientUpdateData);
+
+      // 8. Commit transaction
       await batch.commit();
       console.log('✅ Enhanced FamilyAccessService: Transaction committed successfully');
 
-      // 8. Verify the updates worked
+      // 9. Verify the updates worked
       const verificationResult = await this.verifyInvitationAcceptance(
         invitationDoc.id,
         familyMemberId,
-        invitation.patientId
+        invitation.patientId,
+        invitation.createdBy
       );
       
       if (!verificationResult.success) {
@@ -218,17 +236,20 @@ export class FamilyAccessService {
         );
       }
 
-      // 9. Get final access record
+      // 10. Get final access record
       const finalDoc = await invitationDoc.ref.get();
       const finalAccess = { id: finalDoc.id, ...finalDoc.data() } as FamilyCalendarAccess;
 
-      // 10. Log successful acceptance
+      // 11. Log successful acceptance
       await this.logFamilyAccessAction(invitation.patientId, familyMemberId, 'invitation_accepted', {
         familyMemberEmail: invitation.familyMemberEmail,
         accessLevel: invitation.accessLevel,
         invitationId: invitationDoc.id,
         verificationStatus: verificationResult.success ? 'verified' : 'repair_attempted'
       });
+
+      // 12. Notify patient of new family member (optional email notification)
+      await this.notifyPatientOfNewFamilyMember(invitation, userResult.data);
 
       console.log('🎉 Enhanced FamilyAccessService: Invitation acceptance completed successfully');
 
@@ -258,7 +279,8 @@ export class FamilyAccessService {
   async verifyInvitationAcceptance(
     accessId: string,
     familyMemberId: string,
-    patientId: string
+    patientId: string,
+    patientUserId?: string
   ): Promise<{ success: boolean; issues?: string[] }> {
     
     const issues: string[] = [];
@@ -296,6 +318,21 @@ export class FamilyAccessService {
       const queryResult = await this.getFamilyAccessByMemberId(familyMemberId);
       if (!queryResult.success || !queryResult.data?.length) {
         issues.push('Cannot query family access after acceptance');
+      }
+      
+      // Check 4: Patient's user record updated with new family member
+      if (patientUserId) {
+        const patientUserDoc = await this.usersCollection.doc(patientUserId).get();
+        if (patientUserDoc.exists) {
+          const patientUserData = patientUserDoc.data();
+          const familyMembers = patientUserData.familyMembers || [];
+          const hasFamilyMember = familyMembers.some((fm: any) => fm.familyMemberId === familyMemberId);
+          if (!hasFamilyMember) {
+            issues.push('Patient user record not updated with new family member');
+          }
+        } else {
+          issues.push('Patient user record not found');
+        }
       }
       
       return {
@@ -1005,6 +1042,34 @@ export class FamilyAccessService {
       console.log(`Cleaned up ${expiredInvitations.size} expired invitations and ${expiredEmergencyAccess.size} expired emergency access records`);
     } catch (error) {
       console.error('Error cleaning up expired access:', error);
+    }
+  }
+
+  // Notify patient when a new family member joins
+  private async notifyPatientOfNewFamilyMember(
+    invitation: FamilyCalendarAccess,
+    familyMemberUser: User
+  ): Promise<void> {
+    try {
+      // Get patient user info
+      const patientUser = await this.getUserById(invitation.createdBy);
+      if (!patientUser.success || !patientUser.data) {
+        console.log('⚠️ Could not notify patient - patient user not found');
+        return;
+      }
+
+      console.log(`📧 Notifying patient ${patientUser.data.name} of new family member: ${familyMemberUser.name}`);
+      
+      // Log the notification (could also send email here if desired)
+      await this.logFamilyAccessAction(invitation.patientId, invitation.createdBy, 'family_member_joined', {
+        familyMemberName: familyMemberUser.name,
+        familyMemberEmail: familyMemberUser.email,
+        accessLevel: invitation.accessLevel,
+        joinedAt: new Date()
+      });
+
+    } catch (error) {
+      console.error('❌ Failed to notify patient of new family member:', error);
     }
   }
 }
