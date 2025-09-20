@@ -215,7 +215,7 @@ export default function NotificationSystem({ events, patientId }: NotificationSy
 
       {/* Notifications Dropdown */}
       {showNotifications && (
-        <div className="absolute right-0 mt-2 w-80 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-96 overflow-hidden">
+        <div className="absolute right-0 mt-2 w-80 bg-white border border-gray-200 rounded-lg shadow-lg z-[10000] max-h-96 overflow-hidden">
           {/* Header */}
           <div className="p-4 border-b border-gray-200 flex items-center justify-between">
             <h3 className="text-sm font-medium text-gray-900">Notifications</h3>

@@ -855,6 +855,144 @@ class MedicationCalendarApi {
       errors
     };
   }
+
+  // ===== GRACE PERIOD MANAGEMENT API =====
+
+  // Get grace period configuration
+  async getGracePeriodConfig(): Promise<ApiResponse<any>> {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/patients/grace-periods`, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+      });
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching grace period config:', error);
+      return { success: false, error: 'Failed to fetch grace period configuration' };
+    }
+  }
+
+  // Update grace period configuration
+  async updateGracePeriodConfig(config: any): Promise<ApiResponse<any>> {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/patients/grace-periods`, {
+        method: 'PUT',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify(config),
+      });
+      return await response.json();
+    } catch (error) {
+      console.error('Error updating grace period config:', error);
+      return { success: false, error: 'Failed to update grace period configuration' };
+    }
+  }
+
+  // ===== MISSED MEDICATION MANAGEMENT API =====
+
+  // Get missed medications
+  async getMissedMedications(options: {
+    patientId?: string;
+    startDate?: Date;
+    endDate?: Date;
+    limit?: number;
+  } = {}): Promise<ApiResponse<MedicationCalendarEvent[]>> {
+    try {
+      const params = new URLSearchParams();
+      
+      if (options.patientId) params.append('patientId', options.patientId);
+      if (options.startDate) params.append('startDate', options.startDate.toISOString());
+      if (options.endDate) params.append('endDate', options.endDate.toISOString());
+      if (options.limit) params.append('limit', options.limit.toString());
+
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/medication-calendar/missed?${params}`, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+      });
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching missed medications:', error);
+      return { success: false, error: 'Failed to fetch missed medications' };
+    }
+  }
+
+  // Trigger missed medication detection manually
+  async triggerMissedDetection(): Promise<ApiResponse<any>> {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/medication-calendar/detect-missed`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+      });
+      return await response.json();
+    } catch (error) {
+      console.error('Error triggering missed detection:', error);
+      return { success: false, error: 'Failed to trigger missed detection' };
+    }
+  }
+
+  // Mark medication as missed manually
+  async markMedicationAsMissed(eventId: string, reason?: string): Promise<ApiResponse<any>> {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/medication-calendar/events/${eventId}/mark-missed`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({ reason: reason || 'manual_mark' }),
+      });
+      
+      const result = await response.json();
+      
+      // Clear caches on successful update
+      if (result.success) {
+        RateLimitedAPI.clearCache('today_buckets');
+        RateLimitedAPI.clearCache('calendar_events');
+        requestDebouncer.reset();
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('Error marking medication as missed:', error);
+      return { success: false, error: 'Failed to mark medication as missed' };
+    }
+  }
+
+  // Get missed medication statistics
+  async getMissedMedicationStats(options: {
+    patientId?: string;
+    days?: number;
+  } = {}): Promise<ApiResponse<{
+    totalMissed: number;
+    missedByMedication: Array<{ medicationId: string; medicationName: string; count: number }>;
+    missedByTimeSlot: { morning: number; noon: number; evening: number; bedtime: number };
+    averageGracePeriod: number;
+    mostCommonReasons: Array<{ reason: string; count: number }>;
+  }>> {
+    try {
+      const params = new URLSearchParams();
+      
+      if (options.patientId) params.append('patientId', options.patientId);
+      if (options.days) params.append('days', options.days.toString());
+
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/medication-calendar/missed-stats?${params}`, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+      });
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching missed medication statistics:', error);
+      return { success: false, error: 'Failed to fetch missed medication statistics' };
+    }
+  }
 }
 
 // Export singleton instance

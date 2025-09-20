@@ -1461,7 +1461,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
 
       {/* Add Event Form - Mobile Optimized */}
       {showAddEvent && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[10000]">
           <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-4 sm:p-6">
           <div className="flex items-center justify-between mb-4">
@@ -2183,7 +2183,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
 
       {/* Family Access Controls Modal */}
       {showFamilyControls && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[10000]">
           <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <UnifiedFamilyInvitation
@@ -2202,7 +2202,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
 
       {/* Family Responsibility Dashboard Modal */}
       {showResponsibilityDashboard && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[10000]">
           <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <FamilyResponsibilityDashboard
@@ -2217,7 +2217,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
 
       {/* Calendar Analytics Modal */}
       {showAnalytics && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[10000]">
           <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <CalendarAnalytics
@@ -2232,7 +2232,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
 
       {/* Appointment Templates Modal */}
       {showTemplates && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[10000]">
           <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <AppointmentTemplates
@@ -2247,7 +2247,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
 
       {/* Visit Summary Form Modal */}
       {showVisitSummaryForm && selectedEventForSummary && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[10000]">
           <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">

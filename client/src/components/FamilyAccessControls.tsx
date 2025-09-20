@@ -464,7 +464,7 @@ export default function FamilyAccessControls({ patientId, onClose }: FamilyAcces
 
       {/* Edit Member Modal */}
       {editingMember && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[10000]">
           <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <h4 className="text-lg font-medium text-gray-900 mb-4">
               Edit Permissions - {editingMember.name}

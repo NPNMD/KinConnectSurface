@@ -196,7 +196,7 @@ export default function MedicationSearch({
 
       {/* Error message */}
       {error && (
-        <div className="absolute top-full left-0 right-0 mt-1 p-2 bg-red-50 border border-red-200 rounded-md text-sm text-red-600 flex items-center space-x-2 z-50">
+        <div className="absolute top-full left-0 right-0 mt-1 p-2 bg-red-50 border border-red-200 rounded-md text-sm text-red-600 flex items-center space-x-2 z-[10000]">
           <AlertCircle className="h-4 w-4 flex-shrink-0" />
           <span>{error}</span>
         </div>
@@ -204,7 +204,7 @@ export default function MedicationSearch({
 
       {/* Search results dropdown */}
       {isOpen && results.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-64 overflow-y-auto z-50">
+        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-64 overflow-y-auto z-[10000]">
           {results.map((medication, index) => {
             const info = getMedicationDisplayInfo(medication);
             const isSelected = index === selectedIndex;
@@ -279,7 +279,7 @@ export default function MedicationSearch({
 
       {/* No results message */}
       {isOpen && !isLoading && query.trim().length >= 2 && results.length === 0 && !error && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg p-4 text-center text-gray-500 z-50">
+        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg p-4 text-center text-gray-500 z-[10000]">
           <Pill className="h-8 w-8 text-gray-300 mx-auto mb-2" />
           <p className="text-sm">No medications found for "{query}"</p>
           <p className="text-xs text-gray-400 mt-1">

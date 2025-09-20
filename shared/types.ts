@@ -1601,6 +1601,41 @@ export interface PatientMedicationPreferences {
     end: string;
     enabled: boolean;
   };
+  
+  // Grace Period Configuration
+  gracePeriodSettings?: {
+    // Default grace periods by time slot (in minutes)
+    defaultGracePeriods: {
+      morning: number;
+      noon: number;
+      evening: number;
+      bedtime: number;
+    };
+    
+    // Medication-specific overrides
+    medicationOverrides?: Array<{
+      medicationId: string;
+      medicationName: string;
+      gracePeriodMinutes: number;
+      reason: string;
+    }>;
+    
+    // Medication type rules
+    medicationTypeRules?: Array<{
+      medicationType: 'critical' | 'standard' | 'prn' | 'vitamin';
+      gracePeriodMinutes: number;
+    }>;
+    
+    // Special circumstances multipliers
+    weekendMultiplier?: number; // Default 1.5 = 50% longer grace period on weekends
+    holidayMultiplier?: number; // Default 2.0 = 100% longer grace period on holidays
+    sickDayMultiplier?: number; // Default 3.0 = 200% longer grace period when sick
+    
+    // Emergency notification settings
+    emergencyNotificationThreshold?: number; // minutes after grace period to escalate
+    emergencyContacts?: string[]; // family member IDs for critical misses
+  };
+  
   createdAt: Date;
   updatedAt: Date;
 }
@@ -1632,8 +1667,8 @@ export const DEFAULT_TIME_SLOTS = {
   night_shift: {
     morning: { start: '14:00', end: '18:00', defaultTime: '15:00', label: 'Morning' },
     noon: { start: '19:00', end: '22:00', defaultTime: '20:00', label: 'Noon' },
-    evening: { start: '01:00', end: '04:00', defaultTime: '02:00', label: 'Evening' },
-    bedtime: { start: '05:00', end: '08:00', defaultTime: '06:00', label: 'Bedtime' }
+    evening: { start: '23:00', end: '02:00', defaultTime: '00:00', label: 'Late Evening' },
+    bedtime: { start: '06:00', end: '10:00', defaultTime: '08:00', label: 'Morning Sleep' }
   }
 } as const;
 
@@ -2418,6 +2453,195 @@ export const PRN_REASONS = [
   { value: 'fever', label: 'Fever', icon: '🌡️', requiresPainScore: false },
   { value: 'other', label: 'Other reason', icon: '💭', requiresPainScore: false }
 ] as const;
+
+// ===== GRACE PERIOD AND MISSED MEDICATION DETECTION TYPES =====
+
+// Grace Period Configuration Interface
+export interface GracePeriodConfiguration {
+  id: string;
+  patientId: string;
+  medicationId?: string; // null = default for patient
+  
+  // Grace Period Rules
+  gracePeriodMinutes: number;
+  timeOfDayRules?: Array<{
+    timeSlot: 'morning' | 'noon' | 'evening' | 'bedtime';
+    gracePeriodMinutes: number;
+  }>;
+  
+  // Medication-Specific Rules
+  medicationTypeRules?: Array<{
+    medicationType: 'critical' | 'standard' | 'prn' | 'vitamin';
+    gracePeriodMinutes: number;
+  }>;
+  
+  // Special Conditions
+  weekendGracePeriodMinutes?: number;
+  holidayGracePeriodMinutes?: number;
+  
+  // Metadata
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Grace Period Calculation Result
+export interface GracePeriodCalculation {
+  gracePeriodMinutes: number;
+  gracePeriodEnd: Date;
+  appliedRules: string[];
+  ruleDetails: Array<{
+    ruleName: string;
+    ruleType: string;
+    value: number;
+    reason: string;
+  }>;
+  isWeekend: boolean;
+  isHoliday: boolean;
+  finalMultiplier: number;
+}
+
+// Enhanced Medication Calendar Event with grace period tracking
+export interface EnhancedMedicationCalendarEventWithGracePeriod extends EnhancedMedicationCalendarEvent {
+  // Grace Period Tracking
+  gracePeriodMinutes?: number;
+  gracePeriodEnd?: Date;
+  gracePeriodRules?: string[]; // Applied rules for audit
+  
+  // Missed Detection
+  missedAt?: Date;
+  missedReason?: 'automatic_detection' | 'manual_mark' | 'family_report';
+  missedDetectionAttempts?: number;
+  
+  // Compliance Impact
+  adherenceImpact?: number; // -1 to 1 scale
+  complianceFlags?: string[];
+  
+  // Archival Status
+  archivalEligibleAt?: Date;
+  archivalStatus?: 'eligible' | 'archived' | 'retained';
+}
+
+// Default Grace Period Matrix
+export const DEFAULT_GRACE_PERIODS = {
+  critical: {
+    morning: 15,   // Heart meds, diabetes
+    noon: 20,
+    evening: 15,
+    bedtime: 30
+  },
+  standard: {
+    morning: 30,   // Blood pressure, cholesterol
+    noon: 45,
+    evening: 30,
+    bedtime: 60
+  },
+  vitamin: {
+    morning: 120,  // Vitamins, supplements
+    noon: 180,
+    evening: 120,
+    bedtime: 240
+  },
+  prn: {
+    all: 0         // No grace period for as-needed meds
+  }
+} as const;
+
+// Medication Types for grace period classification
+export const MEDICATION_TYPES = [
+  'critical',
+  'standard',
+  'vitamin',
+  'prn'
+] as const;
+
+export type MedicationType = typeof MEDICATION_TYPES[number];
+
+// Missed Medication Detection Result
+export interface MissedMedicationDetectionResult {
+  processed: number;
+  missed: number;
+  errors: string[];
+  detectionTime: Date;
+  batchResults?: Array<{
+    eventId: string;
+    medicationName: string;
+    patientId: string;
+    gracePeriodMinutes: number;
+    gracePeriodEnd: Date;
+    appliedRules: string[];
+  }>;
+}
+
+// Compliance Alert Types
+export interface ComplianceAlert {
+  id: string;
+  patientId: string;
+  alertType: 'adherence_declining' | 'consecutive_missed' | 'pattern_concern' | 'critical_missed';
+  severity: 'info' | 'warning' | 'critical' | 'emergency';
+  
+  // Alert Details
+  title: string;
+  description: string;
+  affectedMedications: Array<{
+    medicationId: string;
+    medicationName: string;
+    currentAdherenceRate: number;
+    missedDoses: number;
+    lastTaken?: Date;
+  }>;
+  
+  // Recommendations
+  recommendations: string[];
+  suggestedActions: Array<{
+    actionType: 'contact_patient' | 'adjust_schedule' | 'provider_consultation';
+    priority: number;
+    description: string;
+  }>;
+  
+  // Notification Status
+  notificationsSent: Array<{
+    recipientType: 'patient' | 'family' | 'provider';
+    recipientId: string;
+    sentAt: Date;
+    method: 'email' | 'sms' | 'push' | 'in_app';
+  }>;
+  
+  // Resolution
+  status: 'active' | 'acknowledged' | 'resolved' | 'escalated';
+  acknowledgedBy?: string;
+  acknowledgedAt?: Date;
+  resolvedAt?: Date;
+  resolutionNotes?: string;
+  
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Medication Event Archive for lifecycle management
+export interface MedicationEventArchive {
+  id: string;
+  originalEventId: string;
+  patientId: string;
+  medicationId: string;
+  
+  // Original Event Data (compressed)
+  eventData: Partial<MedicationCalendarEvent>;
+  
+  // Archival Metadata
+  archivedAt: Date;
+  archivedReason: 'retention_policy' | 'medication_discontinued' | 'manual_archive';
+  originalCreatedAt: Date;
+  originalUpdatedAt: Date;
+  
+  // Retention Information
+  retentionCategory: 'standard' | 'critical' | 'legal_hold';
+  deleteAfter?: Date; // null = permanent retention
+  
+  // Compliance Data (for analytics)
+  finalStatus: 'taken' | 'missed' | 'skipped';
+  adherenceImpact: number; // -1 to 1 scale
+}
 
 export type PRNReason = typeof PRN_REASONS[number]['value'];
 

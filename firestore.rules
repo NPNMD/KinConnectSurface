@@ -291,6 +291,102 @@ service cloud.firestore {
       allow delete: if request.auth != null && resource.data.patientId == request.auth.uid;
     }
     
+    // Grace period configuration - patients can manage their own, family can view
+    match /medication_grace_periods/{patientId} {
+      allow read, write: if request.auth != null && request.auth.uid == patientId;
+      allow read: if request.auth != null &&
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + patientId)).data.status == 'active';
+    }
+    
+    // Medication calendar events - enhanced with grace period fields
+    match /medication_calendar_events/{eventId} {
+      allow read: if request.auth != null && (
+        // Patient owns the event
+        resource.data.patientId == request.auth.uid ||
+        // Family member has access
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active'
+      );
+      
+      allow create: if request.auth != null && (
+        request.resource.data.patientId == request.auth.uid ||
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + request.resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + request.resource.data.patientId)).data.permissions.canCreate == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + request.resource.data.patientId)).data.status == 'active'
+      );
+      
+      allow update: if request.auth != null && (
+        // Patient updates their own events
+        resource.data.patientId == request.auth.uid ||
+        // Family member with edit permissions
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canEdit == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active' ||
+        // System updates for missed detection (cloud functions)
+        request.auth.token.firebase.sign_in_provider == 'custom'
+      );
+      
+      allow delete: if request.auth != null && (
+        resource.data.patientId == request.auth.uid ||
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canDelete == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active'
+      );
+    }
+    
+    // Family notification rules - patients and family members can manage
+    match /family_notification_rules/{ruleId} {
+      allow read, write: if request.auth != null &&
+        (request.auth.uid == resource.data.patientId || request.auth.uid == resource.data.familyMemberId);
+    }
+    
+    // Family notification queue - system managed, read-only for users
+    match /family_notification_queue/{notificationId} {
+      allow read: if request.auth != null &&
+        (request.auth.uid == resource.data.patientId || request.auth.uid == resource.data.familyMemberId);
+      allow create, update: if request.auth.token.firebase.sign_in_provider == 'custom';
+    }
+    
+    // Medication event archive - read-only for users
+    match /medication_event_archive/{archiveId} {
+      allow read: if request.auth != null &&
+        (request.auth.uid == resource.data.patientId ||
+         exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)));
+      allow create, update: if request.auth.token.firebase.sign_in_provider == 'custom';
+    }
+    
+    // Patient medication preferences - enhanced with grace period settings
+    match /patient_medication_preferences/{patientId} {
+      allow read, write: if request.auth != null && request.auth.uid == patientId;
+      allow read: if request.auth != null &&
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + patientId)).data.status == 'active';
+    }
+    
+    // Medication schedules - patients and family can manage
+    match /medication_schedules/{scheduleId} {
+      allow read: if request.auth != null && (
+        resource.data.patientId == request.auth.uid ||
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active'
+      );
+      
+      allow create, update: if request.auth != null && (
+        resource.data.patientId == request.auth.uid ||
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canEdit == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active'
+      );
+      
+      allow delete: if request.auth != null && (
+        resource.data.patientId == request.auth.uid ||
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canDelete == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active'
+      );
+    }
+    
     // Allow authenticated users to read/write their own data by default (fallback)
     match /{document=**} {
       allow read, write: if request.auth != null;

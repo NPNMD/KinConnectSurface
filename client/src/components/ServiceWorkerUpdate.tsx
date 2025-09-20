@@ -37,7 +37,7 @@ export default function ServiceWorkerUpdate() {
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 max-w-sm">
+    <div className="fixed bottom-4 right-4 z-[10000] max-w-sm">
       <div className="bg-white rounded-lg shadow-lg border border-gray-200 p-4">
         <div className="flex items-start space-x-3">
           <div className="flex-shrink-0">

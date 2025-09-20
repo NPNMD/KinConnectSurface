@@ -3404,6 +3404,19 @@ app.put('/patients/preferences/medication-timing', authenticate, async (req, res
 		const patientId = (req as any).user.uid;
 		const updateData = req.body;
 		
+		// Validate time slots if they're being updated
+		if (updateData.timeSlots && updateData.workSchedule) {
+			const validation = validateTimeSlots(updateData.timeSlots, updateData.workSchedule);
+			if (!validation.isValid) {
+				console.error('❌ Invalid time slot configuration in update:', validation.errors);
+				return res.status(400).json({
+					success: false,
+					error: 'Invalid time slot configuration',
+					details: validation.errors
+				});
+			}
+		}
+		
 		const updatePrefs = {
 			...updateData,
 			patientId,
@@ -3438,6 +3451,63 @@ app.put('/patients/preferences/medication-timing', authenticate, async (req, res
 	}
 });
 
+// Validation function for time slot configurations
+function validateTimeSlots(timeSlots: any, workSchedule: string): { isValid: boolean; errors: string[] } {
+	const errors: string[] = [];
+	
+	// Check for the problematic 2 AM default time issue
+	if (workSchedule === 'night_shift') {
+		if (timeSlots.evening?.defaultTime === '02:00') {
+			errors.push('Night shift evening slot should not default to 2 AM - use 00:00 (midnight) instead');
+		}
+		if (timeSlots.evening?.start === '01:00' && timeSlots.evening?.end === '04:00') {
+			errors.push('Night shift evening slot should be 23:00-02:00, not 01:00-04:00');
+		}
+		if (timeSlots.bedtime?.defaultTime === '06:00') {
+			errors.push('Night shift bedtime slot should default to 08:00, not 06:00');
+		}
+	}
+	
+	// Validate time format (HH:MM)
+	const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+	Object.entries(timeSlots).forEach(([slot, config]: [string, any]) => {
+		if (!timeRegex.test(config.start)) {
+			errors.push(`Invalid start time format for ${slot}: ${config.start}`);
+		}
+		if (!timeRegex.test(config.end)) {
+			errors.push(`Invalid end time format for ${slot}: ${config.end}`);
+		}
+		if (!timeRegex.test(config.defaultTime)) {
+			errors.push(`Invalid default time format for ${slot}: ${config.defaultTime}`);
+		}
+	});
+	
+	// Validate that default time is within the slot range
+	Object.entries(timeSlots).forEach(([slot, config]: [string, any]) => {
+		const start = config.start;
+		const end = config.end;
+		const defaultTime = config.defaultTime;
+		
+		// Handle overnight slots (e.g., 23:00-02:00)
+		if (start > end) {
+			// Overnight slot
+			if (!(defaultTime >= start || defaultTime <= end)) {
+				errors.push(`Default time ${defaultTime} for ${slot} is not within range ${start}-${end}`);
+			}
+		} else {
+			// Regular slot
+			if (!(defaultTime >= start && defaultTime <= end)) {
+				errors.push(`Default time ${defaultTime} for ${slot} is not within range ${start}-${end}`);
+			}
+		}
+	});
+	
+	return {
+		isValid: errors.length === 0,
+		errors
+	};
+}
+
 // Reset patient preferences to defaults
 app.post('/patients/preferences/medication-timing/reset-defaults', authenticate, async (req, res) => {
 	try {
@@ -3447,14 +3517,25 @@ app.post('/patients/preferences/medication-timing/reset-defaults', authenticate,
 		const defaultTimeSlots = workSchedule === 'night_shift' ? {
 			morning: { start: '14:00', end: '18:00', defaultTime: '15:00', label: 'Morning' },
 			noon: { start: '19:00', end: '22:00', defaultTime: '20:00', label: 'Noon' },
-			evening: { start: '01:00', end: '04:00', defaultTime: '02:00', label: 'Evening' },
-			bedtime: { start: '05:00', end: '08:00', defaultTime: '06:00', label: 'Bedtime' }
+			evening: { start: '23:00', end: '02:00', defaultTime: '00:00', label: 'Late Evening' },
+			bedtime: { start: '06:00', end: '10:00', defaultTime: '08:00', label: 'Morning Sleep' }
 		} : {
 			morning: { start: '06:00', end: '10:00', defaultTime: '07:00', label: 'Morning' },
 			noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Noon' },
 			evening: { start: '17:00', end: '20:00', defaultTime: '18:00', label: 'Evening' },
 			bedtime: { start: '21:00', end: '23:59', defaultTime: '22:00', label: 'Bedtime' }
 		};
+		
+		// Validate the time slots configuration
+		const validation = validateTimeSlots(defaultTimeSlots, workSchedule);
+		if (!validation.isValid) {
+			console.error('❌ Invalid time slot configuration:', validation.errors);
+			return res.status(400).json({
+				success: false,
+				error: 'Invalid time slot configuration',
+				details: validation.errors
+			});
+		}
 		
 		const defaultPrefs = {
 			patientId,
@@ -7544,6 +7625,306 @@ export const api = functions
 		secrets: [sendgridApiKey, googleAIApiKey]
 	})
 	.https.onRequest(app);
+
+// ===== MISSED MEDICATION DETECTION SCHEDULED FUNCTION =====
+
+// Import the missed medication detector
+import { MissedMedicationDetector } from './services/missedMedicationDetector';
+import { GracePeriodEngine } from './services/gracePeriodEngine';
+
+// Scheduled function to detect missed medications (runs every 15 minutes)
+export const detectMissedMedications = functions
+  .runWith({
+    memory: '256MB',
+    timeoutSeconds: 540, // 9 minutes
+  })
+  .pubsub.schedule('every 15 minutes')
+  .onRun(async (context) => {
+    console.log('🔍 Starting scheduled missed medication detection...');
+    
+    try {
+      const detector = new MissedMedicationDetector();
+      const results = await detector.detectMissedMedications();
+      
+      console.log('✅ Missed medication detection completed:', {
+        processed: results.processed,
+        missed: results.missed,
+        errors: results.errors.length,
+        timestamp: results.detectionTime.toISOString()
+      });
+      
+      // Log metrics for monitoring
+      if (results.errors.length > 0) {
+        console.error('❌ Missed detection errors:', results.errors);
+      }
+      
+      // Log summary for monitoring dashboard
+      if (results.missed > 0) {
+        console.log(`📊 Missed medications by patient:`,
+          results.batchResults?.reduce((acc: any, result) => {
+            acc[result.patientId] = (acc[result.patientId] || 0) + 1;
+            return acc;
+          }, {})
+        );
+      }
+      
+      return results;
+    } catch (error) {
+      console.error('❌ Fatal error in missed medication detection:', error);
+      return {
+        processed: 0,
+        missed: 0,
+        errors: [error instanceof Error ? error.message : 'Unknown error'],
+        detectionTime: new Date()
+      };
+    }
+  });
+
+// ===== GRACE PERIOD MANAGEMENT API ENDPOINTS =====
+
+// Get patient grace period configuration
+app.get('/patients/grace-periods', authenticate, async (req, res) => {
+  try {
+    const patientId = (req as any).user.uid;
+    
+    const gracePeriodEngine = new GracePeriodEngine();
+    
+    // Try to get existing configuration
+    const configDoc = await firestore.collection('medication_grace_periods').doc(patientId).get();
+    
+    if (!configDoc.exists) {
+      // Create and return default configuration
+      await gracePeriodEngine.createDefaultGracePeriodConfig(patientId);
+      
+      const newConfigDoc = await firestore.collection('medication_grace_periods').doc(patientId).get();
+      const newConfig = newConfigDoc.data();
+      
+      return res.json({
+        success: true,
+        data: {
+          id: patientId,
+          ...newConfig,
+          createdAt: newConfig?.createdAt?.toDate(),
+          updatedAt: newConfig?.updatedAt?.toDate()
+        },
+        message: 'Default grace period configuration created'
+      });
+    }
+    
+    const config = configDoc.data();
+    res.json({
+      success: true,
+      data: {
+        id: configDoc.id,
+        ...config,
+        createdAt: config?.createdAt?.toDate(),
+        updatedAt: config?.updatedAt?.toDate()
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error getting grace period configuration:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Update patient grace period configuration
+app.put('/patients/grace-periods', authenticate, async (req, res) => {
+  try {
+    const patientId = (req as any).user.uid;
+    const updateData = req.body;
+    
+    const gracePeriodEngine = new GracePeriodEngine();
+    
+    // Validate grace period values
+    const validation = gracePeriodEngine.validateGracePeriodConfig(updateData);
+    if (!validation.isValid) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid grace period configuration',
+        details: validation.errors
+      });
+    }
+    
+    await gracePeriodEngine.updatePatientGraceConfig(patientId, updateData);
+    
+    // Get updated configuration
+    const updatedDoc = await firestore.collection('medication_grace_periods').doc(patientId).get();
+    const updatedData = updatedDoc.data();
+    
+    res.json({
+      success: true,
+      data: {
+        id: patientId,
+        ...updatedData,
+        createdAt: updatedData?.createdAt?.toDate(),
+        updatedAt: updatedData?.updatedAt?.toDate()
+      },
+      message: 'Grace period configuration updated successfully'
+    });
+    
+  } catch (error) {
+    console.error('Error updating grace period configuration:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Get missed medications for a patient
+app.get('/medication-calendar/missed', authenticate, async (req, res) => {
+  try {
+    const currentUserId = (req as any).user.uid;
+    const { patientId, limit = '50', startDate, endDate } = req.query;
+    
+    // Determine target patient
+    const targetPatientId = patientId as string || currentUserId;
+    
+    // Check access permissions
+    if (targetPatientId !== currentUserId) {
+      const familyAccess = await firestore.collection('family_calendar_access')
+        .where('familyMemberId', '==', currentUserId)
+        .where('patientId', '==', targetPatientId)
+        .where('status', '==', 'active')
+        .get();
+      
+      if (familyAccess.empty) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access denied'
+        });
+      }
+    }
+    
+    const detector = new MissedMedicationDetector();
+    const startDateObj = startDate ? new Date(startDate as string) : undefined;
+    const endDateObj = endDate ? new Date(endDate as string) : undefined;
+    
+    const missedMedications = await detector.getMissedMedications(
+      targetPatientId,
+      startDateObj,
+      endDateObj,
+      parseInt(limit as string, 10)
+    );
+    
+    res.json({
+      success: true,
+      data: missedMedications,
+      message: `Found ${missedMedications.length} missed medications`
+    });
+    
+  } catch (error) {
+    console.error('Error getting missed medications:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Manual missed detection trigger
+app.post('/medication-calendar/detect-missed', authenticate, async (req, res) => {
+  try {
+    const patientId = (req as any).user.uid;
+    
+    const detector = new MissedMedicationDetector();
+    const results = await detector.detectMissedMedicationsForPatient(patientId);
+    
+    res.json({
+      success: true,
+      data: results,
+      message: `Detected ${results.missed} missed medications`
+    });
+    
+  } catch (error) {
+    console.error('Error in manual missed detection:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Mark medication as missed manually
+app.post('/medication-calendar/events/:eventId/mark-missed', authenticate, async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const userId = (req as any).user.uid;
+    const { reason = 'manual_mark' } = req.body;
+    
+    const detector = new MissedMedicationDetector();
+    const result = await detector.markEventAsMissed(eventId, userId, reason);
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        message: 'Medication marked as missed successfully'
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.error
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error marking medication as missed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Get missed medication statistics
+app.get('/medication-calendar/missed-stats', authenticate, async (req, res) => {
+  try {
+    const currentUserId = (req as any).user.uid;
+    const { patientId, days = '30' } = req.query;
+    
+    // Determine target patient
+    const targetPatientId = patientId as string || currentUserId;
+    
+    // Check access permissions
+    if (targetPatientId !== currentUserId) {
+      const familyAccess = await firestore.collection('family_calendar_access')
+        .where('familyMemberId', '==', currentUserId)
+        .where('patientId', '==', targetPatientId)
+        .where('status', '==', 'active')
+        .get();
+      
+      if (familyAccess.empty) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access denied'
+        });
+      }
+    }
+    
+    const detector = new MissedMedicationDetector();
+    const stats = await detector.getMissedMedicationStats(
+      targetPatientId,
+      parseInt(days as string, 10)
+    );
+    
+    res.json({
+      success: true,
+      data: stats,
+      message: 'Missed medication statistics retrieved successfully'
+    });
+    
+  } catch (error) {
+    console.error('Error getting missed medication statistics:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
 
 // Export new visit recording functions
 export { processVisitUpload } from './visitUploadTrigger';
