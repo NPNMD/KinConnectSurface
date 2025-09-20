@@ -36,16 +36,21 @@ export default function HealthcareProviderSearch({
     setError(null);
 
     try {
+      console.log('🔍 Searching for healthcare providers:', { query, searchType });
+      
       const results = await googlePlacesApi.searchHealthcareProviders({
         query: query,
-        type: searchType
+        type: searchType,
+        location: undefined, // Could be enhanced with user location
+        radius: 25000
       });
-
+      
+      console.log('✅ Search results received:', results.length);
       setSearchResults(results);
       setShowResults(true);
     } catch (error) {
-      console.error('Error searching healthcare providers:', error);
-      setError('Failed to search providers. Please try again.');
+      console.error('❌ Error searching healthcare providers:', error);
+      setError('Failed to search providers. Please check your internet connection and try again.');
       setSearchResults([]);
     } finally {
       setIsSearching(false);

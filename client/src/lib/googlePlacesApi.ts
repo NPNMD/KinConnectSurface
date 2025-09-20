@@ -38,85 +38,94 @@ class GooglePlacesApiService {
   }
 
   async searchHealthcareProviders(request: GooglePlaceSearchRequest): Promise<GooglePlaceResult[]> {
+    // Try the new Places API first, with fallback to legacy API
+    try {
+      return await this.searchHealthcareProvidersNew(request);
+    } catch (error) {
+      console.warn('🏥 New Places API failed, falling back to legacy API:', error);
+      return await this.searchHealthcareProvidersLegacy(request);
+    }
+  }
+
+  private async searchHealthcareProvidersNew(request: GooglePlaceSearchRequest): Promise<GooglePlaceResult[]> {
     if (!await this.initialize()) {
       throw new Error('Google Places API not available');
     }
 
-    try {
-      // Use the new Places API (Text Search)
-      let query = request.query;
-      if (request.type === 'doctor') {
-        query += ' doctor physician medical clinic';
-      } else if (request.type === 'hospital') {
-        query += ' hospital medical center';
-      } else if (request.type === 'pharmacy') {
-        query += ' pharmacy drugstore';
-      } else if (request.type === 'health') {
-        query += ' medical health clinic';
-      }
-
-      // Build the request for the new Places API
-      const searchRequest = {
-        textQuery: query,
-        fields: [
-          'places.id',
-          'places.displayName',
-          'places.formattedAddress',
-          'places.nationalPhoneNumber',
-          'places.websiteUri',
-          'places.rating',
-          'places.userRatingCount',
-          'places.businessStatus',
-          'places.types',
-          'places.location',
-          'places.addressComponents',
-          'places.currentOpeningHours'
-        ],
-        maxResultCount: 20,
-        ...(request.location && {
-          locationBias: {
-            circle: {
-              center: {
-                latitude: request.location.lat,
-                longitude: request.location.lng
-              },
-              radius: request.radius || 25000
-            }
-          }
-        })
-      };
-
-      // Use fetch API to call the new Places API
-      const response = await fetch(`https://places.googleapis.com/v1/places:searchText`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': this.apiKey!,
-          'X-Goog-FieldMask': searchRequest.fields.join(',')
-        },
-        body: JSON.stringify(searchRequest)
-      });
-
-      if (!response.ok) {
-        throw new Error(`Places API request failed: ${response.status}`);
-      }
-
-      const data = await response.json();
-      
-      if (!data.places) {
-        return [];
-      }
-
-      const formattedResults: GooglePlaceResult[] = data.places
-        .filter((place: any) => this.isHealthcareRelatedNew(place))
-        .map((place: any) => this.formatPlaceResultNew(place))
-        .slice(0, 20);
-      
-      return formattedResults;
-    } catch (error) {
-      console.error('Places search failed:', error);
-      throw new Error(`Places search failed: ${error}`);
+    // Use the new Places API (Text Search)
+    let query = request.query;
+    if (request.type === 'doctor') {
+      query += ' doctor physician medical clinic';
+    } else if (request.type === 'hospital') {
+      query += ' hospital medical center';
+    } else if (request.type === 'pharmacy') {
+      query += ' pharmacy drugstore';
+    } else if (request.type === 'health') {
+      query += ' medical health clinic';
     }
+
+    // Build the request for the new Places API
+    const searchRequest = {
+      textQuery: query,
+      maxResultCount: 20,
+      ...(request.location && {
+        locationBias: {
+          circle: {
+            center: {
+              latitude: request.location.lat,
+              longitude: request.location.lng
+            },
+            radius: request.radius || 25000
+          }
+        }
+      })
+    };
+
+    // Correct field mask format for new Places API
+    const fieldMask = [
+      'places.id',
+      'places.displayName',
+      'places.formattedAddress',
+      'places.nationalPhoneNumber',
+      'places.websiteUri',
+      'places.rating',
+      'places.userRatingCount',
+      'places.businessStatus',
+      'places.types',
+      'places.location',
+      'places.addressComponents',
+      'places.currentOpeningHours'
+    ].join(',');
+
+    // Use fetch API to call the new Places API
+    const response = await fetch(`https://places.googleapis.com/v1/places:searchText`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': this.apiKey!,
+        'X-Goog-FieldMask': fieldMask
+      },
+      body: JSON.stringify(searchRequest)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('🏥 New Places API error:', response.status, errorText);
+      throw new Error(`Places API request failed: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    
+    if (!data.places) {
+      return [];
+    }
+
+    const formattedResults: GooglePlaceResult[] = data.places
+      .filter((place: any) => this.isHealthcareRelatedNew(place))
+      .map((place: any) => this.formatPlaceResultNew(place))
+      .slice(0, 20);
+    
+    return formattedResults;
   }
 
   async getPlaceDetails(placeId: string): Promise<GooglePlaceResult | null> {
@@ -177,20 +186,6 @@ class GooglePlacesApiService {
 
       const searchRequest = {
         textQuery: keyword,
-        fields: [
-          'places.id',
-          'places.displayName',
-          'places.formattedAddress',
-          'places.nationalPhoneNumber',
-          'places.websiteUri',
-          'places.rating',
-          'places.userRatingCount',
-          'places.businessStatus',
-          'places.types',
-          'places.location',
-          'places.addressComponents',
-          'places.currentOpeningHours'
-        ],
         maxResultCount: 15,
         locationBias: {
           circle: {
@@ -203,12 +198,28 @@ class GooglePlacesApiService {
         }
       };
 
+      // Correct field mask format for new Places API
+      const fieldMask = [
+        'places.id',
+        'places.displayName',
+        'places.formattedAddress',
+        'places.nationalPhoneNumber',
+        'places.websiteUri',
+        'places.rating',
+        'places.userRatingCount',
+        'places.businessStatus',
+        'places.types',
+        'places.location',
+        'places.addressComponents',
+        'places.currentOpeningHours'
+      ].join(',');
+
       const response = await fetch(`https://places.googleapis.com/v1/places:searchText`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': this.apiKey!,
-          'X-Goog-FieldMask': searchRequest.fields.join(',')
+          'X-Goog-FieldMask': fieldMask
         },
         body: JSON.stringify(searchRequest)
       });
@@ -441,19 +452,6 @@ class GooglePlacesApiService {
     }
 
     return 'Other';
-  }
-
-  // Add fallback method for backward compatibility and error handling
-  async searchHealthcareProvidersWithFallback(request: GooglePlaceSearchRequest): Promise<GooglePlaceResult[]> {
-    try {
-      // Try the new Places API first
-      return await this.searchHealthcareProviders(request);
-    } catch (error) {
-      console.warn('New Places API failed, falling back to legacy API:', error);
-      
-      // Fallback to legacy PlacesService if new API fails
-      return this.searchHealthcareProvidersLegacy(request);
-    }
   }
 
   // Legacy method as fallback
