@@ -6,9 +6,12 @@ A comprehensive family care coordination platform built with React, TypeScript, 
 
 - **User Authentication**: Google OAuth 2.0 integration with Firebase
 - **Patient Profiles**: Comprehensive medical information management
-- **Family Coordination**: Connect family members and caregivers
+- **Healthcare Provider Management**: Search, add, and manage healthcare providers with Google Places API integration
+- **Primary Care Provider (PCP) Support**: Designate and manage primary care providers
+- **Family Coordination**: Connect family members and caregivers with shared provider access
 - **Medication Tracking**: Prescription and dosage management
-- **Appointment Scheduling**: Healthcare visit coordination
+- **Appointment Scheduling**: Healthcare visit coordination with provider integration
+- **Visit Recording & Summaries**: AI-powered visit transcription and summary generation
 - **Task Management**: Care coordination task assignment
 - **Secure & Private**: HIPAA-compliant with enterprise-grade security
 
@@ -171,6 +174,29 @@ kinconnect/
 - `GET /api/patients/search/allergy/:allergy` - Search by allergy
 - `GET /api/patients/search/age/:min/:max` - Search by age range
 
+### Healthcare Providers
+- `GET /api/healthcare/providers/:patientId` - Get providers for patient
+- `POST /api/healthcare/providers` - Create new provider
+- `PUT /api/healthcare/providers/:id` - Update specific provider
+- `DELETE /api/healthcare/providers/:id` - Delete specific provider
+
+### Healthcare Facilities
+- `GET /api/healthcare/facilities/:patientId` - Get facilities for patient
+- `POST /api/healthcare/facilities` - Create new facility
+- `PUT /api/healthcare/facilities/:id` - Update specific facility
+- `DELETE /api/healthcare/facilities/:id` - Delete specific facility
+
+### Family Access
+- `GET /api/family/access` - Get family access permissions
+- `POST /api/family/invitations` - Send family invitation
+- `PUT /api/family/invitations/:id/accept` - Accept family invitation
+
+### Medical Events & Calendar
+- `GET /api/calendar/events` - Get calendar events
+- `POST /api/calendar/events` - Create calendar event
+- `PUT /api/calendar/events/:id` - Update calendar event
+- `DELETE /api/calendar/events/:id` - Delete calendar event
+
 ### Health Check
 - `GET /api/health` - API health status
 
@@ -245,23 +271,52 @@ For support and questions:
 
 ## 🔮 Roadmap
 
-### Phase 1 (Current)
+### Phase 1 (Completed)
 - [x] User authentication
 - [x] Basic patient profiles
 - [x] Dashboard interface
 - [x] Profile management
+- [x] Healthcare provider management with Google Places API
+- [x] Primary Care Provider (PCP) designation
+- [x] Family coordination and access control
+- [x] Visit recording and AI-powered summaries
 
-### Phase 2 (Next)
-- [ ] Medication management
-- [ ] Appointment scheduling
-- [ ] Family group coordination
-- [ ] Task management
+### Phase 2 (Current)
+- [x] Medication management and tracking
+- [x] Appointment scheduling with provider integration
+- [x] Family group coordination with shared access
+- [x] Medical calendar with event management
+- [ ] Enhanced notification system
+- [ ] Advanced medication reminders
 
-### Phase 3 (Future)
-- [ ] Real-time notifications
+### Phase 3 (Next)
+- [ ] Real-time notifications and alerts
 - [ ] Mobile app development
-- [ ] Third-party integrations
-- [ ] Advanced analytics
+- [ ] Third-party EHR integrations
+- [ ] Advanced analytics and reporting
+- [ ] Telehealth integration
+- [ ] Insurance and billing management
+
+## 🏥 Healthcare Provider Integration
+
+### Google Places API Integration
+The application integrates with Google Places API to provide comprehensive healthcare provider search and management:
+
+- **Provider Search**: Search for doctors, hospitals, pharmacies, and other healthcare facilities
+- **Automatic Data Population**: Provider information, ratings, reviews, and contact details
+- **Specialty Inference**: AI-powered medical specialty detection from provider data
+- **Address Parsing**: Automatic address component extraction and formatting
+- **Business Status**: Real-time business status and hours information
+
+### Recent Fixes (September 2025)
+- ✅ **Fixed Google Places API 400 errors** - Corrected field mask format for new Places API v1
+- ✅ **Added automatic fallback mechanism** - Seamless fallback to legacy Places API
+- ✅ **Enhanced error handling** - Better user feedback and detailed error logging
+- ✅ **Comprehensive testing** - Full test suite for provider functionality
+
+For detailed information about the provider fixes, see:
+- [`PROVIDER_PCP_FIXES_FINAL_SUMMARY.md`](PROVIDER_PCP_FIXES_FINAL_SUMMARY.md) - Complete implementation summary
+- [`PROVIDER_PCP_TESTING_REPORT.md`](PROVIDER_PCP_TESTING_REPORT.md) - Detailed testing results
 
 ---
 
