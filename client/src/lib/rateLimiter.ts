@@ -54,8 +54,8 @@ class RateLimiter {
   private isProcessing = false;
   
   // Configuration
-  private readonly MAX_CONCURRENT_REQUESTS = 3;
-  private readonly MAX_REQUESTS_PER_MINUTE = 20;
+  private readonly MAX_CONCURRENT_REQUESTS = 5;
+  private readonly MAX_REQUESTS_PER_MINUTE = 60;
   private readonly CIRCUIT_BREAKER_THRESHOLD = 5;
   private readonly CIRCUIT_BREAKER_TIMEOUT = 30000; // 30 seconds
   private readonly DEFAULT_RETRY_DELAY = 1000; // 1 second

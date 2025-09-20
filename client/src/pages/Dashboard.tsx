@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useFamily } from '@/contexts/FamilyContext';
@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
-import { createSmartRefresh, createDebouncedFunction } from '@/lib/requestDebouncer';
+import { createSmartRefresh, createSmartRefreshWithMount, createDebouncedFunction } from '@/lib/requestDebouncer';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import VisitSummaryCard from '@/components/VisitSummaryCard';
 import VisitSummaryForm from '@/components/VisitSummaryForm';
@@ -60,6 +60,9 @@ export default function Dashboard() {
     hasPermission,
     isLoading: familyLoading
   } = useFamily();
+  
+  // Track if this is the initial mount to bypass cache on navigation
+  const isInitialMount = useRef(true);
   const [recentVisitSummaries, setRecentVisitSummaries] = useState<VisitSummary[]>([]);
   const [loadingVisitSummaries, setLoadingVisitSummaries] = useState(false);
   const [todaysMedications, setTodaysMedications] = useState<TodaysMedication[]>([]);
@@ -526,26 +529,26 @@ export default function Dashboard() {
     setShowVisitRecording(false);
   };
 
-  // Create smart refresh functions with shorter intervals for better UX
-  const smartFetchVisitSummaries = createSmartRefresh(
+  // Create mount-aware smart refresh functions to fix navigation blank page issues
+  const smartFetchVisitSummaries = createSmartRefreshWithMount(
     fetchRecentVisitSummaries,
     30000, // 30 seconds minimum between calls
     'dashboard_visit_summaries'
   );
 
-  const smartFetchTodaysMedications = createSmartRefresh(
+  const smartFetchTodaysMedications = createSmartRefreshWithMount(
     fetchTodaysMedications,
     10000, // 10 seconds minimum between calls (shorter for medication actions)
     'dashboard_todays_medications'
   );
 
-  const smartFetchAllMedications = createSmartRefresh(
+  const smartFetchAllMedications = createSmartRefreshWithMount(
     fetchAllMedications,
     30000, // 30 seconds minimum between calls
     'dashboard_all_medications'
   );
 
-  const smartFetchUpcomingAppointments = createSmartRefresh(
+  const smartFetchUpcomingAppointments = createSmartRefreshWithMount(
     fetchUpcomingAppointments,
     120000, // 2 minutes minimum between calls
     'dashboard_appointments'
@@ -557,16 +560,39 @@ export default function Dashboard() {
       hasFirebaseUser: !!firebaseUser,
       familyLoading,
       effectivePatientId,
-      userRole
+      userRole,
+      isInitialMount: isInitialMount.current
     });
 
     if (firebaseUser && !familyLoading && effectivePatientId) {
-      console.log('✅ Dashboard: All conditions met, fetching data...');
-      // Use smart refresh functions to prevent rapid API calls
-      smartFetchVisitSummaries();
-      smartFetchTodaysMedications();
-      smartFetchAllMedications();
-      smartFetchUpcomingAppointments();
+      console.log('✅ Dashboard: All conditions met, fetching data with staggered timing...');
+      
+      // Use mount-aware cache bypassing - bypass cache on initial mount, use normal cache for subsequent calls
+      const bypassCache = isInitialMount.current;
+      
+      if (bypassCache) {
+        console.log('🔄 Dashboard: Initial mount detected, bypassing cache for fresh data');
+      }
+      
+      // Stagger API calls to prevent rate limiting
+      smartFetchVisitSummaries(bypassCache);
+      
+      setTimeout(() => {
+        smartFetchTodaysMedications(bypassCache);
+      }, 200);
+      
+      setTimeout(() => {
+        smartFetchAllMedications(bypassCache);
+      }, 400);
+      
+      setTimeout(() => {
+        smartFetchUpcomingAppointments(bypassCache);
+      }, 600);
+      
+      // Mark that initial mount is complete
+      if (isInitialMount.current) {
+        isInitialMount.current = false;
+      }
     } else {
       console.log('⏳ Dashboard: Waiting for conditions to be met');
     }
@@ -576,11 +602,25 @@ export default function Dashboard() {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (!document.hidden && firebaseUser && !familyLoading && getEffectivePatientId()) {
-        console.log('🔄 Dashboard: Page became visible, refreshing data...');
-        smartFetchVisitSummaries();
-        smartFetchTodaysMedications();
-        smartFetchAllMedications();
-        smartFetchUpcomingAppointments();
+        console.log('🔄 Dashboard: Page became visible, refreshing data with staggered timing...');
+        
+        // Use normal cache behavior for visibility changes (not bypassing cache)
+        const bypassCache = false;
+        
+        // Stagger refresh calls to prevent rate limiting
+        smartFetchVisitSummaries(bypassCache);
+        
+        setTimeout(() => {
+          smartFetchTodaysMedications(bypassCache);
+        }, 300);
+        
+        setTimeout(() => {
+          smartFetchAllMedications(bypassCache);
+        }, 600);
+        
+        setTimeout(() => {
+          smartFetchUpcomingAppointments(bypassCache);
+        }, 900);
       }
     };
 
@@ -596,8 +636,9 @@ export default function Dashboard() {
     const debouncedRefresh = createDebouncedFunction(
       async () => {
         console.log('🔍 Dashboard: Refreshing data after schedule update');
-        await smartFetchTodaysMedications();
-        await smartFetchAllMedications();
+        // Use normal cache behavior for schedule updates (not bypassing cache)
+        await smartFetchTodaysMedications(false);
+        await smartFetchAllMedications(false);
       },
       2000, // 2 second debounce
       'dashboard_schedule_update'
@@ -1075,13 +1116,20 @@ export default function Dashboard() {
       {/* Mobile Bottom Navigation */}
       <nav className="mobile-nav-container">
         <div className="flex items-center justify-around">
-          <Link
-            to="/dashboard"
+          <button
+            onClick={() => {
+              console.log('🏠 Home button clicked - forcing dashboard refresh');
+              // Force refresh all data by bypassing smart refresh cache
+              smartFetchVisitSummaries(true);
+              setTimeout(() => smartFetchTodaysMedications(true), 200);
+              setTimeout(() => smartFetchAllMedications(true), 400);
+              setTimeout(() => smartFetchUpcomingAppointments(true), 600);
+            }}
             className="flex flex-col items-center space-y-1 p-2 text-primary-600"
           >
             <Heart className="w-5 h-5" />
             <span className="text-xs font-medium">Home</span>
-          </Link>
+          </button>
           
           <Link
             to="/medications"

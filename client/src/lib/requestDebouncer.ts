@@ -181,6 +181,40 @@ class RequestDebouncer {
   }
 
   /**
+   * Smart refresh with mount-aware cache bypassing
+   * This version can bypass cache on component mount to fix navigation issues
+   */
+  smartRefreshWithMount<T extends (...args: any[]) => Promise<any>>(
+    fn: T,
+    minInterval: number = 30000, // 30 seconds minimum
+    key?: string
+  ): (bypassCache?: boolean, ...args: Parameters<T>) => Promise<ReturnType<T> | null> {
+    const refreshKey = key || fn.name || 'default';
+    
+    return async (bypassCache: boolean = false, ...args: Parameters<T>): Promise<ReturnType<T> | null> => {
+      const now = Date.now();
+      const lastRefresh = this.lastRequestTimes.get(refreshKey) || 0;
+      
+      // If bypassCache is true, skip the cache check and make fresh API call
+      if (bypassCache) {
+        console.log(`🔄 Smart refresh with cache bypass: ${refreshKey} (mount-aware refresh)`);
+        this.lastRequestTimes.set(refreshKey, now);
+        return await fn(...args);
+      }
+      
+      // Normal cache behavior - if we've refreshed recently, skip
+      if (now - lastRefresh < minInterval) {
+        console.log(`🚫 Skipping refresh: ${refreshKey} (${Math.round((now - lastRefresh) / 1000)}s since last refresh)`);
+        return null;
+      }
+      
+      console.log(`🔄 Smart refresh: ${refreshKey}`);
+      this.lastRequestTimes.set(refreshKey, now);
+      return await fn(...args);
+    };
+  }
+
+  /**
    * Get status for debugging
    */
   getStatus() {
@@ -238,6 +272,12 @@ export const createSmartRefresh = <T extends (...args: any[]) => Promise<any>>(
   minInterval?: number,
   key?: string
 ) => requestDebouncer.smartRefresh(fn, minInterval, key);
+
+export const createSmartRefreshWithMount = <T extends (...args: any[]) => Promise<any>>(
+  fn: T,
+  minInterval?: number,
+  key?: string
+) => requestDebouncer.smartRefreshWithMount(fn, minInterval, key);
 
 // Add global debug helper
 if (typeof window !== 'undefined') {
