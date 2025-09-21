@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Pill, 
-  Clock, 
-  CheckCircle, 
-  AlertTriangle, 
+import {
+  Pill,
+  Clock,
+  CheckCircle,
+  AlertTriangle,
   Calendar,
   Plus,
   Bell,
@@ -15,6 +15,7 @@ import type { Medication, MedicationCalendarEvent, MedicationSchedule } from '@s
 import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import LoadingSpinner from './LoadingSpinner';
+import { parseFrequencyToScheduleType, generateDefaultTimesForFrequency, validateFrequencyParsing } from '@/utils/medicationFrequencyUtils';
 
 interface UnifiedMedicationViewProps {
   patientId: string;
@@ -208,27 +209,23 @@ export default function UnifiedMedicationView({
   };
 
   const getScheduleFrequency = (medicationFrequency: string): 'daily' | 'twice_daily' | 'three_times_daily' | 'four_times_daily' | 'weekly' | 'monthly' | 'as_needed' => {
-    const freq = medicationFrequency.toLowerCase();
-    if (freq.includes('once') || freq === 'daily') return 'daily';
-    if (freq.includes('twice')) return 'twice_daily';
-    if (freq.includes('three')) return 'three_times_daily';
-    if (freq.includes('four')) return 'four_times_daily';
-    if (freq.includes('weekly')) return 'weekly';
-    if (freq.includes('monthly')) return 'monthly';
-    if (freq.includes('needed') || freq.includes('prn')) return 'as_needed';
-    return 'daily'; // Default fallback
+    const parsedFrequency = parseFrequencyToScheduleType(medicationFrequency);
+    const generatedTimes = generateDefaultTimesForFrequency(parsedFrequency);
+    
+    // Validate and log the parsing for debugging
+    validateFrequencyParsing(medicationFrequency, parsedFrequency, generatedTimes);
+    
+    return parsedFrequency;
   };
 
   const getDefaultTimes = (frequency: string): string[] => {
-    switch (frequency) {
-      case 'daily': return ['07:00'];
-      case 'twice_daily': return ['07:00', '19:00'];
-      case 'three_times_daily': return ['07:00', '13:00', '19:00'];
-      case 'four_times_daily': return ['07:00', '12:00', '17:00', '22:00'];
-      case 'weekly': return ['07:00'];
-      case 'monthly': return ['07:00'];
-      default: return ['07:00'];
-    }
+    console.log('🔍 UnifiedMedicationView: Getting default times for frequency:', frequency);
+    
+    // Use medicationCalendarApi as single source of truth for default times
+    const times = medicationCalendarApi.generateDefaultTimes(frequency);
+    console.log('🔍 UnifiedMedicationView: Generated default times:', times);
+    
+    return times;
   };
 
   const formatTime = (date: Date): string => {

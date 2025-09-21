@@ -21,6 +21,7 @@ import type {
   MedicationCalendarEvent 
 } from '@shared/types';
 import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
+import { parseFrequencyToScheduleType, generateDefaultTimesForFrequency, validateFrequencyParsing } from '@/utils/medicationFrequencyUtils';
 
 interface MedicationScheduleManagerProps {
   medication: Medication;
@@ -104,44 +105,20 @@ export default function MedicationScheduleManager({
     // Auto-populate form with medication data when component mounts
     if (medication && !isAddingSchedule) {
       const medicationFrequency = medication.frequency?.toLowerCase().trim() || '';
-      let scheduleFrequency: ScheduleFormData['frequency'] = 'daily';
       
       console.log('🔍 MedicationScheduleManager: Mapping frequency:', medicationFrequency);
       
-      // Improved medication frequency to schedule frequency mapping
-      if (medicationFrequency.includes('once daily') || medicationFrequency.includes('once a day') || medicationFrequency === 'daily' || medicationFrequency.includes('once')) {
-        scheduleFrequency = 'daily';
-      } else if (medicationFrequency.includes('twice daily') || medicationFrequency.includes('twice a day') || medicationFrequency.includes('bid') || medicationFrequency.includes('twice')) {
-        scheduleFrequency = 'twice_daily';
-      } else if (medicationFrequency.includes('three times daily') || medicationFrequency.includes('three times a day') || medicationFrequency.includes('tid') || medicationFrequency.includes('three')) {
-        scheduleFrequency = 'three_times_daily';
-      } else if (medicationFrequency.includes('four times daily') || medicationFrequency.includes('four times a day') || medicationFrequency.includes('qid') || medicationFrequency.includes('four')) {
-        scheduleFrequency = 'four_times_daily';
-      } else if (medicationFrequency.includes('every 4 hours')) {
-        scheduleFrequency = 'four_times_daily'; // Closest match
-      } else if (medicationFrequency.includes('every 6 hours')) {
-        scheduleFrequency = 'four_times_daily';
-      } else if (medicationFrequency.includes('every 8 hours')) {
-        scheduleFrequency = 'three_times_daily';
-      } else if (medicationFrequency.includes('every 12 hours')) {
-        scheduleFrequency = 'twice_daily';
-      } else if (medicationFrequency.includes('weekly')) {
-        scheduleFrequency = 'weekly';
-      } else if (medicationFrequency.includes('monthly')) {
-        scheduleFrequency = 'monthly';
-      } else if (medicationFrequency.includes('as needed') || medicationFrequency.includes('prn')) {
-        scheduleFrequency = 'as_needed';
-      } else {
-        // Default fallback with warning
-        console.warn(`⚠️ MedicationScheduleManager: Unknown frequency "${medicationFrequency}", defaulting to daily`);
-        scheduleFrequency = 'daily';
-      }
+      // Use shared utility function for consistent frequency parsing
+      const scheduleFrequency = parseFrequencyToScheduleType(medicationFrequency) as ScheduleFormData['frequency'];
       
       console.log('🔍 MedicationScheduleManager: Mapped to schedule frequency:', scheduleFrequency);
       
-      // Generate default times for the mapped frequency
-      const defaultTimes = medicationCalendarApi.generateDefaultTimes(scheduleFrequency);
+      // Generate default times for the mapped frequency using shared utility
+      const defaultTimes = generateDefaultTimesForFrequency(scheduleFrequency);
       console.log('🔍 MedicationScheduleManager: Generated default times:', defaultTimes);
+      
+      // Validate and log the parsing for debugging
+      validateFrequencyParsing(medicationFrequency, scheduleFrequency, defaultTimes);
       
       // Update initial form data with medication info
       setFormData(prev => ({

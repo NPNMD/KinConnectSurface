@@ -48,7 +48,7 @@ export default function TimeBucketView({
 }: TimeBucketViewProps) {
   const [buckets, setBuckets] = useState<TodayMedicationBuckets | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [expandedBuckets, setExpandedBuckets] = useState<Set<string>>(new Set(['now', 'overdue']));
+  const [expandedBuckets, setExpandedBuckets] = useState<Set<string>>(new Set(['now', 'overdue', 'completed']));
   const [processingAction, setProcessingAction] = useState<string | null>(null);
 
   // Create smart refresh function with shorter interval for user actions
@@ -66,6 +66,39 @@ export default function TimeBucketView({
         }
 
         setBuckets(bucketsResult.data);
+        
+        // Add debugging for medication display
+        console.log('🔍 TimeBucketView: Loaded medication buckets:', {
+          now: bucketsResult.data.now?.length || 0,
+          dueSoon: bucketsResult.data.dueSoon?.length || 0,
+          morning: bucketsResult.data.morning?.length || 0,
+          noon: bucketsResult.data.noon?.length || 0,
+          evening: bucketsResult.data.evening?.length || 0,
+          bedtime: bucketsResult.data.bedtime?.length || 0,
+          overdue: bucketsResult.data.overdue?.length || 0,
+          completed: bucketsResult.data.completed?.length || 0,
+          total: (bucketsResult.data.now?.length || 0) +
+                 (bucketsResult.data.dueSoon?.length || 0) +
+                 (bucketsResult.data.morning?.length || 0) +
+                 (bucketsResult.data.noon?.length || 0) +
+                 (bucketsResult.data.evening?.length || 0) +
+                 (bucketsResult.data.bedtime?.length || 0) +
+                 (bucketsResult.data.overdue?.length || 0) +
+                 (bucketsResult.data.completed?.length || 0)
+        });
+        
+        // Log completed medications specifically
+        if (bucketsResult.data.completed && bucketsResult.data.completed.length > 0) {
+          console.log('🔍 TimeBucketView: Completed medications found:',
+            bucketsResult.data.completed.map(event => ({
+              id: event.id,
+              medicationName: event.medicationName,
+              status: event.status,
+              scheduledDateTime: event.scheduledDateTime,
+              actualTakenDateTime: event.actualTakenDateTime
+            }))
+          );
+        }
         
       } catch (error) {
         console.error('Error loading today\'s medication buckets:', error);
@@ -153,6 +186,7 @@ export default function TimeBucketView({
             noon: removeFrom(prev.noon),
             evening: removeFrom(prev.evening),
             bedtime: removeFrom(prev.bedtime),
+            completed: removeFrom(prev.completed || []),
             lastUpdated: new Date()
           } as TodayMedicationBuckets;
         });
@@ -236,6 +270,8 @@ export default function TimeBucketView({
         return <Moon className="w-5 h-5 text-indigo-600" />;
       case 'overdue':
         return <AlertTriangle className="w-5 h-5 text-red-700" />;
+      case 'completed':
+        return <CheckCircle className="w-5 h-5 text-green-600" />;
       default:
         return <Clock className="w-5 h-5 text-gray-600" />;
     }
@@ -257,6 +293,8 @@ export default function TimeBucketView({
         return 'border-indigo-200 bg-indigo-50';
       case 'overdue':
         return 'border-red-300 bg-red-100';
+      case 'completed':
+        return 'border-green-200 bg-green-50';
       default:
         return 'border-gray-200 bg-gray-50';
     }
@@ -373,6 +411,15 @@ export default function TimeBucketView({
       timeRange: `${buckets.patientPreferences.timeSlots.bedtime.start} - ${buckets.patientPreferences.timeSlots.bedtime.end}`,
       priority: 7,
       color: 'border-indigo-200 bg-indigo-50'
+    },
+    {
+      key: 'completed',
+      label: 'Completed Today',
+      icon: <CheckCircle className="w-5 h-5 text-green-600" />,
+      events: buckets.completed || [],
+      timeRange: 'Taken, missed, or skipped',
+      priority: 8,
+      color: 'border-green-200 bg-green-50'
     }
   ].filter(bucket => bucket.events.length > 0); // Only show buckets with medications
 
@@ -514,16 +561,48 @@ export default function TimeBucketView({
                           </div>
                         </div>
                         
-                        {/* Quick Actions */}
-                        <QuickActionButtons
-                          event={event}
-                          onTake={() => handleTake(event.id)}
-                          onSnooze={(minutes: number, reason?: string) => handleSnooze(event.id, minutes, reason)}
-                          onSkip={(reason: string, notes?: string) => handleSkip(event.id, reason, notes)}
-                          onReschedule={(newTime: Date, reason: string, isOneTime: boolean) => handleReschedule(event.id, newTime, reason, isOneTime)}
-                          isProcessing={processingAction === event.id}
-                          compactMode={compactMode}
-                        />
+                        {/* Quick Actions - only show for actionable medications */}
+                        {bucket.key !== 'completed' && (
+                          <QuickActionButtons
+                            event={event}
+                            onTake={() => handleTake(event.id)}
+                            onSnooze={(minutes: number, reason?: string) => handleSnooze(event.id, minutes, reason)}
+                            onSkip={(reason: string, notes?: string) => handleSkip(event.id, reason, notes)}
+                            onReschedule={(newTime: Date, reason: string, isOneTime: boolean) => handleReschedule(event.id, newTime, reason, isOneTime)}
+                            isProcessing={processingAction === event.id}
+                            compactMode={compactMode}
+                          />
+                        )}
+                        
+                        {/* Status indicator for completed medications */}
+                        {bucket.key === 'completed' && (
+                          <div className="flex items-center space-x-2">
+                            {event.status === 'taken' && (
+                              <span className="flex items-center space-x-1 text-green-600 text-sm">
+                                <CheckCircle className="w-4 h-4" />
+                                <span>Taken</span>
+                              </span>
+                            )}
+                            {event.status === 'missed' && (
+                              <span className="flex items-center space-x-1 text-red-600 text-sm">
+                                <AlertTriangle className="w-4 h-4" />
+                                <span>Missed</span>
+                              </span>
+                            )}
+                            {event.status === 'skipped' && (
+                              <span className="flex items-center space-x-1 text-yellow-600 text-sm">
+                                <Package className="w-4 h-4" />
+                                <span>Skipped</span>
+                              </span>
+                            )}
+                            {event.status === 'late' && (
+                              <span className="flex items-center space-x-1 text-orange-600 text-sm">
+                                <Clock className="w-4 h-4" />
+                                <span>Late</span>
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}

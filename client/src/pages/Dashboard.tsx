@@ -36,20 +36,10 @@ import { createSmartRefresh, createSmartRefreshWithMount, createDebouncedFunctio
 import LoadingSpinner from '@/components/LoadingSpinner';
 import VisitSummaryCard from '@/components/VisitSummaryCard';
 import VisitSummaryForm from '@/components/VisitSummaryForm';
-import UnifiedMedicationView from '@/components/UnifiedMedicationView';
+import TimeBucketView from '@/components/TimeBucketView';
 import PatientSwitcher from '@/components/PatientSwitcher';
 import { CreatePermissionWrapper, EditPermissionWrapper } from '@/components/PermissionWrapper';
-import type { VisitSummary, MedicationCalendarEvent, MedicalEvent, Medication } from '@shared/types';
-
-interface TodaysMedication {
-  id: string;
-  medicationName: string;
-  dosageAmount: string;
-  scheduledDateTime: Date;
-  status: 'scheduled' | 'taken' | 'missed' | 'skipped';
-  instructions?: string;
-  isOverdue: boolean;
-}
+import type { VisitSummary, MedicationCalendarEvent, MedicalEvent, Medication, TodayMedicationBuckets } from '@shared/types';
 
 export default function Dashboard() {
   const { user, firebaseUser } = useAuth();
@@ -65,15 +55,13 @@ export default function Dashboard() {
   const isInitialMount = useRef(true);
   const [recentVisitSummaries, setRecentVisitSummaries] = useState<VisitSummary[]>([]);
   const [loadingVisitSummaries, setLoadingVisitSummaries] = useState(false);
-  const [todaysMedications, setTodaysMedications] = useState<TodaysMedication[]>([]);
+  const [todaysMedications, setTodaysMedications] = useState<TodayMedicationBuckets | null>(null);
   const [loadingMedications, setLoadingMedications] = useState(false);
-  const [allMedications, setAllMedications] = useState<Medication[]>([]);
-  const [loadingAllMedications, setLoadingAllMedications] = useState(false);
+  const [medicationFilter, setMedicationFilter] = useState<'active' | 'inactive' | 'all'>('active');
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [upcomingAppointments, setUpcomingAppointments] = useState<MedicalEvent[]>([]);
   const [loadingAppointments, setLoadingAppointments] = useState(false);
   const [takingMedication, setTakingMedication] = useState<string | null>(null);
-  const [selectAllChecked, setSelectAllChecked] = useState(false);
-  const [selectedMedications, setSelectedMedications] = useState<Set<string>>(new Set());
   const [showVisitRecording, setShowVisitRecording] = useState(false);
   const [actionableEvents, setActionableEvents] = useState<ActionableEvent[]>([]);
 
@@ -299,55 +287,26 @@ export default function Dashboard() {
     try {
       setLoadingMedications(true);
       const now = new Date();
-      const startOfDay = new Date(now);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(now);
-      endOfDay.setHours(23, 59, 59, 999);
+      
+      console.log('🔍 Dashboard: Fetching today\'s medication buckets');
 
-      console.log('🔍 Dashboard: Fetching today\'s medications from', startOfDay, 'to', endOfDay);
-
-      const result = await medicationCalendarApi.getMedicationCalendarEvents({
-        startDate: startOfDay,
-        endDate: endOfDay,
+      const result = await medicationCalendarApi.getTodayMedicationBuckets(now, {
         patientId: getEffectivePatientId() || undefined
       });
 
-      console.log('🔍 Dashboard: Medication events result:', result);
+      console.log('🔍 Dashboard: Medication buckets result:', result);
 
       if (result.success && result.data) {
-        // Filter to show only medications that need action (not taken or late) AND are for today
-        const todaysEvents = result.data
-          .filter(event => {
-            const eventDate = new Date(event.scheduledDateTime);
-            const isToday = eventDate >= startOfDay && eventDate <= endOfDay;
-            const needsAction = !['taken', 'late'].includes(event.status); // Hide both taken and late
-            
-            console.log('🔍 Event filter check:', {
-              eventId: event.id,
-              medicationName: event.medicationName,
-              scheduledDateTime: eventDate.toISOString(),
-              status: event.status,
-              isToday,
-              needsAction,
-              willShow: isToday && needsAction
-            });
-            
-            return isToday && needsAction;
-          })
-          .map(event => ({
-            id: event.id,
-            medicationName: event.medicationName,
-            dosageAmount: event.dosageAmount,
-            scheduledDateTime: new Date(event.scheduledDateTime),
-            status: event.status as 'scheduled' | 'taken' | 'missed' | 'skipped',
-            instructions: event.instructions,
-            isOverdue: new Date(event.scheduledDateTime) < now
-          }))
-          .sort((a, b) => a.scheduledDateTime.getTime() - b.scheduledDateTime.getTime());
-
-        console.log('🔍 Dashboard: Processed today\'s events (filtered by date and status):', todaysEvents);
-        console.log('🔍 Dashboard: Total events received:', result.data.length, 'Showing (today + not taken):', todaysEvents.length);
-        setTodaysMedications(todaysEvents);
+        setTodaysMedications(result.data);
+        console.log('🔍 Dashboard: Today\'s medication buckets loaded:', {
+          overdue: result.data.overdue.length,
+          now: result.data.now.length,
+          dueSoon: result.data.dueSoon.length,
+          morning: result.data.morning.length,
+          noon: result.data.noon.length,
+          evening: result.data.evening.length,
+          bedtime: result.data.bedtime.length
+        });
       }
     } catch (error) {
       console.error('❌ Error fetching today\'s medications:', error);
@@ -396,127 +355,16 @@ export default function Dashboard() {
     }
   };
 
-  const fetchAllMedications = async () => {
-    try {
-      setLoadingAllMedications(true);
-      const effectivePatientId = getEffectivePatientId();
-      if (!effectivePatientId) return;
-      
-      const endpoint = userRole === 'family_member'
-        ? API_ENDPOINTS.MEDICATIONS_FOR_PATIENT(effectivePatientId)
-        : API_ENDPOINTS.MEDICATIONS;
-      
-      const response = await apiClient.get<{ success: boolean; data: Medication[] }>(endpoint);
-      
-      if (response.success && response.data) {
-        // Parse date strings back to Date objects
-        const medicationsWithDates = response.data.map(med => ({
-          ...med,
-          prescribedDate: new Date(med.prescribedDate),
-          startDate: med.startDate ? new Date(med.startDate) : undefined,
-          endDate: med.endDate ? new Date(med.endDate) : undefined,
-          createdAt: new Date(med.createdAt),
-          updatedAt: new Date(med.updatedAt),
-        }));
-        setAllMedications(medicationsWithDates);
-      }
-    } catch (error) {
-      console.error('❌ Error fetching all medications:', error);
-    } finally {
-      setLoadingAllMedications(false);
-    }
+
+  const handleMedicationAction = (eventId: string, action: 'take' | 'snooze' | 'skip' | 'reschedule') => {
+    console.log('🔧 Dashboard: Medication action performed:', { eventId, action });
+    // Refresh medications and trigger refresh
+    setTimeout(() => {
+      fetchTodaysMedications();
+      setRefreshTrigger(prev => prev + 1);
+    }, 1000); // 1 second delay to batch updates
   };
 
-  const handleMarkMedicationTaken = async (medicationId: string) => {
-    try {
-      console.log('🔧 Dashboard: Marking medication as taken:', medicationId);
-      setTakingMedication(medicationId);
-      
-      const result = await medicationCalendarApi.markMedicationTaken(
-        medicationId,
-        new Date()
-      );
-
-      console.log('🔧 Dashboard: Mark medication result:', result);
-
-      if (result.success) {
-        console.log('✅ Dashboard: Medication marked as taken successfully');
-        await fetchTodaysMedications();
-        // Remove from selected medications if it was selected
-        setSelectedMedications(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(medicationId);
-          return newSet;
-        });
-      } else {
-        console.error('❌ Dashboard: Failed to mark medication as taken:', result.error);
-        // You could add a toast notification here to show the error to the user
-        alert(`Failed to mark medication as taken: ${result.error}`);
-      }
-    } catch (error) {
-      console.error('❌ Dashboard: Error marking medication as taken:', error);
-      // You could add a toast notification here to show the error to the user
-      alert('An unexpected error occurred while marking the medication as taken. Please try again.');
-    } finally {
-      setTakingMedication(null);
-    }
-  };
-
-  const handleMarkAllSelectedTaken = async () => {
-    try {
-      console.log('🔧 Dashboard: Marking all selected medications as taken:', Array.from(selectedMedications));
-      
-      const promises = Array.from(selectedMedications).map(id =>
-        medicationCalendarApi.markMedicationTaken(id, new Date())
-      );
-      
-      const results = await Promise.all(promises);
-      console.log('🔧 Dashboard: Mark all selected results:', results);
-      
-      // Check if any failed
-      const failedResults = results.filter(result => !result.success);
-      if (failedResults.length > 0) {
-        console.error('❌ Dashboard: Some medications failed to be marked as taken:', failedResults);
-        alert(`Failed to mark ${failedResults.length} medication(s) as taken. Please try again.`);
-      } else {
-        console.log('✅ Dashboard: All selected medications marked as taken successfully');
-      }
-      
-      await fetchTodaysMedications();
-      setSelectedMedications(new Set());
-      setSelectAllChecked(false);
-    } catch (error) {
-      console.error('❌ Dashboard: Error marking selected medications as taken:', error);
-      alert('An unexpected error occurred while marking medications as taken. Please try again.');
-    }
-  };
-
-  const handleSelectAll = () => {
-    if (selectAllChecked) {
-      setSelectedMedications(new Set());
-      setSelectAllChecked(false);
-    } else {
-      const allMedicationIds = new Set(todaysMedications.map(med => med.id));
-      setSelectedMedications(allMedicationIds);
-      setSelectAllChecked(true);
-    }
-  };
-
-  const handleMedicationSelect = (medicationId: string) => {
-    setSelectedMedications(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(medicationId)) {
-        newSet.delete(medicationId);
-      } else {
-        newSet.add(medicationId);
-      }
-      
-      // Update select all checkbox
-      setSelectAllChecked(newSet.size === todaysMedications.length && todaysMedications.length > 0);
-      
-      return newSet;
-    });
-  };
 
   const handleVisitSummarySubmit = async (summary: any) => {
     console.log('✅ Visit summary submitted:', summary);
@@ -542,11 +390,6 @@ export default function Dashboard() {
     'dashboard_todays_medications'
   );
 
-  const smartFetchAllMedications = createSmartRefreshWithMount(
-    fetchAllMedications,
-    30000, // 30 seconds minimum between calls
-    'dashboard_all_medications'
-  );
 
   const smartFetchUpcomingAppointments = createSmartRefreshWithMount(
     fetchUpcomingAppointments,
@@ -582,12 +425,8 @@ export default function Dashboard() {
       }, 200);
       
       setTimeout(() => {
-        smartFetchAllMedications(bypassCache);
-      }, 400);
-      
-      setTimeout(() => {
         smartFetchUpcomingAppointments(bypassCache);
-      }, 600);
+      }, 400);
       
       // Mark that initial mount is complete
       if (isInitialMount.current) {
@@ -597,6 +436,43 @@ export default function Dashboard() {
       console.log('⏳ Dashboard: Waiting for conditions to be met');
     }
   }, [firebaseUser, familyLoading, getEffectivePatientId(), userRole]);
+
+  // Midnight refresh effect - automatically refresh medications at midnight
+  useEffect(() => {
+    const setupMidnightRefresh = () => {
+      const now = new Date();
+      const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1, 0); // 1 second after midnight
+      const msUntilMidnight = tomorrow.getTime() - now.getTime();
+      
+      console.log(`🕛 Setting up midnight refresh in ${Math.round(msUntilMidnight / 1000 / 60)} minutes`);
+      
+      const timeoutId = setTimeout(() => {
+        console.log('🕛 Midnight refresh triggered - refreshing today\'s medications');
+        
+        // Force fresh data at midnight
+        if (firebaseUser && !familyLoading && getEffectivePatientId()) {
+          smartFetchTodaysMedications(true); // Force fresh
+          
+          // Set up the next midnight refresh
+          setupMidnightRefresh();
+        }
+      }, msUntilMidnight);
+      
+      return timeoutId;
+    };
+    
+    let timeoutId: NodeJS.Timeout | null = null;
+    
+    if (firebaseUser && !familyLoading && getEffectivePatientId()) {
+      timeoutId = setupMidnightRefresh();
+    }
+    
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [firebaseUser, familyLoading, getEffectivePatientId()]);
 
   // Additional effect to handle navigation refresh issues
   useEffect(() => {
@@ -615,12 +491,8 @@ export default function Dashboard() {
         }, 300);
         
         setTimeout(() => {
-          smartFetchAllMedications(bypassCache);
-        }, 600);
-        
-        setTimeout(() => {
           smartFetchUpcomingAppointments(bypassCache);
-        }, 900);
+        }, 600);
       }
     };
 
@@ -638,7 +510,6 @@ export default function Dashboard() {
         console.log('🔍 Dashboard: Refreshing data after schedule update');
         // Use normal cache behavior for schedule updates (not bypassing cache)
         await smartFetchTodaysMedications(false);
-        await smartFetchAllMedications(false);
       },
       2000, // 2 second debounce
       'dashboard_schedule_update'
@@ -969,63 +840,61 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* All Medications Section - Unified View */}
+        {/* Today's Medications Section */}
         <div className="mb-6">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-gray-900">Medications</h2>
-            <Link
-              to="/medications"
-              className="text-sm text-primary-600 hover:text-primary-700 font-medium"
-            >
-              Manage
-            </Link>
+            <h2 className="text-lg font-semibold text-gray-900">Today's Medications</h2>
+            <div className="flex items-center space-x-2">
+              {/* Filter Tabs */}
+              <div className="flex rounded-lg border border-gray-200 bg-white text-xs">
+                {[
+                  { key: 'active', label: 'Active' },
+                  { key: 'inactive', label: 'Past/Inactive' },
+                  { key: 'all', label: 'All' }
+                ].map(filter => (
+                  <button
+                    key={filter.key}
+                    onClick={() => setMedicationFilter(filter.key as any)}
+                    className={`px-2 py-1 font-medium transition-colors first:rounded-l-lg last:rounded-r-lg ${
+                      medicationFilter === filter.key
+                        ? 'bg-primary-600 text-white'
+                        : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+              <Link
+                to="/medications"
+                className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+              >
+                View All
+              </Link>
+            </div>
           </div>
           
-          {loadingAllMedications ? (
-            <div className="bg-white rounded-lg p-4 border border-gray-200">
-              <div className="flex items-center justify-center py-4">
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            {loadingMedications ? (
+              <div className="flex items-center justify-center py-8">
                 <LoadingSpinner size="sm" />
-                <span className="ml-2 text-gray-600 text-sm">Loading medications...</span>
+                <span className="ml-2 text-gray-600 text-sm">Loading today's medications...</span>
               </div>
-            </div>
-          ) : allMedications.length > 0 ? (
-           <div className="bg-white rounded-lg border border-gray-200 p-4">
-             <UnifiedMedicationView
-               patientId={getEffectivePatientId() || ''}
-               medications={allMedications}
-               maxItems={5}
-               showCreateScheduleButton={hasPermission('canCreate')}
-               onScheduleCreated={() => {
-                 fetchTodaysMedications();
-                 fetchAllMedications();
-               }}
-             />
-           </div>
-          ) : (
-            <div className="bg-white rounded-lg p-6 border border-gray-200 text-center">
-             <Pill className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-             <p className="text-gray-500 text-sm mb-3">
-               {userRole === 'family_member' && activePatientAccess
-                 ? `${activePatientAccess.patientName} has no medications added yet`
-                 : 'No medications added yet'
-               }
-             </p>
-             <CreatePermissionWrapper>
-               <Link
-                 to="/medications"
-                 className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors"
-               >
-                 <Plus className="w-4 h-4" />
-                 <span>
-                   {userRole === 'family_member' && activePatientAccess
-                     ? `Add Medication for ${activePatientAccess.patientName}`
-                     : 'Add Your First Medication'
-                   }
-                 </span>
-               </Link>
-             </CreatePermissionWrapper>
-           </div>
-          )}
+            ) : todaysMedications ? (
+              <TimeBucketView
+                patientId={getEffectivePatientId() || ''}
+                date={new Date()}
+                onMedicationAction={handleMedicationAction}
+                compactMode={true}
+                refreshTrigger={refreshTrigger}
+              />
+            ) : (
+              <div className="text-center py-8">
+                <Pill className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                <p className="text-gray-500 text-sm">No medications scheduled for today</p>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Upcoming Appointments Section */}
@@ -1122,8 +991,7 @@ export default function Dashboard() {
               // Force refresh all data by bypassing smart refresh cache
               smartFetchVisitSummaries(true);
               setTimeout(() => smartFetchTodaysMedications(true), 200);
-              setTimeout(() => smartFetchAllMedications(true), 400);
-              setTimeout(() => smartFetchUpcomingAppointments(true), 600);
+              setTimeout(() => smartFetchUpcomingAppointments(true), 400);
             }}
             className="flex flex-col items-center space-y-1 p-2 text-primary-600"
           >

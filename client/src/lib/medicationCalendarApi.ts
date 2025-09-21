@@ -93,6 +93,31 @@ class MedicationCalendarApi {
       console.log('🔧 MedicationCalendarApi: Creating medication schedule');
       console.log('🔧 MedicationCalendarApi: Schedule data:', scheduleData);
       
+      // Enhanced validation and debugging
+      const validation = this.validateScheduleData(scheduleData);
+      if (!validation.isValid) {
+        console.error('❌ MedicationCalendarApi: Schedule validation failed:', validation.errors);
+        return {
+          success: false,
+          error: `Validation failed: ${validation.errors.join(', ')}`
+        };
+      }
+      
+      console.log('✅ MedicationCalendarApi: Schedule validation passed');
+      
+      // Log frequency and time generation details
+      console.log('🔍 MedicationCalendarApi: Schedule creation details:', {
+        frequency: scheduleData.frequency,
+        times: scheduleData.times,
+        timesCount: scheduleData.times?.length || 0,
+        medicationId: scheduleData.medicationId,
+        patientId: scheduleData.patientId,
+        generateCalendarEvents: scheduleData.generateCalendarEvents,
+        isIndefinite: scheduleData.isIndefinite,
+        startDate: scheduleData.startDate?.toISOString(),
+        endDate: scheduleData.endDate?.toISOString()
+      });
+      
       const headers = await getAuthHeaders();
       console.log('🔧 MedicationCalendarApi: Headers prepared');
       
@@ -117,6 +142,15 @@ class MedicationCalendarApi {
 
       const result = await response.json();
       console.log('🔧 MedicationCalendarApi: Response data:', result);
+      
+      if (result.success) {
+        console.log('✅ MedicationCalendarApi: Schedule created successfully:', {
+          scheduleId: result.data?.id,
+          frequency: result.data?.frequency,
+          times: result.data?.times,
+          generateCalendarEvents: result.data?.generateCalendarEvents
+        });
+      }
       
       return result;
     } catch (error) {
@@ -784,22 +818,32 @@ class MedicationCalendarApi {
 
   // Generate default schedule times based on frequency
   generateDefaultTimes(frequency: string): string[] {
-    switch (frequency) {
-      case 'daily':
-        return ['07:00'];
-      case 'twice_daily':
-        return ['07:00', '19:00'];
-      case 'three_times_daily':
-        return ['07:00', '13:00', '19:00'];
-      case 'four_times_daily':
-        return ['07:00', '12:00', '17:00', '22:00'];
-      case 'weekly':
-        return ['07:00'];
-      case 'monthly':
-        return ['07:00'];
-      default:
-        return ['07:00'];
-    }
+    console.log('🔍 MedicationCalendarApi: Generating default times for frequency:', frequency);
+    
+    const times = (() => {
+      switch (frequency) {
+        case 'daily':
+          return ['07:00'];
+        case 'twice_daily':
+          return ['07:00', '19:00'];
+        case 'three_times_daily':
+          return ['07:00', '13:00', '19:00'];
+        case 'four_times_daily':
+          return ['07:00', '12:00', '17:00', '22:00'];
+        case 'weekly':
+          return ['07:00'];
+        case 'monthly':
+          return ['07:00'];
+        case 'as_needed':
+          return []; // PRN medications don't have scheduled times
+        default:
+          console.warn(`⚠️ MedicationCalendarApi: Unknown frequency "${frequency}", defaulting to daily`);
+          return ['07:00'];
+      }
+    })();
+    
+    console.log('🔍 MedicationCalendarApi: Generated default times:', times);
+    return times;
   }
 
   // Generate default reminder times (in minutes before dose)
@@ -812,6 +856,8 @@ class MedicationCalendarApi {
     isValid: boolean;
     errors: string[];
   } {
+    console.log('🔍 MedicationCalendarApi: Validating schedule data:', scheduleData);
+    
     const errors: string[] = [];
 
     if (!scheduleData.medicationId) {
@@ -832,6 +878,12 @@ class MedicationCalendarApi {
           errors.push(`Invalid time format: ${time}. Use HH:MM format`);
         }
       }
+      
+      // Check for duplicate times
+      const uniqueTimes = new Set(scheduleData.times);
+      if (uniqueTimes.size !== scheduleData.times.length) {
+        errors.push('Duplicate times are not allowed');
+      }
     }
 
     if (!scheduleData.dosageAmount) {
@@ -850,10 +902,14 @@ class MedicationCalendarApi {
       errors.push('Day of month is required for monthly frequency');
     }
 
-    return {
+    const validationResult = {
       isValid: errors.length === 0,
       errors
     };
+    
+    console.log('🔍 MedicationCalendarApi: Validation result:', validationResult);
+    
+    return validationResult;
   }
 
   // ===== GRACE PERIOD MANAGEMENT API =====
@@ -991,6 +1047,40 @@ class MedicationCalendarApi {
     } catch (error) {
       console.error('Error fetching missed medication statistics:', error);
       return { success: false, error: 'Failed to fetch missed medication statistics' };
+    }
+  }
+
+  // ===== BULK OPERATIONS API =====
+
+  // Create schedules for existing medications that don't have them
+  async createBulkSchedules(): Promise<ApiResponse<{
+    processed: number;
+    created: number;
+    skipped: number;
+    errors: string[];
+  }>> {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/medications/bulk-create-schedules`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+      });
+      
+      const result = await response.json();
+      
+      // Clear caches on successful bulk creation
+      if (result.success && result.data.created > 0) {
+        RateLimitedAPI.clearCache('today_buckets');
+        RateLimitedAPI.clearCache('calendar_events');
+        RateLimitedAPI.clearCache('medication_schedules');
+        requestDebouncer.reset();
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('Error creating bulk schedules:', error);
+      return { success: false, error: 'Failed to create bulk schedules' };
     }
   }
 }

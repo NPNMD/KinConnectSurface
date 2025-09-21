@@ -17,17 +17,20 @@ interface MedicationRemindersProps {
   patientId: string;
   showUpcoming?: boolean;
   showOverdue?: boolean;
+  showCompleted?: boolean;
   maxItems?: number;
 }
 
-export default function MedicationReminders({ 
-  patientId, 
-  showUpcoming = true, 
+export default function MedicationReminders({
+  patientId,
+  showUpcoming = true,
   showOverdue = true,
+  showCompleted = false,
   maxItems = 10
 }: MedicationRemindersProps) {
   const [upcomingEvents, setUpcomingEvents] = useState<MedicationCalendarEvent[]>([]);
   const [overdueEvents, setOverdueEvents] = useState<MedicationCalendarEvent[]>([]);
+  const [completedEvents, setCompletedEvents] = useState<MedicationCalendarEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [takingMedication, setTakingMedication] = useState<string | null>(null);
   const [showNotes, setShowNotes] = useState<string | null>(null);
@@ -61,9 +64,10 @@ export default function MedicationReminders({
       if (result.success && result.data) {
         const events = result.data;
         
-        // Separate upcoming and overdue events
+        // Separate upcoming, overdue, and completed events
         const upcoming: MedicationCalendarEvent[] = [];
         const overdue: MedicationCalendarEvent[] = [];
+        const completed: MedicationCalendarEvent[] = [];
         
         events.forEach(event => {
           if (event.status === 'scheduled') {
@@ -73,15 +77,19 @@ export default function MedicationReminders({
             } else {
               overdue.push(event);
             }
+          } else if (event.status === 'taken') {
+            completed.push(event);
           }
         });
 
         // Sort by scheduled time
         upcoming.sort((a, b) => new Date(a.scheduledDateTime).getTime() - new Date(b.scheduledDateTime).getTime());
         overdue.sort((a, b) => new Date(b.scheduledDateTime).getTime() - new Date(a.scheduledDateTime).getTime());
+        completed.sort((a, b) => new Date(a.scheduledDateTime).getTime() - new Date(b.scheduledDateTime).getTime());
 
         setUpcomingEvents(upcoming.slice(0, maxItems));
         setOverdueEvents(overdue.slice(0, maxItems));
+        setCompletedEvents(completed.slice(0, maxItems));
       }
     } catch (error) {
       console.error('Error loading reminders:', error);
@@ -176,27 +184,40 @@ export default function MedicationReminders({
     }
   };
 
-  const ReminderCard = ({ event, isOverdue = false }: { event: MedicationCalendarEvent; isOverdue?: boolean }) => (
+  const ReminderCard = ({ event, isOverdue = false, isCompleted = false }: { event: MedicationCalendarEvent; isOverdue?: boolean; isCompleted?: boolean }) => (
     <div className={`p-4 rounded-lg border ${
-      isOverdue 
-        ? 'bg-red-50 border-red-200' 
+      isCompleted
+        ? 'bg-green-50 border-green-200'
+        : isOverdue
+        ? 'bg-red-50 border-red-200'
         : 'bg-blue-50 border-blue-200'
     }`}>
       <div className="flex items-start justify-between">
         <div className="flex items-start space-x-3 flex-1">
           <div className={`p-2 rounded-full ${
-            isOverdue ? 'bg-red-100' : 'bg-blue-100'
+            isCompleted ? 'bg-green-100' : isOverdue ? 'bg-red-100' : 'bg-blue-100'
           }`}>
-            <Pill className={`w-4 h-4 ${
-              isOverdue ? 'text-red-600' : 'text-blue-600'
-            }`} />
+            {isCompleted ? (
+              <CheckCircle className="w-4 h-4 text-green-600" />
+            ) : (
+              <Pill className={`w-4 h-4 ${
+                isOverdue ? 'text-red-600' : 'text-blue-600'
+              }`} />
+            )}
           </div>
           
           <div className="flex-1">
-            <h4 className="font-medium text-gray-900">
-              {event.medicationName}
-            </h4>
-            <p className="text-sm text-gray-600">
+            <div className="flex items-center space-x-2">
+              <h4 className={`font-medium ${isCompleted ? 'text-gray-600' : 'text-gray-900'}`}>
+                {event.medicationName}
+              </h4>
+              {isCompleted && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                  ✓ Taken
+                </span>
+              )}
+            </div>
+            <p className={`text-sm ${isCompleted ? 'text-gray-500' : 'text-gray-600'}`}>
               {event.dosageAmount}
             </p>
             {event.instructions && (
@@ -207,23 +228,30 @@ export default function MedicationReminders({
             
             <div className="flex items-center space-x-4 mt-2 text-sm">
               <span className={`flex items-center space-x-1 ${
-                isOverdue ? 'text-red-600' : 'text-blue-600'
+                isCompleted
+                  ? 'text-gray-500'
+                  : isOverdue
+                  ? 'text-red-600'
+                  : 'text-blue-600'
               }`}>
                 <Clock className="w-3 h-3" />
                 <span>{formatTime(event.scheduledDateTime)}</span>
               </span>
               
-              <span className={`text-xs ${
-                isOverdue ? 'text-red-500' : 'text-gray-500'
-              }`}>
-                {getTimeUntil(event.scheduledDateTime)}
-              </span>
+              {!isCompleted && (
+                <span className={`text-xs ${
+                  isOverdue ? 'text-red-500' : 'text-gray-500'
+                }`}>
+                  {getTimeUntil(event.scheduledDateTime)}
+                </span>
+              )}
             </div>
           </div>
         </div>
         
-        <div className="flex items-center space-x-2">
-          {showNotes === event.id ? (
+        {!isCompleted && (
+          <div className="flex items-center space-x-2">
+            {showNotes === event.id ? (
             <div className="flex items-center space-x-2">
               <input
                 type="text"
@@ -276,9 +304,10 @@ export default function MedicationReminders({
               >
                 <Plus className="w-4 h-4" />
               </button>
-            </>
-          )}
-        </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -292,7 +321,7 @@ export default function MedicationReminders({
     );
   }
 
-  const hasReminders = (showOverdue && overdueEvents.length > 0) || (showUpcoming && upcomingEvents.length > 0);
+  const hasReminders = (showOverdue && overdueEvents.length > 0) || (showUpcoming && upcomingEvents.length > 0) || (showCompleted && completedEvents.length > 0);
 
   if (!hasReminders) {
     return (
@@ -300,11 +329,15 @@ export default function MedicationReminders({
         <Bell className="w-12 h-12 text-gray-300 mx-auto mb-4" />
         <h4 className="text-lg font-medium text-gray-900 mb-2">No reminders</h4>
         <p className="text-gray-500">
-          {showUpcoming && showOverdue 
+          {showUpcoming && showOverdue && showCompleted
+            ? "You're all caught up! No medications scheduled for today."
+            : showUpcoming && showOverdue
             ? "You're all caught up! No upcoming or overdue medications."
-            : showUpcoming 
+            : showUpcoming
             ? "No upcoming medications scheduled for today."
-            : "No overdue medications."}
+            : showOverdue
+            ? "No overdue medications."
+            : "No completed medications today."}
         </p>
       </div>
     );
@@ -356,6 +389,23 @@ export default function MedicationReminders({
           <div className="space-y-3">
             {upcomingEvents.map((event) => (
               <ReminderCard key={event.id} event={event} isOverdue={false} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Completed Medications */}
+      {showCompleted && completedEvents.length > 0 && (
+        <div>
+          <div className="flex items-center space-x-2 mb-3">
+            <CheckCircle className="w-4 h-4 text-green-600" />
+            <h4 className="text-md font-medium text-green-900">
+              Completed Today ({completedEvents.length})
+            </h4>
+          </div>
+          <div className="space-y-3">
+            {completedEvents.map((event) => (
+              <ReminderCard key={event.id} event={event} isCompleted={true} />
             ))}
           </div>
         </div>

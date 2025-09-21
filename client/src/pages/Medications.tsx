@@ -18,17 +18,25 @@ import {
   Trash2,
   Settings,
   User,
-  Users
+  Users,
+  TrendingUp,
+  Target,
+  History,
+  X
 } from 'lucide-react';
-import { Medication, NewMedication } from '@shared/types';
+import { Medication, NewMedication, MedicationCalendarEvent } from '@shared/types';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import { createSmartRefresh, createDebouncedFunction } from '@/lib/requestDebouncer';
+import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
 import MedicationManager from '@/components/MedicationManager';
 import MedicationReminders from '@/components/MedicationReminders';
 import UnifiedMedicationView from '@/components/UnifiedMedicationView';
 import TimeBucketView from '@/components/TimeBucketView';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import PatientSwitcher from '@/components/PatientSwitcher';
+import MissedMedicationsModal from '@/components/MissedMedicationsModal';
+import DrugSafetyPanel from '@/components/DrugSafetyPanel';
+import UnscheduledMedicationsAlert from '@/components/UnscheduledMedicationsAlert';
 import { CreatePermissionWrapper, EditPermissionWrapper } from '@/components/PermissionWrapper';
 
 export default function Medications() {
@@ -41,10 +49,21 @@ export default function Medications() {
   const [medications, setMedications] = useState<Medication[]>([]);
   const [isLoadingMedications, setIsLoadingMedications] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
+  const [filterStatus, setFilterStatus] = useState<'active' | 'inactive' | 'all'>('active');
   const [showReminders, setShowReminders] = useState(true);
   const [useTimeBuckets, setUseTimeBuckets] = useState(true); // New enhanced view
   const [refreshTrigger, setRefreshTrigger] = useState(0); // Trigger for TimeBucketView refresh
+  const [showMissedModal, setShowMissedModal] = useState(false);
+  const [missedMedicationsCount, setMissedMedicationsCount] = useState(0);
+  const [isDrugSafetyCollapsed, setIsDrugSafetyCollapsed] = useState(false);
+  const [showMedicationHistory, setShowMedicationHistory] = useState(false);
+  const [adherenceStats, setAdherenceStats] = useState<{
+    totalMedications: number;
+    overallAdherenceRate: number;
+    totalScheduledDoses: number;
+    totalTakenDoses: number;
+    totalMissedDoses: number;
+  } | null>(null);
 
   // Create smart refresh function for medications
   const smartLoadMedications = createSmartRefresh(
@@ -97,6 +116,59 @@ export default function Medications() {
       loadMedications();
     }
   }, [getEffectivePatientId()]);
+
+  // Load missed medications count and adherence stats
+  useEffect(() => {
+    const effectivePatientId = getEffectivePatientId();
+    if (effectivePatientId) {
+      loadMissedMedicationsCount();
+      loadAdherenceStats();
+    }
+  }, [getEffectivePatientId()]);
+
+  const loadMissedMedicationsCount = async () => {
+    try {
+      const patientId = getEffectivePatientId();
+      if (!patientId) return;
+
+      // Get missed medications from last 7 days
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 7);
+
+      const response = await medicationCalendarApi.getMissedMedications({
+        patientId,
+        startDate,
+        endDate,
+        limit: 50
+      });
+
+      if (response.success && response.data) {
+        setMissedMedicationsCount(response.data.length);
+      }
+    } catch (error) {
+      console.error('Error loading missed medications count:', error);
+    }
+  };
+
+  const loadAdherenceStats = async () => {
+    try {
+      const response = await medicationCalendarApi.getAdherenceSummary();
+      if (response.success && response.data) {
+        setAdherenceStats(response.data.summary);
+      }
+    } catch (error) {
+      console.error('Error loading adherence stats:', error);
+    }
+  };
+
+  const handleMissedMedicationAction = (eventId: string, action: 'take' | 'skip') => {
+    // Refresh counts and stats after action
+    loadMissedMedicationsCount();
+    loadAdherenceStats();
+    loadMedications();
+    setRefreshTrigger(prev => prev + 1);
+  };
 
   // Listen for medication schedule updates with debounced refresh
   useEffect(() => {
@@ -207,11 +279,18 @@ export default function Medications() {
                          medication.genericName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          medication.brandName?.toLowerCase().includes(searchQuery.toLowerCase());
     
-    const matchesStatus = filterStatus === 'all' || 
+    const matchesStatus = filterStatus === 'all' ||
                          (filterStatus === 'active' && medication.isActive) ||
                          (filterStatus === 'inactive' && !medication.isActive);
     
     return matchesSearch && matchesStatus;
+  });
+
+  // For medication history modal, show all medications regardless of filter
+  const allMedicationsForHistory = medications.filter(medication => {
+    return medication.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+           medication.genericName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+           medication.brandName?.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
   const activeMedications = filteredMedications.filter(med => med.isActive);
@@ -236,21 +315,146 @@ export default function Medications() {
               </div>
             </div>
             
-            <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
-              <Settings className="w-5 h-5" />
-            </button>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setShowMedicationHistory(true)}
+                className="flex items-center space-x-1 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors"
+              >
+                <History className="w-4 h-4" />
+                <span>History</span>
+              </button>
+              <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
+                <Settings className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="px-4 py-4 pb-20">
+        {/* Missed Medications Alert & Adherence Stats */}
+        {(missedMedicationsCount > 0 || adherenceStats) && (
+          <div className="mb-6 space-y-4">
+            {/* Missed Medications Alert */}
+            {missedMedicationsCount > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <AlertTriangle className="w-6 h-6 text-red-600" />
+                    <div>
+                      <h3 className="font-medium text-red-900">
+                        {missedMedicationsCount} Missed Medication{missedMedicationsCount !== 1 ? 's' : ''}
+                      </h3>
+                      <p className="text-sm text-red-700">
+                        You have missed medications from the last 7 days that need attention.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowMissedModal(true)}
+                    className="relative px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+                  >
+                    View Missed Medications
+                    {missedMedicationsCount > 0 && (
+                      <span className="absolute -top-2 -right-2 bg-red-800 text-white text-xs rounded-full h-6 w-6 flex items-center justify-center">
+                        {missedMedicationsCount > 99 ? '99+' : missedMedicationsCount}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Adherence Statistics */}
+            {adherenceStats && (
+              <div className="bg-white rounded-lg border border-gray-200 p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900 flex items-center space-x-2">
+                    <TrendingUp className="w-5 h-5 text-blue-600" />
+                    <span>Medication Adherence</span>
+                  </h3>
+                  <div className="flex items-center space-x-2">
+                    <Target className="w-4 h-4 text-green-600" />
+                    <span className="text-sm text-gray-600">Last 30 days</span>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-green-600">
+                      {Math.round(adherenceStats.overallAdherenceRate)}%
+                    </div>
+                    <div className="text-sm text-gray-600">Overall Adherence</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-blue-600">
+                      {adherenceStats.totalTakenDoses}
+                    </div>
+                    <div className="text-sm text-gray-600">Doses Taken</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-red-600">
+                      {adherenceStats.totalMissedDoses}
+                    </div>
+                    <div className="text-sm text-gray-600">Doses Missed</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-gray-600">
+                      {adherenceStats.totalMedications}
+                    </div>
+                    <div className="text-sm text-gray-600">Active Medications</div>
+                  </div>
+                </div>
+                
+                {/* Progress Bar */}
+                <div className="mt-4">
+                  <div className="flex justify-between text-sm text-gray-600 mb-1">
+                    <span>Adherence Progress</span>
+                    <span>{Math.round(adherenceStats.overallAdherenceRate)}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className="bg-green-600 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.min(adherenceStats.overallAdherenceRate, 100)}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Unscheduled Medications Alert */}
+        <UnscheduledMedicationsAlert
+          medications={medications}
+          onSchedulesCreated={() => {
+            // Refresh medications and today's view after schedules are created
+            loadMedications();
+            setRefreshTrigger(prev => prev + 1);
+            loadMissedMedicationsCount();
+            loadAdherenceStats();
+          }}
+        />
+
         {/* Today's Medications Section */}
         {showReminders && (
           <div className="mb-6">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-semibold text-gray-900">Today's Medications</h2>
               <div className="flex items-center space-x-2">
+                {/* Missed Medications Button */}
+                <button
+                  onClick={() => setShowMissedModal(true)}
+                  className="relative text-xs px-3 py-1.5 bg-red-100 text-red-800 rounded-md hover:bg-red-200 transition-colors"
+                >
+                  Missed ({missedMedicationsCount})
+                  {missedMedicationsCount > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-red-600 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
+                      {missedMedicationsCount > 9 ? '9+' : missedMedicationsCount}
+                    </span>
+                  )}
+                </button>
                 <button
                   onClick={() => setUseTimeBuckets(!useTimeBuckets)}
                   className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-md hover:bg-blue-200 transition-colors"
@@ -309,9 +513,9 @@ export default function Medications() {
             {/* Filter Tabs */}
             <div className="flex rounded-lg border border-gray-200 bg-white">
               {[
-                { key: 'all', label: 'All', count: medications.length },
-                { key: 'active', label: 'Active', count: activeMedications.length },
-                { key: 'inactive', label: 'Past', count: inactiveMedications.length }
+                { key: 'active', label: 'Active Medications', count: activeMedications.length },
+                { key: 'inactive', label: 'Past/Inactive Medications', count: inactiveMedications.length },
+                { key: 'all', label: 'All Medications', count: medications.length }
               ].map(filter => (
                 <button
                   key={filter.key}
@@ -370,15 +574,25 @@ export default function Medications() {
           </div>
         )}
 
-        {/* Quick Stats */}
+        {/* Drug Safety Panel */}
+        <div className="mt-6">
+          <DrugSafetyPanel
+            medications={filteredMedications}
+            patientId={getEffectivePatientId() || ''}
+            isCollapsed={isDrugSafetyCollapsed}
+            onToggleCollapse={() => setIsDrugSafetyCollapsed(!isDrugSafetyCollapsed)}
+          />
+        </div>
+
+        {/* Quick Stats - Focus on Active Medications */}
         <div className="mt-6 grid grid-cols-2 gap-4">
           <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
             <div className="text-2xl font-bold text-primary-600">{activeMedications.length}</div>
             <div className="text-sm text-gray-600">Active Medications</div>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
-            <div className="text-2xl font-bold text-blue-600">{medications.length}</div>
-            <div className="text-sm text-gray-600">Total Medications</div>
+            <div className="text-2xl font-bold text-orange-600">{inactiveMedications.length}</div>
+            <div className="text-sm text-gray-600">Past/Inactive</div>
           </div>
         </div>
       </main>
@@ -427,6 +641,123 @@ export default function Medications() {
           </Link>
         </div>
       </nav>
+
+      {/* Missed Medications Modal */}
+      <MissedMedicationsModal
+        isOpen={showMissedModal}
+        onClose={() => setShowMissedModal(false)}
+        onMedicationAction={handleMissedMedicationAction}
+      />
+
+      {/* Medication History Modal */}
+      {showMedicationHistory && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <div className="flex items-center space-x-2">
+                <History className="w-5 h-5 text-gray-600" />
+                <h2 className="text-lg font-semibold text-gray-900">Complete Medication History</h2>
+              </div>
+              <button
+                onClick={() => setShowMedicationHistory(false)}
+                className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-4 overflow-y-auto max-h-[calc(90vh-120px)]">
+              {/* Search for History */}
+              <div className="mb-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                  <input
+                    type="text"
+                    placeholder="Search medication history..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  />
+                </div>
+              </div>
+
+              {/* History Stats */}
+              <div className="grid grid-cols-3 gap-4 mb-6">
+                <div className="bg-green-50 rounded-lg border border-green-200 p-3 text-center">
+                  <div className="text-xl font-bold text-green-600">{activeMedications.length}</div>
+                  <div className="text-xs text-green-700">Currently Active</div>
+                </div>
+                <div className="bg-orange-50 rounded-lg border border-orange-200 p-3 text-center">
+                  <div className="text-xl font-bold text-orange-600">{inactiveMedications.length}</div>
+                  <div className="text-xs text-orange-700">Past/Inactive</div>
+                </div>
+                <div className="bg-blue-50 rounded-lg border border-blue-200 p-3 text-center">
+                  <div className="text-xl font-bold text-blue-600">{medications.length}</div>
+                  <div className="text-xs text-blue-700">Total Ever</div>
+                </div>
+              </div>
+
+              {/* All Medications List */}
+              <div className="space-y-3">
+                {allMedicationsForHistory.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Pill className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500">No medications found matching your search.</p>
+                  </div>
+                ) : (
+                  allMedicationsForHistory
+                    .sort((a, b) => {
+                      // Sort by active status first, then by name
+                      if (a.isActive !== b.isActive) {
+                        return a.isActive ? -1 : 1;
+                      }
+                      return a.name.localeCompare(b.name);
+                    })
+                    .map(medication => (
+                      <div
+                        key={medication.id}
+                        className={`p-4 rounded-lg border ${
+                          medication.isActive
+                            ? 'border-green-200 bg-green-50'
+                            : 'border-gray-200 bg-gray-50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-2">
+                              <h3 className="font-medium text-gray-900">{medication.name}</h3>
+                              <span className={`px-2 py-1 text-xs rounded-full ${
+                                medication.isActive
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-gray-100 text-gray-600'
+                              }`}>
+                                {medication.isActive ? 'Active' : 'Inactive'}
+                              </span>
+                            </div>
+                            <div className="text-sm text-gray-600 mt-1">
+                              <div>{medication.dosage} • {medication.frequency}</div>
+                              {medication.genericName && (
+                                <div className="text-xs text-gray-500">Generic: {medication.genericName}</div>
+                              )}
+                              <div className="text-xs text-gray-500">
+                                Prescribed: {medication.prescribedDate.toLocaleDateString()}
+                                {medication.endDate && (
+                                  <span> • Ended: {medication.endDate.toLocaleDateString()}</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

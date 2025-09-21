@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.summarizeVisit = exports.transcribeAudio = exports.processVisitUpload = exports.api = void 0;
+exports.summarizeVisit = exports.transcribeAudio = exports.processVisitUpload = exports.detectMissedMedications = exports.api = void 0;
 const functions = __importStar(require("firebase-functions/v1"));
 const params_1 = require("firebase-functions/params");
 const express_1 = __importDefault(require("express"));
@@ -2868,8 +2868,8 @@ app.get('/medication-calendar/events/today-buckets', authenticate, async (req, r
             id: targetPatientId,
             patientId: targetPatientId,
             timeSlots: {
-                morning: { start: '06:00', end: '10:00', defaultTime: '07:00', label: 'Morning' },
-                noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Noon' },
+                morning: { start: '06:00', end: '10:00', defaultTime: '08:00', label: 'Morning' },
+                noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Afternoon' },
                 evening: { start: '17:00', end: '20:00', defaultTime: '18:00', label: 'Evening' },
                 bedtime: { start: '21:00', end: '23:59', defaultTime: '22:00', label: 'Bedtime' }
             },
@@ -2900,8 +2900,8 @@ app.get('/medication-calendar/events/today-buckets', authenticate, async (req, r
                 const defaultPrefs = {
                     patientId: targetPatientId,
                     timeSlots: {
-                        morning: { start: '06:00', end: '10:00', defaultTime: '07:00', label: 'Morning' },
-                        noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Noon' },
+                        morning: { start: '06:00', end: '10:00', defaultTime: '08:00', label: 'Morning' },
+                        noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Afternoon' },
                         evening: { start: '17:00', end: '20:00', defaultTime: '18:00', label: 'Evening' },
                         bedtime: { start: '21:00', end: '23:59', defaultTime: '22:00', label: 'Bedtime' }
                     },
@@ -2937,14 +2937,27 @@ app.get('/medication-calendar/events/today-buckets', authenticate, async (req, r
             evening: [],
             bedtime: [],
             overdue: [],
+            completed: [], // Add completed bucket for taken medications
             patientPreferences: preferences,
             lastUpdated: now
         };
         events.forEach(event => {
             const eventTime = new Date(event.scheduledDateTime);
             const minutesUntilDue = Math.floor((eventTime.getTime() - now.getTime()) / (1000 * 60));
-            // Skip non-actionable medications
-            const nonActionableStatuses = ['taken', 'late', 'skipped', 'missed', 'cancelled', 'paused', 'completed'];
+            // Handle completed medications separately
+            if (['taken', 'late', 'skipped', 'missed'].includes(event.status)) {
+                const enhancedEvent = {
+                    ...event,
+                    minutesUntilDue,
+                    isOverdue: minutesUntilDue < 0,
+                    minutesOverdue: minutesUntilDue < 0 ? Math.abs(minutesUntilDue) : 0,
+                    timeBucket: 'completed'
+                };
+                buckets.completed.push(enhancedEvent);
+                return;
+            }
+            // Skip truly non-actionable medications (cancelled, paused, completed)
+            const nonActionableStatuses = ['cancelled', 'paused', 'completed'];
             if (nonActionableStatuses.includes(event.status)) {
                 return;
             }
@@ -3025,8 +3038,8 @@ app.get('/patients/preferences/medication-timing', authenticate, async (req, res
             const defaultPrefs = {
                 patientId,
                 timeSlots: {
-                    morning: { start: '06:00', end: '10:00', defaultTime: '07:00', label: 'Morning' },
-                    noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Noon' },
+                    morning: { start: '06:00', end: '10:00', defaultTime: '08:00', label: 'Morning' },
+                    noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Afternoon' },
                     evening: { start: '17:00', end: '20:00', defaultTime: '18:00', label: 'Evening' },
                     bedtime: { start: '21:00', end: '23:59', defaultTime: '22:00', label: 'Bedtime' }
                 },
@@ -3076,6 +3089,18 @@ app.put('/patients/preferences/medication-timing', authenticate, async (req, res
     try {
         const patientId = req.user.uid;
         const updateData = req.body;
+        // Validate time slots if they're being updated
+        if (updateData.timeSlots && updateData.workSchedule) {
+            const validation = validateTimeSlots(updateData.timeSlots, updateData.workSchedule);
+            if (!validation.isValid) {
+                console.error('❌ Invalid time slot configuration in update:', validation.errors);
+                return res.status(400).json({
+                    success: false,
+                    error: 'Invalid time slot configuration',
+                    details: validation.errors
+                });
+            }
+        }
         const updatePrefs = {
             ...updateData,
             patientId,
@@ -3106,6 +3131,58 @@ app.put('/patients/preferences/medication-timing', authenticate, async (req, res
         });
     }
 });
+// Validation function for time slot configurations
+function validateTimeSlots(timeSlots, workSchedule) {
+    const errors = [];
+    // Check for the problematic 2 AM default time issue
+    if (workSchedule === 'night_shift') {
+        if (timeSlots.evening?.defaultTime === '02:00') {
+            errors.push('Night shift evening slot should not default to 2 AM - use 00:00 (midnight) instead');
+        }
+        if (timeSlots.evening?.start === '01:00' && timeSlots.evening?.end === '04:00') {
+            errors.push('Night shift evening slot should be 23:00-02:00, not 01:00-04:00');
+        }
+        if (timeSlots.bedtime?.defaultTime === '06:00') {
+            errors.push('Night shift bedtime slot should default to 08:00, not 06:00');
+        }
+    }
+    // Validate time format (HH:MM)
+    const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    Object.entries(timeSlots).forEach(([slot, config]) => {
+        if (!timeRegex.test(config.start)) {
+            errors.push(`Invalid start time format for ${slot}: ${config.start}`);
+        }
+        if (!timeRegex.test(config.end)) {
+            errors.push(`Invalid end time format for ${slot}: ${config.end}`);
+        }
+        if (!timeRegex.test(config.defaultTime)) {
+            errors.push(`Invalid default time format for ${slot}: ${config.defaultTime}`);
+        }
+    });
+    // Validate that default time is within the slot range
+    Object.entries(timeSlots).forEach(([slot, config]) => {
+        const start = config.start;
+        const end = config.end;
+        const defaultTime = config.defaultTime;
+        // Handle overnight slots (e.g., 23:00-02:00)
+        if (start > end) {
+            // Overnight slot
+            if (!(defaultTime >= start || defaultTime <= end)) {
+                errors.push(`Default time ${defaultTime} for ${slot} is not within range ${start}-${end}`);
+            }
+        }
+        else {
+            // Regular slot
+            if (!(defaultTime >= start && defaultTime <= end)) {
+                errors.push(`Default time ${defaultTime} for ${slot} is not within range ${start}-${end}`);
+            }
+        }
+    });
+    return {
+        isValid: errors.length === 0,
+        errors
+    };
+}
 // Reset patient preferences to defaults
 app.post('/patients/preferences/medication-timing/reset-defaults', authenticate, async (req, res) => {
     try {
@@ -3114,14 +3191,24 @@ app.post('/patients/preferences/medication-timing/reset-defaults', authenticate,
         const defaultTimeSlots = workSchedule === 'night_shift' ? {
             morning: { start: '14:00', end: '18:00', defaultTime: '15:00', label: 'Morning' },
             noon: { start: '19:00', end: '22:00', defaultTime: '20:00', label: 'Noon' },
-            evening: { start: '01:00', end: '04:00', defaultTime: '02:00', label: 'Evening' },
-            bedtime: { start: '05:00', end: '08:00', defaultTime: '06:00', label: 'Bedtime' }
+            evening: { start: '23:00', end: '02:00', defaultTime: '00:00', label: 'Late Evening' },
+            bedtime: { start: '06:00', end: '10:00', defaultTime: '08:00', label: 'Morning Sleep' }
         } : {
-            morning: { start: '06:00', end: '10:00', defaultTime: '07:00', label: 'Morning' },
-            noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Noon' },
+            morning: { start: '06:00', end: '10:00', defaultTime: '08:00', label: 'Morning' },
+            noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Afternoon' },
             evening: { start: '17:00', end: '20:00', defaultTime: '18:00', label: 'Evening' },
             bedtime: { start: '21:00', end: '23:59', defaultTime: '22:00', label: 'Bedtime' }
         };
+        // Validate the time slots configuration
+        const validation = validateTimeSlots(defaultTimeSlots, workSchedule);
+        if (!validation.isValid) {
+            console.error('❌ Invalid time slot configuration:', validation.errors);
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid time slot configuration',
+                details: validation.errors
+            });
+        }
         const defaultPrefs = {
             patientId,
             timeSlots: defaultTimeSlots,
@@ -3488,28 +3575,36 @@ app.post('/medication-calendar/schedules', authenticate, async (req, res) => {
         const dosageAmount = scheduleData.dosageAmount || medicationData?.dosage || '1 tablet';
         // Generate default times based on frequency (7am for once daily, 7am & 7pm for twice daily, etc.)
         let defaultTimes = ['07:00']; // Default to 7am
+        console.log('🔍 Backend Schedule Creation: Processing frequency:', frequency);
         switch (frequency) {
             case 'daily':
             case 'once_daily':
                 defaultTimes = ['07:00'];
+                console.log('🔍 Backend Schedule Creation: Set daily times:', defaultTimes);
                 break;
             case 'twice_daily':
                 defaultTimes = ['07:00', '19:00']; // 7am and 7pm
+                console.log('🔍 Backend Schedule Creation: Set twice_daily times:', defaultTimes);
                 break;
             case 'three_times_daily':
                 defaultTimes = ['07:00', '13:00', '19:00']; // 7am, 1pm, and 7pm
+                console.log('🔍 Backend Schedule Creation: Set three_times_daily times:', defaultTimes);
                 break;
             case 'four_times_daily':
                 defaultTimes = ['07:00', '12:00', '17:00', '22:00']; // 7am, 12pm, 5pm, 10pm
+                console.log('🔍 Backend Schedule Creation: Set four_times_daily times:', defaultTimes);
                 break;
             case 'weekly':
                 defaultTimes = ['07:00'];
+                console.log('🔍 Backend Schedule Creation: Set weekly times:', defaultTimes);
                 break;
             case 'monthly':
                 defaultTimes = ['07:00'];
+                console.log('🔍 Backend Schedule Creation: Set monthly times:', defaultTimes);
                 break;
             default:
                 defaultTimes = ['07:00'];
+                console.log('🔍 Backend Schedule Creation: Set default times:', defaultTimes);
         }
         const times = scheduleData.times && scheduleData.times.length > 0 ? scheduleData.times : defaultTimes;
         // Validate required fields after auto-filling
@@ -4427,6 +4522,13 @@ app.post('/medications', authenticate, async (req, res) => {
     try {
         const userId = req.user.uid;
         const medicationData = req.body;
+        console.log('💊 Creating medication with data:', {
+            name: medicationData.name,
+            hasReminders: medicationData.hasReminders,
+            reminderTimes: medicationData.reminderTimes,
+            frequency: medicationData.frequency,
+            isPRN: medicationData.isPRN
+        });
         if (!medicationData.name) {
             return res.status(400).json({
                 success: false,
@@ -4440,6 +4542,130 @@ app.post('/medications', authenticate, async (req, res) => {
             updatedAt: admin.firestore.Timestamp.now()
         };
         const medicationRef = await firestore.collection('medications').add(newMedication);
+        console.log('✅ Medication created successfully:', medicationRef.id);
+        // 🔥 CRITICAL FIX: Auto-create schedule if hasReminders is true and not PRN
+        if (medicationData.hasReminders && !medicationData.isPRN && medicationData.frequency) {
+            console.log('📅 Auto-creating schedule for medication with reminders:', medicationRef.id);
+            try {
+                // Generate default times based on frequency if not provided
+                let defaultTimes = ['07:00']; // Morning default (7 AM)
+                const frequency = medicationData.frequency.toLowerCase().trim();
+                console.log('🔍 Backend: Parsing medication frequency:', frequency);
+                // Enhanced frequency parsing with comprehensive variations
+                if (frequency.includes('once daily') || frequency.includes('once a day') || frequency === 'daily' || frequency.includes('once')) {
+                    defaultTimes = ['07:00']; // Morning (7 AM)
+                    console.log('🔍 Backend: Mapped to daily times:', defaultTimes);
+                }
+                else if (frequency.includes('twice daily') || frequency.includes('twice a day') || frequency.includes('bid') || frequency.includes('twice') || frequency.includes('2x daily') || frequency.includes('twice per day')) {
+                    defaultTimes = ['07:00', '19:00']; // Morning & Evening (7 AM, 7 PM)
+                    console.log('🔍 Backend: Mapped to twice_daily times:', defaultTimes);
+                }
+                else if (frequency.includes('three times daily') || frequency.includes('three times a day') || frequency.includes('tid') || frequency.includes('three') || frequency.includes('3x daily') || frequency.includes('three times per day')) {
+                    defaultTimes = ['07:00', '13:00', '19:00']; // Morning, Afternoon, Evening
+                    console.log('🔍 Backend: Mapped to three_times_daily times:', defaultTimes);
+                }
+                else if (frequency.includes('four times daily') || frequency.includes('four times a day') || frequency.includes('qid') || frequency.includes('four') || frequency.includes('4x daily') || frequency.includes('four times per day')) {
+                    defaultTimes = ['07:00', '12:00', '17:00', '22:00']; // Morning, Afternoon, Evening, Bedtime
+                    console.log('🔍 Backend: Mapped to four_times_daily times:', defaultTimes);
+                }
+                else if (frequency.includes('every 4 hours')) {
+                    defaultTimes = ['07:00', '11:00', '15:00', '19:00', '23:00']; // Every 4 hours starting at 7 AM
+                    console.log('🔍 Backend: Mapped every 4 hours to times:', defaultTimes);
+                }
+                else if (frequency.includes('every 6 hours')) {
+                    defaultTimes = ['07:00', '13:00', '19:00', '01:00']; // Every 6 hours starting at 7 AM
+                    console.log('🔍 Backend: Mapped every 6 hours to times:', defaultTimes);
+                }
+                else if (frequency.includes('every 8 hours')) {
+                    defaultTimes = ['07:00', '15:00', '23:00']; // Every 8 hours starting at 7 AM
+                    console.log('🔍 Backend: Mapped every 8 hours to times:', defaultTimes);
+                }
+                else if (frequency.includes('every 12 hours')) {
+                    defaultTimes = ['07:00', '19:00']; // Every 12 hours
+                    console.log('🔍 Backend: Mapped every 12 hours to times:', defaultTimes);
+                }
+                else if (frequency.includes('weekly')) {
+                    defaultTimes = ['07:00'];
+                    console.log('🔍 Backend: Mapped to weekly times:', defaultTimes);
+                }
+                else if (frequency.includes('monthly')) {
+                    defaultTimes = ['07:00'];
+                    console.log('🔍 Backend: Mapped to monthly times:', defaultTimes);
+                }
+                else {
+                    console.warn(`⚠️ Backend: Unknown frequency "${frequency}", defaulting to daily`);
+                    defaultTimes = ['07:00']; // Default fallback
+                }
+                // Use provided reminderTimes or defaults
+                const scheduleTimes = medicationData.reminderTimes && medicationData.reminderTimes.length > 0
+                    ? medicationData.reminderTimes
+                    : defaultTimes;
+                // Map frequency to schedule frequency format with enhanced parsing
+                let scheduleFrequency = 'daily';
+                if (frequency.includes('twice daily') || frequency.includes('twice a day') || frequency.includes('bid') || frequency.includes('twice') || frequency.includes('2x daily') || frequency.includes('twice per day') || frequency.includes('every 12 hours')) {
+                    scheduleFrequency = 'twice_daily';
+                }
+                else if (frequency.includes('three times daily') || frequency.includes('three times a day') || frequency.includes('tid') || frequency.includes('three') || frequency.includes('3x daily') || frequency.includes('three times per day') || frequency.includes('every 8 hours')) {
+                    scheduleFrequency = 'three_times_daily';
+                }
+                else if (frequency.includes('four times daily') || frequency.includes('four times a day') || frequency.includes('qid') || frequency.includes('four') || frequency.includes('4x daily') || frequency.includes('four times per day') || frequency.includes('every 6 hours') || frequency.includes('every 4 hours')) {
+                    scheduleFrequency = 'four_times_daily';
+                }
+                else if (frequency.includes('weekly')) {
+                    scheduleFrequency = 'weekly';
+                }
+                else if (frequency.includes('monthly')) {
+                    scheduleFrequency = 'monthly';
+                }
+                else if (frequency.includes('needed') || frequency.includes('prn') || frequency.includes('as needed')) {
+                    scheduleFrequency = 'as_needed';
+                }
+                console.log('🔍 Backend: Mapped to schedule frequency:', scheduleFrequency);
+                const scheduleData = {
+                    medicationId: medicationRef.id,
+                    medicationName: medicationData.name,
+                    medicationDosage: medicationData.dosage || '',
+                    medicationForm: medicationData.dosageForm || '',
+                    medicationRoute: medicationData.route || 'oral',
+                    medicationInstructions: medicationData.instructions || '',
+                    patientId: userId,
+                    frequency: scheduleFrequency,
+                    times: scheduleTimes,
+                    daysOfWeek: [],
+                    dayOfMonth: 1,
+                    startDate: admin.firestore.Timestamp.fromDate(medicationData.startDate ? new Date(medicationData.startDate) : new Date()),
+                    endDate: medicationData.endDate ? admin.firestore.Timestamp.fromDate(new Date(medicationData.endDate)) : null,
+                    isIndefinite: !medicationData.endDate, // Indefinite if no end date
+                    dosageAmount: medicationData.dosage || '1 tablet',
+                    instructions: medicationData.instructions || '',
+                    generateCalendarEvents: true, // Always generate events for reminders
+                    reminderMinutesBefore: medicationData.reminderMinutesBefore || [15, 5],
+                    isActive: true,
+                    isPaused: false,
+                    pausedUntil: null,
+                    createdAt: admin.firestore.Timestamp.now(),
+                    updatedAt: admin.firestore.Timestamp.now(),
+                    autoCreated: true, // Flag to indicate this was auto-created
+                    autoCreatedReason: 'medication_has_reminders'
+                };
+                const scheduleRef = await firestore.collection('medication_schedules').add(scheduleData);
+                console.log('✅ Auto-created medication schedule:', scheduleRef.id);
+                // Generate calendar events for the new schedule
+                try {
+                    await generateCalendarEventsForSchedule(scheduleRef.id, scheduleData);
+                    console.log('✅ Auto-generated calendar events for schedule:', scheduleRef.id);
+                }
+                catch (eventError) {
+                    console.error('❌ Error auto-generating calendar events:', eventError);
+                    // Don't fail medication creation if event generation fails
+                }
+            }
+            catch (scheduleError) {
+                console.error('❌ Error auto-creating schedule for medication:', scheduleError);
+                // Don't fail medication creation if schedule creation fails
+                // The user can manually create a schedule later
+            }
+        }
         res.json({
             success: true,
             data: {
@@ -4458,13 +4684,258 @@ app.post('/medications', authenticate, async (req, res) => {
         });
     }
 });
+// 🔥 BULK SCHEDULE CREATION: Create schedules for existing medications without them
+app.post('/medications/bulk-create-schedules', authenticate, async (req, res) => {
+    try {
+        const userId = req.user.uid;
+        console.log('📅 Starting bulk schedule creation for patient:', userId);
+        // 🔍 DIAGNOSTIC: Get ALL medications first to see what we're working with
+        const allMedicationsQuery = await firestore.collection('medications')
+            .where('patientId', '==', userId)
+            .get();
+        const allMedications = allMedicationsQuery.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        }));
+        console.log('🔍 DIAGNOSTIC: All medications for patient:', {
+            totalCount: allMedications.length,
+            medications: allMedications.map(med => ({
+                id: med.id,
+                name: med.name,
+                isActive: med.isActive,
+                hasReminders: med.hasReminders,
+                isPRN: med.isPRN,
+                frequency: med.frequency,
+                dosage: med.dosage
+            }))
+        });
+        // Get all active medications for this patient that have reminders enabled
+        const medicationsQuery = await firestore.collection('medications')
+            .where('patientId', '==', userId)
+            .where('isActive', '==', true)
+            .where('hasReminders', '==', true)
+            .get();
+        const medications = medicationsQuery.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        }));
+        console.log(`📊 Found ${medications.length} medications with reminders enabled`);
+        console.log('🔍 DIAGNOSTIC: Medications with reminders:', medications.map(med => ({
+            id: med.id,
+            name: med.name,
+            frequency: med.frequency,
+            hasReminders: med.hasReminders,
+            isPRN: med.isPRN,
+            isActive: med.isActive
+        })));
+        const results = {
+            processed: 0,
+            created: 0,
+            skipped: 0,
+            errors: []
+        };
+        // Process each medication
+        for (const medication of medications) {
+            try {
+                results.processed++;
+                console.log(`🔍 DIAGNOSTIC: Processing medication "${medication.name}":`, {
+                    id: medication.id,
+                    name: medication.name,
+                    frequency: medication.frequency,
+                    dosage: medication.dosage,
+                    hasReminders: medication.hasReminders,
+                    isPRN: medication.isPRN,
+                    isActive: medication.isActive,
+                    reminderTimes: medication.reminderTimes
+                });
+                // Skip PRN medications
+                if (medication.isPRN) {
+                    console.log(`⏭️ SKIP REASON: PRN medication: ${medication.name}`);
+                    results.skipped++;
+                    continue;
+                }
+                // 🔍 DIAGNOSTIC: Check frequency field
+                if (!medication.frequency || typeof medication.frequency !== 'string' || medication.frequency.trim() === '') {
+                    console.log(`⏭️ SKIP REASON: Missing or invalid frequency for medication: ${medication.name}`, {
+                        frequency: medication.frequency,
+                        frequencyType: typeof medication.frequency,
+                        frequencyLength: medication.frequency?.length || 0
+                    });
+                    results.skipped++;
+                    results.errors.push(`${medication.name}: Missing or invalid frequency field`);
+                    continue;
+                }
+                // 🔍 DIAGNOSTIC: Check dosage field
+                if (!medication.dosage || typeof medication.dosage !== 'string' || medication.dosage.trim() === '') {
+                    console.log(`⏭️ SKIP REASON: Missing or invalid dosage for medication: ${medication.name}`, {
+                        dosage: medication.dosage,
+                        dosageType: typeof medication.dosage,
+                        dosageLength: medication.dosage?.length || 0
+                    });
+                    results.skipped++;
+                    results.errors.push(`${medication.name}: Missing or invalid dosage field`);
+                    continue;
+                }
+                // Check if schedule already exists
+                const existingScheduleQuery = await firestore.collection('medication_schedules')
+                    .where('medicationId', '==', medication.id)
+                    .where('isActive', '==', true)
+                    .limit(1)
+                    .get();
+                if (!existingScheduleQuery.empty) {
+                    console.log(`⏭️ SKIP REASON: Schedule already exists for medication: ${medication.name}`);
+                    results.skipped++;
+                    continue;
+                }
+                // Generate default times based on frequency
+                let defaultTimes = ['07:00']; // Morning default (7 AM)
+                const frequency = (medication.frequency || '').toLowerCase().trim();
+                console.log('🔍 Backend Bulk: Parsing medication frequency:', frequency);
+                // Enhanced frequency parsing with comprehensive variations
+                if (frequency.includes('once daily') || frequency.includes('once a day') || frequency === 'daily' || frequency.includes('once')) {
+                    defaultTimes = ['07:00']; // Morning (7 AM)
+                    console.log('🔍 Backend Bulk: Mapped to daily times:', defaultTimes);
+                }
+                else if (frequency.includes('twice daily') || frequency.includes('twice a day') || frequency.includes('bid') || frequency.includes('twice') || frequency.includes('2x daily') || frequency.includes('twice per day')) {
+                    defaultTimes = ['07:00', '19:00']; // Morning & Evening (7 AM, 7 PM)
+                    console.log('🔍 Backend Bulk: Mapped to twice_daily times:', defaultTimes);
+                }
+                else if (frequency.includes('three times daily') || frequency.includes('three times a day') || frequency.includes('tid') || frequency.includes('three') || frequency.includes('3x daily') || frequency.includes('three times per day')) {
+                    defaultTimes = ['07:00', '13:00', '19:00']; // Morning, Afternoon, Evening
+                    console.log('🔍 Backend Bulk: Mapped to three_times_daily times:', defaultTimes);
+                }
+                else if (frequency.includes('four times daily') || frequency.includes('four times a day') || frequency.includes('qid') || frequency.includes('four') || frequency.includes('4x daily') || frequency.includes('four times per day')) {
+                    defaultTimes = ['07:00', '12:00', '17:00', '22:00']; // Morning, Afternoon, Evening, Bedtime
+                    console.log('🔍 Backend Bulk: Mapped to four_times_daily times:', defaultTimes);
+                }
+                else if (frequency.includes('every 4 hours')) {
+                    defaultTimes = ['07:00', '11:00', '15:00', '19:00', '23:00']; // Every 4 hours starting at 7 AM
+                    console.log('🔍 Backend Bulk: Mapped every 4 hours to times:', defaultTimes);
+                }
+                else if (frequency.includes('every 6 hours')) {
+                    defaultTimes = ['07:00', '13:00', '19:00', '01:00']; // Every 6 hours starting at 7 AM
+                    console.log('🔍 Backend Bulk: Mapped every 6 hours to times:', defaultTimes);
+                }
+                else if (frequency.includes('every 8 hours')) {
+                    defaultTimes = ['07:00', '15:00', '23:00']; // Every 8 hours starting at 7 AM
+                    console.log('🔍 Backend Bulk: Mapped every 8 hours to times:', defaultTimes);
+                }
+                else if (frequency.includes('every 12 hours')) {
+                    defaultTimes = ['07:00', '19:00']; // Every 12 hours
+                    console.log('🔍 Backend Bulk: Mapped every 12 hours to times:', defaultTimes);
+                }
+                else if (frequency.includes('weekly')) {
+                    defaultTimes = ['07:00'];
+                    console.log('🔍 Backend Bulk: Mapped to weekly times:', defaultTimes);
+                }
+                else if (frequency.includes('monthly')) {
+                    defaultTimes = ['07:00'];
+                    console.log('🔍 Backend Bulk: Mapped to monthly times:', defaultTimes);
+                }
+                else {
+                    console.warn(`⚠️ Backend Bulk: Unknown frequency "${frequency}", defaulting to daily`);
+                    defaultTimes = ['07:00']; // Default fallback
+                }
+                // Use provided reminderTimes or defaults
+                const scheduleTimes = medication.reminderTimes && medication.reminderTimes.length > 0
+                    ? medication.reminderTimes
+                    : defaultTimes;
+                // Map frequency to schedule frequency format with enhanced parsing
+                let scheduleFrequency = 'daily';
+                if (frequency.includes('twice daily') || frequency.includes('twice a day') || frequency.includes('bid') || frequency.includes('twice') || frequency.includes('2x daily') || frequency.includes('twice per day') || frequency.includes('every 12 hours')) {
+                    scheduleFrequency = 'twice_daily';
+                }
+                else if (frequency.includes('three times daily') || frequency.includes('three times a day') || frequency.includes('tid') || frequency.includes('three') || frequency.includes('3x daily') || frequency.includes('three times per day') || frequency.includes('every 8 hours')) {
+                    scheduleFrequency = 'three_times_daily';
+                }
+                else if (frequency.includes('four times daily') || frequency.includes('four times a day') || frequency.includes('qid') || frequency.includes('four') || frequency.includes('4x daily') || frequency.includes('four times per day') || frequency.includes('every 6 hours') || frequency.includes('every 4 hours')) {
+                    scheduleFrequency = 'four_times_daily';
+                }
+                else if (frequency.includes('weekly')) {
+                    scheduleFrequency = 'weekly';
+                }
+                else if (frequency.includes('monthly')) {
+                    scheduleFrequency = 'monthly';
+                }
+                else if (frequency.includes('needed') || frequency.includes('prn') || frequency.includes('as needed')) {
+                    scheduleFrequency = 'as_needed';
+                }
+                console.log('🔍 Backend Bulk: Mapped to schedule frequency:', scheduleFrequency);
+                const scheduleData = {
+                    medicationId: medication.id,
+                    medicationName: medication.name,
+                    medicationDosage: medication.dosage || '',
+                    medicationForm: medication.dosageForm || '',
+                    medicationRoute: medication.route || 'oral',
+                    medicationInstructions: medication.instructions || '',
+                    patientId: userId,
+                    frequency: scheduleFrequency,
+                    times: scheduleTimes,
+                    daysOfWeek: [],
+                    dayOfMonth: 1,
+                    startDate: admin.firestore.Timestamp.fromDate(medication.startDate ? new Date(medication.startDate) : new Date()),
+                    endDate: medication.endDate ? admin.firestore.Timestamp.fromDate(new Date(medication.endDate)) : null,
+                    isIndefinite: !medication.endDate, // Indefinite if no end date
+                    dosageAmount: medication.dosage || '1 tablet',
+                    instructions: medication.instructions || '',
+                    generateCalendarEvents: true, // Always generate events for reminders
+                    reminderMinutesBefore: medication.reminderMinutesBefore || [15, 5],
+                    isActive: true,
+                    isPaused: false,
+                    pausedUntil: null,
+                    createdAt: admin.firestore.Timestamp.now(),
+                    updatedAt: admin.firestore.Timestamp.now(),
+                    autoCreated: true, // Flag to indicate this was auto-created
+                    autoCreatedReason: 'bulk_schedule_creation'
+                };
+                const scheduleRef = await firestore.collection('medication_schedules').add(scheduleData);
+                console.log(`✅ Created schedule for ${medication.name}:`, scheduleRef.id);
+                // Generate calendar events for the new schedule
+                try {
+                    await generateCalendarEventsForSchedule(scheduleRef.id, scheduleData);
+                    console.log(`✅ Generated calendar events for ${medication.name}`);
+                }
+                catch (eventError) {
+                    console.error(`❌ Error generating calendar events for ${medication.name}:`, eventError);
+                    // Don't fail the entire process if event generation fails for one medication
+                }
+                results.created++;
+            }
+            catch (medicationError) {
+                console.error(`❌ Error processing medication ${medication.name}:`, medicationError);
+                results.errors.push(`Failed to create schedule for ${medication.name}: ${medicationError instanceof Error ? medicationError.message : 'Unknown error'}`);
+            }
+        }
+        console.log('📊 Bulk schedule creation completed:', results);
+        res.json({
+            success: true,
+            data: results,
+            message: `Bulk schedule creation completed. Created ${results.created} schedules, skipped ${results.skipped}, ${results.errors.length} errors.`
+        });
+    }
+    catch (error) {
+        console.error('❌ Error in bulk schedule creation:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
 // Update medication
 app.put('/medications/:medicationId', authenticate, async (req, res) => {
     try {
+        console.log('🚀 === MEDICATION UPDATE DEBUG START ===');
         const { medicationId } = req.params;
         const userId = req.user.uid;
         const updateData = req.body;
-        console.log('📝 Updating medication:', { medicationId, userId, updateData });
+        console.log('📝 Step 1: Initial request data:', {
+            medicationId,
+            userId,
+            updateDataKeys: Object.keys(updateData),
+            updateDataTypes: Object.fromEntries(Object.entries(updateData).map(([k, v]) => [k, typeof v])),
+            rawUpdateData: updateData
+        });
         // Get the medication document
         const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
         if (!medicationDoc.exists) {
@@ -4499,50 +4970,102 @@ app.put('/medications/:medicationId', authenticate, async (req, res) => {
                 });
             }
         }
+        console.log('📝 Step 2: Preparing update data with enhanced validation...');
         // Prepare update data - be more careful with date handling
         const updatedMedication = {
             updatedAt: admin.firestore.Timestamp.now()
         };
+        console.log('📝 Step 3: Processing each field in update data...');
         // Only convert date fields if they are actually date strings, not other data
         Object.keys(updateData).forEach(key => {
-            if (key === 'prescribedDate' || key === 'startDate' || key === 'endDate') {
-                // Only convert if the value is a valid date string
-                if (updateData[key] && typeof updateData[key] === 'string') {
-                    try {
-                        updatedMedication[key] = admin.firestore.Timestamp.fromDate(new Date(updateData[key]));
+            console.log(`📝 Processing field: ${key} = ${updateData[key]} (type: ${typeof updateData[key]})`);
+            try {
+                if (key === 'prescribedDate' || key === 'startDate' || key === 'endDate') {
+                    // Only convert if the value is a valid date string
+                    if (updateData[key] && typeof updateData[key] === 'string') {
+                        try {
+                            const dateValue = new Date(updateData[key]);
+                            if (isNaN(dateValue.getTime())) {
+                                console.warn(`⚠️ Invalid date string for ${key}:`, updateData[key]);
+                                // Skip invalid dates
+                            }
+                            else {
+                                updatedMedication[key] = admin.firestore.Timestamp.fromDate(dateValue);
+                                console.log(`✅ Converted ${key} to timestamp:`, dateValue.toISOString());
+                            }
+                        }
+                        catch (dateError) {
+                            console.warn(`⚠️ Date conversion error for ${key}:`, dateError);
+                            // Skip invalid dates
+                        }
                     }
-                    catch (dateError) {
-                        console.warn(`⚠️ Invalid date format for ${key}:`, updateData[key]);
-                        // Skip invalid dates
+                    else if (updateData[key] instanceof Date) {
+                        updatedMedication[key] = admin.firestore.Timestamp.fromDate(updateData[key]);
+                        console.log(`✅ Converted ${key} Date object to timestamp`);
                     }
-                }
-                else if (updateData[key] instanceof Date) {
-                    updatedMedication[key] = admin.firestore.Timestamp.fromDate(updateData[key]);
-                }
-            }
-            else {
-                // For non-date fields, copy directly
-                // Special handling for reminder fields to ensure they're valid
-                if (key === 'reminderTimes' && Array.isArray(updateData[key])) {
-                    // Validate that reminderTimes is an array of valid time strings
-                    const validTimes = updateData[key].filter(time => typeof time === 'string' && /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(time));
-                    updatedMedication[key] = validTimes;
-                }
-                else if (key === 'hasReminders' && typeof updateData[key] === 'boolean') {
-                    // Ensure hasReminders is a boolean
-                    updatedMedication[key] = updateData[key];
+                    else if (updateData[key] === null || updateData[key] === undefined) {
+                        // Allow null/undefined for optional date fields
+                        updatedMedication[key] = null;
+                        console.log(`✅ Set ${key} to null`);
+                    }
                 }
                 else {
-                    // For all other non-date fields, copy directly
-                    updatedMedication[key] = updateData[key];
+                    // For non-date fields, copy directly with validation
+                    // Special handling for reminder fields to ensure they're valid
+                    if (key === 'reminderTimes' && Array.isArray(updateData[key])) {
+                        // Validate that reminderTimes is an array of valid time strings
+                        const validTimes = updateData[key].filter(time => {
+                            const isValid = typeof time === 'string' && /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(time);
+                            if (!isValid) {
+                                console.warn(`⚠️ Invalid reminder time format: ${time}`);
+                            }
+                            return isValid;
+                        });
+                        updatedMedication[key] = validTimes;
+                        console.log(`✅ Validated reminderTimes: ${validTimes.length} valid times`);
+                    }
+                    else if (key === 'hasReminders' && typeof updateData[key] === 'boolean') {
+                        // Ensure hasReminders is a boolean
+                        updatedMedication[key] = updateData[key];
+                        console.log(`✅ Set hasReminders to: ${updateData[key]}`);
+                    }
+                    else if (key === 'reminderMinutesBefore' && Array.isArray(updateData[key])) {
+                        // Validate reminderMinutesBefore is an array of numbers
+                        const validMinutes = updateData[key].filter(minutes => {
+                            const isValid = typeof minutes === 'number' && minutes >= 0 && minutes <= 1440; // 0-24 hours
+                            if (!isValid) {
+                                console.warn(`⚠️ Invalid reminder minutes: ${minutes}`);
+                            }
+                            return isValid;
+                        });
+                        updatedMedication[key] = validMinutes;
+                        console.log(`✅ Validated reminderMinutesBefore: ${validMinutes.length} valid entries`);
+                    }
+                    else {
+                        // For all other non-date fields, copy directly but validate type safety
+                        if (updateData[key] !== undefined) {
+                            updatedMedication[key] = updateData[key];
+                            console.log(`✅ Copied field ${key}: ${typeof updateData[key]}`);
+                        }
+                    }
                 }
+            }
+            catch (fieldError) {
+                console.error(`❌ Error processing field ${key}:`, fieldError);
+                // Skip problematic fields instead of failing the entire update
             }
         });
         // Remove fields that shouldn't be updated
         delete updatedMedication.id;
         delete updatedMedication.createdAt;
         delete updatedMedication.patientId;
-        console.log('📝 Final update data:', updatedMedication);
+        console.log('📝 Step 4: Final update data prepared:', {
+            fieldCount: Object.keys(updatedMedication).length,
+            fields: Object.keys(updatedMedication),
+            hasDateFields: Object.keys(updatedMedication).some(k => k.includes('Date')),
+            hasReminderFields: Object.keys(updatedMedication).some(k => k.includes('reminder')),
+            finalUpdateData: updatedMedication
+        });
         // Validate the update data before sending to Firestore
         try {
             await medicationDoc.ref.update(updatedMedication);
@@ -6674,6 +7197,532 @@ app.post('/medications/:medicationId/prn-logs', authenticate, async (req, res) =
         });
     }
 });
+// ===== GRACE PERIOD MANAGEMENT API ENDPOINTS =====
+// Get patient grace period configuration
+app.get('/patients/grace-periods', authenticate, async (req, res) => {
+    try {
+        const patientId = req.user.uid;
+        const gracePeriodEngine = new gracePeriodEngine_1.GracePeriodEngine();
+        // Try to get existing configuration
+        const configDoc = await firestore.collection('medication_grace_periods').doc(patientId).get();
+        if (!configDoc.exists) {
+            // Create and return default configuration
+            await gracePeriodEngine.createDefaultGracePeriodConfig(patientId);
+            const newConfigDoc = await firestore.collection('medication_grace_periods').doc(patientId).get();
+            const newConfig = newConfigDoc.data();
+            return res.json({
+                success: true,
+                data: {
+                    id: patientId,
+                    ...newConfig,
+                    createdAt: newConfig?.createdAt?.toDate(),
+                    updatedAt: newConfig?.updatedAt?.toDate()
+                },
+                message: 'Default grace period configuration created'
+            });
+        }
+        const config = configDoc.data();
+        res.json({
+            success: true,
+            data: {
+                id: configDoc.id,
+                ...config,
+                createdAt: config?.createdAt?.toDate(),
+                updatedAt: config?.updatedAt?.toDate()
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error getting grace period configuration:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Update patient grace period configuration
+app.put('/patients/grace-periods', authenticate, async (req, res) => {
+    try {
+        const patientId = req.user.uid;
+        const updateData = req.body;
+        const gracePeriodEngine = new gracePeriodEngine_1.GracePeriodEngine();
+        // Validate grace period values
+        const validation = gracePeriodEngine.validateGracePeriodConfig(updateData);
+        if (!validation.isValid) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid grace period configuration',
+                details: validation.errors
+            });
+        }
+        await gracePeriodEngine.updatePatientGraceConfig(patientId, updateData);
+        // Get updated configuration
+        const updatedDoc = await firestore.collection('medication_grace_periods').doc(patientId).get();
+        const updatedData = updatedDoc.data();
+        res.json({
+            success: true,
+            data: {
+                id: patientId,
+                ...updatedData,
+                createdAt: updatedData?.createdAt?.toDate(),
+                updatedAt: updatedData?.updatedAt?.toDate()
+            },
+            message: 'Grace period configuration updated successfully'
+        });
+    }
+    catch (error) {
+        console.error('Error updating grace period configuration:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Get missed medications for a patient
+app.get('/medication-calendar/missed', authenticate, async (req, res) => {
+    try {
+        const currentUserId = req.user.uid;
+        const { patientId, limit = '50', startDate, endDate } = req.query;
+        // Determine target patient
+        const targetPatientId = patientId || currentUserId;
+        // Check access permissions
+        if (targetPatientId !== currentUserId) {
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', currentUserId)
+                .where('patientId', '==', targetPatientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+        }
+        const detector = new missedMedicationDetector_1.MissedMedicationDetector();
+        const startDateObj = startDate ? new Date(startDate) : undefined;
+        const endDateObj = endDate ? new Date(endDate) : undefined;
+        const missedMedications = await detector.getMissedMedications(targetPatientId, startDateObj, endDateObj, parseInt(limit, 10));
+        res.json({
+            success: true,
+            data: missedMedications,
+            message: `Found ${missedMedications.length} missed medications`
+        });
+    }
+    catch (error) {
+        console.error('Error getting missed medications:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Manual missed detection trigger
+app.post('/medication-calendar/detect-missed', authenticate, async (req, res) => {
+    try {
+        const patientId = req.user.uid;
+        const detector = new missedMedicationDetector_1.MissedMedicationDetector();
+        const results = await detector.detectMissedMedicationsForPatient(patientId);
+        res.json({
+            success: true,
+            data: results,
+            message: `Detected ${results.missed} missed medications`
+        });
+    }
+    catch (error) {
+        console.error('Error in manual missed detection:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Mark medication as missed manually
+app.post('/medication-calendar/events/:eventId/mark-missed', authenticate, async (req, res) => {
+    try {
+        const { eventId } = req.params;
+        const userId = req.user.uid;
+        const { reason = 'manual_mark' } = req.body;
+        const detector = new missedMedicationDetector_1.MissedMedicationDetector();
+        const result = await detector.markEventAsMissed(eventId, userId, reason);
+        if (result.success) {
+            res.json({
+                success: true,
+                message: 'Medication marked as missed successfully'
+            });
+        }
+        else {
+            res.status(400).json({
+                success: false,
+                error: result.error
+            });
+        }
+    }
+    catch (error) {
+        console.error('Error marking medication as missed:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Get missed medication statistics
+app.get('/medication-calendar/missed-stats', authenticate, async (req, res) => {
+    try {
+        const currentUserId = req.user.uid;
+        const { patientId, days = '30' } = req.query;
+        // Determine target patient
+        const targetPatientId = patientId || currentUserId;
+        // Check access permissions
+        if (targetPatientId !== currentUserId) {
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', currentUserId)
+                .where('patientId', '==', targetPatientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+        }
+        const detector = new missedMedicationDetector_1.MissedMedicationDetector();
+        const stats = await detector.getMissedMedicationStats(targetPatientId, parseInt(days, 10));
+        res.json({
+            success: true,
+            data: stats,
+            message: 'Missed medication statistics retrieved successfully'
+        });
+    }
+    catch (error) {
+        console.error('Error getting missed medication statistics:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// ===== DRUG SAFETY API ENDPOINTS =====
+// Get patient safety profile
+app.get('/patients/:patientId/safety-profile', authenticate, async (req, res) => {
+    try {
+        const { patientId } = req.params;
+        const userId = req.user.uid;
+        console.log('🛡️ Getting safety profile for patient:', patientId, 'requested by:', userId);
+        // Verify access to patient
+        if (patientId !== userId) {
+            // Check family access
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', userId)
+                .where('patientId', '==', patientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied to patient data'
+                });
+            }
+        }
+        // Get patient safety profile from Firestore
+        const safetyProfileRef = firestore.collection('patient_safety_profiles').doc(patientId);
+        const safetyProfileDoc = await safetyProfileRef.get();
+        if (!safetyProfileDoc.exists) {
+            // Create default safety profile if none exists
+            const defaultProfile = {
+                id: patientId,
+                patientId: patientId,
+                allergies: [],
+                contraindications: [],
+                medicalConditions: [],
+                riskFactors: [],
+                createdAt: admin.firestore.Timestamp.now(),
+                updatedAt: admin.firestore.Timestamp.now()
+            };
+            await safetyProfileRef.set(defaultProfile);
+            console.log('✅ Created default safety profile for patient:', patientId);
+            return res.json({
+                success: true,
+                data: {
+                    ...defaultProfile,
+                    createdAt: defaultProfile.createdAt.toDate(),
+                    updatedAt: defaultProfile.updatedAt.toDate()
+                }
+            });
+        }
+        const safetyProfileData = safetyProfileDoc.data();
+        const safetyProfile = {
+            id: safetyProfileDoc.id,
+            ...safetyProfileData,
+            createdAt: safetyProfileData?.createdAt?.toDate(),
+            updatedAt: safetyProfileData?.updatedAt?.toDate()
+        };
+        console.log('✅ Retrieved safety profile for patient:', patientId);
+        res.json({
+            success: true,
+            data: safetyProfile
+        });
+    }
+    catch (error) {
+        console.error('❌ Error fetching patient safety profile:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch patient safety profile'
+        });
+    }
+});
+// Update patient safety profile
+app.put('/patients/:patientId/safety-profile', authenticate, async (req, res) => {
+    try {
+        const { patientId } = req.params;
+        const userId = req.user.uid;
+        const updates = req.body;
+        console.log('🛡️ Updating safety profile for patient:', patientId, 'by user:', userId);
+        // Verify access to patient
+        if (patientId !== userId) {
+            // Check family access with edit permissions
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', userId)
+                .where('patientId', '==', patientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied to patient data'
+                });
+            }
+            const accessData = familyAccess.docs[0].data();
+            if (!accessData.permissions?.canEdit) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Insufficient permissions to edit safety profile'
+                });
+            }
+        }
+        // Validate required fields
+        if (!updates.allergies && !updates.contraindications && !updates.medicalConditions && !updates.riskFactors) {
+            return res.status(400).json({
+                success: false,
+                error: 'At least one field must be provided for update'
+            });
+        }
+        // Update safety profile
+        const safetyProfileRef = firestore.collection('patient_safety_profiles').doc(patientId);
+        const updateData = {
+            ...updates,
+            patientId,
+            updatedAt: admin.firestore.Timestamp.now()
+        };
+        // Remove fields that shouldn't be updated
+        delete updateData.id;
+        delete updateData.createdAt;
+        await safetyProfileRef.set(updateData, { merge: true });
+        // Get updated profile
+        const updatedDoc = await safetyProfileRef.get();
+        const updatedProfileData = updatedDoc.data();
+        const updatedProfile = {
+            id: updatedDoc.id,
+            ...updatedProfileData,
+            createdAt: updatedProfileData?.createdAt?.toDate(),
+            updatedAt: updatedProfileData?.updatedAt?.toDate()
+        };
+        console.log('✅ Updated safety profile for patient:', patientId);
+        res.json({
+            success: true,
+            data: updatedProfile
+        });
+    }
+    catch (error) {
+        console.error('❌ Error updating patient safety profile:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update patient safety profile'
+        });
+    }
+});
+// Analyze medication list for safety issues
+app.post('/patients/:patientId/medications/safety-analysis', authenticate, async (req, res) => {
+    try {
+        const { patientId } = req.params;
+        const { medicationIds } = req.body;
+        const userId = req.user.uid;
+        console.log('🛡️ Performing safety analysis for patient:', patientId, 'medications:', medicationIds?.length);
+        // Verify access to patient
+        if (patientId !== userId) {
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', userId)
+                .where('patientId', '==', patientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied to patient data'
+                });
+            }
+        }
+        if (!medicationIds || !Array.isArray(medicationIds)) {
+            return res.status(400).json({
+                success: false,
+                error: 'medicationIds array is required'
+            });
+        }
+        // Get medications
+        const medicationPromises = medicationIds.map(id => firestore.collection('medications').doc(id).get());
+        const medicationDocs = await Promise.all(medicationPromises);
+        const medications = medicationDocs
+            .filter(doc => doc.exists)
+            .map(doc => ({ id: doc.id, ...doc.data() }));
+        // Get patient safety profile
+        const safetyProfileRef = firestore.collection('patient_safety_profiles').doc(patientId);
+        const safetyProfileDoc = await safetyProfileRef.get();
+        const safetyProfile = safetyProfileDoc.exists ? safetyProfileDoc.data() : null;
+        // Perform safety analysis
+        const analysisResults = {
+            interactions: [],
+            allergyConflicts: [],
+            contraindications: [],
+            duplicateTherapy: [],
+            timingSeparation: [],
+            totalIssues: 0,
+            riskLevel: 'low'
+        };
+        // Drug-drug interaction analysis (simplified)
+        for (let i = 0; i < medications.length; i++) {
+            for (let j = i + 1; j < medications.length; j++) {
+                const med1 = medications[i];
+                const med2 = medications[j];
+                // Check for known interactions
+                const interaction = checkDrugInteraction(med1, med2);
+                if (interaction) {
+                    analysisResults.interactions.push(interaction);
+                }
+            }
+        }
+        // Allergy conflict analysis
+        if (safetyProfile?.allergies) {
+            for (const medication of medications) {
+                for (const allergy of safetyProfile.allergies) {
+                    if (isAllergyConflict(medication, allergy)) {
+                        analysisResults.allergyConflicts.push({
+                            medicationId: medication.id,
+                            medicationName: medication.name || 'Unknown Medication',
+                            allergen: allergy.allergen,
+                            severity: allergy.severity,
+                            symptoms: allergy.symptoms
+                        });
+                    }
+                }
+            }
+        }
+        // Contraindication analysis
+        if (safetyProfile?.contraindications) {
+            for (const medication of medications) {
+                for (const contraindication of safetyProfile.contraindications) {
+                    if (isContraindicated(medication, contraindication)) {
+                        analysisResults.contraindications.push({
+                            medicationId: medication.id,
+                            medicationName: medication.name || 'Unknown Medication',
+                            reason: contraindication.reason,
+                            source: contraindication.source
+                        });
+                    }
+                }
+            }
+        }
+        // Calculate total issues and risk level
+        analysisResults.totalIssues =
+            analysisResults.interactions.length +
+                analysisResults.allergyConflicts.length +
+                analysisResults.contraindications.length +
+                analysisResults.duplicateTherapy.length +
+                analysisResults.timingSeparation.length;
+        // Determine risk level
+        if (analysisResults.allergyConflicts.length > 0 || analysisResults.contraindications.length > 0) {
+            analysisResults.riskLevel = 'high';
+        }
+        else if (analysisResults.interactions.length > 2 || analysisResults.totalIssues > 3) {
+            analysisResults.riskLevel = 'medium';
+        }
+        else if (analysisResults.totalIssues > 0) {
+            analysisResults.riskLevel = 'low';
+        }
+        console.log('✅ Safety analysis completed:', {
+            totalIssues: analysisResults.totalIssues,
+            riskLevel: analysisResults.riskLevel,
+            interactions: analysisResults.interactions.length,
+            allergyConflicts: analysisResults.allergyConflicts.length
+        });
+        res.json({
+            success: true,
+            data: analysisResults
+        });
+    }
+    catch (error) {
+        console.error('❌ Error performing safety analysis:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to perform medication safety analysis'
+        });
+    }
+});
+// Helper functions for drug safety analysis
+function checkDrugInteraction(med1, med2) {
+    // Simplified interaction checking logic
+    const knownInteractions = [
+        {
+            drug1: 'warfarin',
+            drug2: 'aspirin',
+            severity: 'major',
+            description: 'Increased risk of bleeding',
+            management: 'Monitor INR closely'
+        },
+        {
+            drug1: 'levothyroxine',
+            drug2: 'calcium',
+            severity: 'moderate',
+            description: 'Reduced thyroid hormone absorption',
+            management: 'Separate by 4 hours'
+        },
+        {
+            drug1: 'metformin',
+            drug2: 'alcohol',
+            severity: 'moderate',
+            description: 'Increased risk of lactic acidosis',
+            management: 'Limit alcohol consumption'
+        }
+    ];
+    for (const interaction of knownInteractions) {
+        const med1Name = med1.name?.toLowerCase() || '';
+        const med2Name = med2.name?.toLowerCase() || '';
+        if ((med1Name.includes(interaction.drug1) && med2Name.includes(interaction.drug2)) ||
+            (med1Name.includes(interaction.drug2) && med2Name.includes(interaction.drug1))) {
+            return {
+                medication1: med1.name || 'Unknown',
+                medication2: med2.name || 'Unknown',
+                severity: interaction.severity,
+                description: interaction.description,
+                management: interaction.management,
+                source: 'clinical_rules'
+            };
+        }
+    }
+    return null;
+}
+function isAllergyConflict(medication, allergy) {
+    const medName = medication.name?.toLowerCase() || '';
+    const allergen = allergy.allergen?.toLowerCase() || '';
+    return medName.includes(allergen) ||
+        (medication.genericName && medication.genericName.toLowerCase().includes(allergen)) ||
+        (medication.brandName && medication.brandName.toLowerCase().includes(allergen));
+}
+function isContraindicated(medication, contraindication) {
+    const medName = medication.name?.toLowerCase() || '';
+    const contraindicatedMed = contraindication.medication?.toLowerCase() || '';
+    return medName.includes(contraindicatedMed) || contraindicatedMed.includes(medName);
+}
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error('Unhandled error:', err);
@@ -6699,6 +7748,51 @@ exports.api = functions
     secrets: [sendgridApiKey, googleAIApiKey]
 })
     .https.onRequest(app);
+// ===== MISSED MEDICATION DETECTION SCHEDULED FUNCTION =====
+// Import the missed medication detector
+const missedMedicationDetector_1 = require("./services/missedMedicationDetector");
+const gracePeriodEngine_1 = require("./services/gracePeriodEngine");
+// Scheduled function to detect missed medications (runs every 15 minutes)
+exports.detectMissedMedications = functions
+    .runWith({
+    memory: '256MB',
+    timeoutSeconds: 540, // 9 minutes
+})
+    .pubsub.schedule('every 15 minutes')
+    .onRun(async (context) => {
+    console.log('🔍 Starting scheduled missed medication detection...');
+    try {
+        const detector = new missedMedicationDetector_1.MissedMedicationDetector();
+        const results = await detector.detectMissedMedications();
+        console.log('✅ Missed medication detection completed:', {
+            processed: results.processed,
+            missed: results.missed,
+            errors: results.errors.length,
+            timestamp: results.detectionTime.toISOString()
+        });
+        // Log metrics for monitoring
+        if (results.errors.length > 0) {
+            console.error('❌ Missed detection errors:', results.errors);
+        }
+        // Log summary for monitoring dashboard
+        if (results.missed > 0) {
+            console.log(`📊 Missed medications by patient:`, results.batchResults?.reduce((acc, result) => {
+                acc[result.patientId] = (acc[result.patientId] || 0) + 1;
+                return acc;
+            }, {}));
+        }
+        return results;
+    }
+    catch (error) {
+        console.error('❌ Fatal error in missed medication detection:', error);
+        return {
+            processed: 0,
+            missed: 0,
+            errors: [error instanceof Error ? error.message : 'Unknown error'],
+            detectionTime: new Date()
+        };
+    }
+});
 // Export new visit recording functions
 var visitUploadTrigger_1 = require("./visitUploadTrigger");
 Object.defineProperty(exports, "processVisitUpload", { enumerable: true, get: function () { return visitUploadTrigger_1.processVisitUpload; } });

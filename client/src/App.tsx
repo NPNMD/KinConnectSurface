@@ -100,6 +100,7 @@ function AppRoutes() {
       
       {/* Development test routes - bypass authentication */}
       <Route path="/test-dashboard" element={<Dashboard />} />
+      <Route path="/test-medications" element={<Medications />} />
       <Route path="/test-landing" element={<Landing />} />
       <Route path="/test-family-invite-flow" element={<TestFamilyInviteFlow />} />
       

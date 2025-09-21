@@ -1793,6 +1793,7 @@ export interface TodayMedicationBuckets {
   evening: EnhancedMedicationCalendarEvent[];
   bedtime: EnhancedMedicationCalendarEvent[];
   overdue: EnhancedMedicationCalendarEvent[];
+  completed: EnhancedMedicationCalendarEvent[]; // taken, missed, skipped medications
   patientPreferences: PatientMedicationPreferences;
   lastUpdated: Date;
 }

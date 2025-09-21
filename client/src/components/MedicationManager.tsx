@@ -3,6 +3,7 @@ import { Plus, Edit, Trash2, Calendar, Pill, Save, X, AlertTriangle, CheckCircle
 import { Medication, NewMedication } from '@shared/types';
 import { DrugConcept, drugApiService } from '@/lib/drugApi';
 import MedicationSearch from './MedicationSearch';
+import { parseFrequencyToScheduleType, getDefaultTimesObject, validateFrequencyParsing } from '@/utils/medicationFrequencyUtils';
 
 // API constants
 const API_BASE = 'https://us-central1-claritystream-uldp9.cloudfunctions.net/api';
@@ -52,6 +53,8 @@ interface MedicationFormData {
   pharmacy: string;
   prescriptionNumber: string;
   refillsRemaining: number;
+  hasReminders: boolean;
+  reminderTimes: string[];
 }
 
 const initialFormData: MedicationFormData = {
@@ -74,6 +77,8 @@ const initialFormData: MedicationFormData = {
   pharmacy: '',
   prescriptionNumber: '',
   refillsRemaining: 0,
+  hasReminders: false,
+  reminderTimes: [],
 };
 
 // Common dosage forms for validation
@@ -112,15 +117,16 @@ export default function MedicationManager({
   // Removed RxNorm-based state variables for OpenFDA-only implementation
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
 
-  // Default medication timing settings
-  const [defaultTimes, setDefaultTimes] = useState({
-    daily: ['07:00'],
-    twice_daily: ['07:00', '19:00'],
-    three_times_daily: ['07:00', '13:00', '19:00'],
-    four_times_daily: ['07:00', '12:00', '17:00', '22:00'],
-    weekly: ['07:00'],
-    monthly: ['07:00']
-  });
+  // Enhanced time-based reminder preset options
+  const TIME_PRESETS = [
+    { value: '08:00', label: 'Morning (8:00 AM)', icon: '🌅' },
+    { value: '12:00', label: 'Afternoon (12:00 PM)', icon: '☀️' },
+    { value: '18:00', label: 'Evening (6:00 PM)', icon: '🌆' },
+    { value: '22:00', label: 'Bedtime (10:00 PM)', icon: '🌙' }
+  ];
+
+  // Default medication timing settings with enhanced presets - use shared utility
+  const [defaultTimes, setDefaultTimes] = useState(getDefaultTimesObject());
 
   const handleDrugSelect = async (drug: DrugConcept) => {
     console.log('🔍 Selected drug:', drug);
@@ -305,6 +311,8 @@ export default function MedicationManager({
         pharmacy: formData.pharmacy?.trim() || undefined,
         prescriptionNumber: formData.prescriptionNumber?.trim() || undefined,
         refillsRemaining: formData.refillsRemaining || undefined,
+        hasReminders: formData.hasReminders,
+        reminderTimes: formData.reminderTimes.length > 0 ? formData.reminderTimes : undefined,
       };
 
       console.log('🔍 MedicationManager: Prepared medication data:', medicationData);
@@ -366,6 +374,8 @@ export default function MedicationManager({
       pharmacy: medication.pharmacy || '',
       prescriptionNumber: medication.prescriptionNumber || '',
       refillsRemaining: medication.refillsRemaining || 0,
+      hasReminders: medication.hasReminders || false,
+      reminderTimes: medication.reminderTimes || [],
     });
     setEditingMedicationId(medication.id);
     setIsAddingMedication(true);
@@ -377,6 +387,32 @@ export default function MedicationManager({
     setFormData(initialFormData);
     setValidationErrors({});
     setDuplicateWarning(null);
+  };
+
+  // Handle adding/removing reminder times
+  const handleAddReminderTime = (time: string) => {
+    if (!formData.reminderTimes.includes(time)) {
+      setFormData(prev => ({
+        ...prev,
+        reminderTimes: [...prev.reminderTimes, time].sort()
+      }));
+    }
+  };
+
+  const handleRemoveReminderTime = (time: string) => {
+    setFormData(prev => ({
+      ...prev,
+      reminderTimes: prev.reminderTimes.filter(t => t !== time)
+    }));
+  };
+
+  const handleCustomTimeAdd = (customTime: string) => {
+    if (customTime && !formData.reminderTimes.includes(customTime)) {
+      setFormData(prev => ({
+        ...prev,
+        reminderTimes: [...prev.reminderTimes, customTime].sort()
+      }));
+    }
   };
 
   const handleDelete = async (medicationId: string) => {
@@ -391,23 +427,37 @@ export default function MedicationManager({
 
   // Generate default reminder times based on medication frequency
   const generateDefaultReminderTimes = (frequency: string): string[] => {
-    const freq = frequency.toLowerCase();
+    console.log('🔍 MedicationManager: Generating reminder times for frequency:', frequency);
     
-    if (freq.includes('once') || freq.includes('daily')) {
-      return defaultTimes.daily;
-    } else if (freq.includes('twice') || freq.includes('bid')) {
-      return defaultTimes.twice_daily;
-    } else if (freq.includes('three') || freq.includes('tid')) {
-      return defaultTimes.three_times_daily;
-    } else if (freq.includes('four') || freq.includes('qid')) {
-      return defaultTimes.four_times_daily;
-    } else if (freq.includes('weekly')) {
-      return defaultTimes.weekly;
-    } else if (freq.includes('monthly')) {
-      return defaultTimes.monthly;
-    } else {
-      return defaultTimes.daily; // Default fallback
-    }
+    // Use shared utility function for consistent parsing
+    const parsedFrequency = parseFrequencyToScheduleType(frequency);
+    
+    // Get times from our current defaultTimes state (which uses the shared utility)
+    const times = (() => {
+      switch (parsedFrequency) {
+        case 'daily':
+          return defaultTimes.daily;
+        case 'twice_daily':
+          return defaultTimes.twice_daily;
+        case 'three_times_daily':
+          return defaultTimes.three_times_daily;
+        case 'four_times_daily':
+          return defaultTimes.four_times_daily;
+        case 'weekly':
+          return defaultTimes.weekly;
+        case 'monthly':
+          return defaultTimes.monthly;
+        case 'as_needed':
+          return []; // PRN medications don't have scheduled times
+        default:
+          return defaultTimes.daily;
+      }
+    })();
+    
+    // Validate and log the parsing for debugging
+    validateFrequencyParsing(frequency, parsedFrequency, times);
+    
+    return times;
   };
 
   // Simple reminder toggle function
@@ -814,17 +864,128 @@ export default function MedicationManager({
               </div>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="isPRN"
-                checked={formData.isPRN}
-                onChange={(e) => handleInputChange('isPRN', e.target.checked)}
-                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              />
-              <label htmlFor="isPRN" className="text-sm text-gray-700">
-                As needed (PRN) medication
-              </label>
+            <div className="space-y-4">
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="isPRN"
+                  checked={formData.isPRN}
+                  onChange={(e) => handleInputChange('isPRN', e.target.checked)}
+                  className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                />
+                <label htmlFor="isPRN" className="text-sm text-gray-700">
+                  As needed (PRN) medication
+                </label>
+              </div>
+
+              {/* Enhanced Reminder Settings */}
+              {!formData.isPRN && (
+                <div className="space-y-3">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="hasReminders"
+                      checked={formData.hasReminders}
+                      onChange={(e) => {
+                        const hasReminders = e.target.checked;
+                        setFormData(prev => ({
+                          ...prev,
+                          hasReminders,
+                          reminderTimes: hasReminders && prev.reminderTimes.length === 0
+                            ? generateDefaultReminderTimes(prev.frequency)
+                            : prev.reminderTimes
+                        }));
+                      }}
+                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    />
+                    <label htmlFor="hasReminders" className="text-sm text-gray-700 font-medium">
+                      Enable medication reminders
+                    </label>
+                  </div>
+
+                  {formData.hasReminders && (
+                    <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                      <h5 className="text-sm font-medium text-blue-900 mb-3">Reminder Times</h5>
+                      
+                      {/* Time Preset Buttons */}
+                      <div className="grid grid-cols-2 gap-2 mb-4">
+                        {TIME_PRESETS.map((preset) => (
+                          <button
+                            key={preset.value}
+                            type="button"
+                            onClick={() => handleAddReminderTime(preset.value)}
+                            disabled={formData.reminderTimes.includes(preset.value)}
+                            className={`p-2 text-sm rounded-md border transition-colors ${
+                              formData.reminderTimes.includes(preset.value)
+                                ? 'bg-primary-100 border-primary-300 text-primary-700 cursor-not-allowed'
+                                : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            <span className="mr-1">{preset.icon}</span>
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Custom Time Input */}
+                      <div className="flex items-center space-x-2 mb-3">
+                        <input
+                          type="time"
+                          id="customTime"
+                          className="input text-sm"
+                          placeholder="Custom time"
+                          onBlur={(e) => {
+                            if (e.target.value) {
+                              handleCustomTimeAdd(e.target.value);
+                              e.target.value = '';
+                            }
+                          }}
+                        />
+                        <span className="text-xs text-gray-500">Add custom time</span>
+                      </div>
+
+                      {/* Selected Times Display */}
+                      {formData.reminderTimes.length > 0 && (
+                        <div>
+                          <p className="text-xs text-blue-800 mb-2">Selected reminder times:</p>
+                          <div className="flex flex-wrap gap-2">
+                            {formData.reminderTimes.map((time) => {
+                              const [hours, minutes] = time.split(':');
+                              const hour = parseInt(hours);
+                              const ampm = hour >= 12 ? 'PM' : 'AM';
+                              const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+                              const displayTime = `${displayHour}:${minutes} ${ampm}`;
+                              
+                              return (
+                                <span
+                                  key={time}
+                                  className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-primary-100 text-primary-800"
+                                >
+                                  {displayTime}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveReminderTime(time)}
+                                    className="ml-1 text-primary-600 hover:text-primary-800"
+                                  >
+                                    ×
+                                  </button>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="mt-3 p-2 bg-blue-100 rounded-md">
+                        <p className="text-xs text-blue-800">
+                          <Bell className="w-3 h-3 inline mr-1" />
+                          Reminders will automatically create a medication schedule and appear in your daily view.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Drug interaction checking removed for OpenFDA-only implementation */}
