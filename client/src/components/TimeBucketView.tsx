@@ -1,23 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Clock, 
-  Sun, 
-  Sunset, 
-  Moon, 
-  AlertTriangle, 
+import {
+  Clock,
+  Sun,
+  Sunset,
+  Moon,
+  AlertTriangle,
   CheckCircle,
   Bell,
   Package,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  AlertCircle,
+  Wifi,
+  WifiOff,
+  Lock
 } from 'lucide-react';
-import type { 
-  EnhancedMedicationCalendarEvent, 
-  TodayMedicationBuckets, 
+import type {
+  EnhancedMedicationCalendarEvent,
+  TodayMedicationBuckets,
   PatientMedicationPreferences
 } from '@shared/types';
 import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
 import { createSmartRefresh } from '@/lib/requestDebouncer';
+import { useFamily } from '@/contexts/FamilyContext';
 import LoadingSpinner from './LoadingSpinner';
 import QuickActionButtons from '@/components/QuickActionButtons';
 
@@ -50,22 +55,33 @@ export default function TimeBucketView({
   const [isLoading, setIsLoading] = useState(true);
   const [expandedBuckets, setExpandedBuckets] = useState<Set<string>>(new Set(['now', 'overdue', 'completed']));
   const [processingAction, setProcessingAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  
+  // Add family context for permission checks
+  const { hasPermission, userRole, activePatientAccess } = useFamily();
 
   // Create smart refresh function with shorter interval for user actions
   const smartLoadTodaysBuckets = createSmartRefresh(
     async () => {
       try {
         setIsLoading(true);
+        setError(null);
         
-        // Use the new time buckets API endpoint
-        const bucketsResult = await medicationCalendarApi.getTodayMedicationBuckets(date);
+        // Use the new time buckets API endpoint with proper patient ID
+        const bucketsResult = await medicationCalendarApi.getTodayMedicationBuckets(date, {
+          patientId: patientId || undefined,
+          forceFresh: false
+        });
 
         if (!bucketsResult.success || !bucketsResult.data) {
           console.error('Failed to load medication buckets:', bucketsResult.error);
+          setError(bucketsResult.error || 'Failed to load medications');
           return;
         }
 
         setBuckets(bucketsResult.data);
+        setError(null); // Clear any previous errors
         
         // Add debugging for medication display
         console.log('🔍 TimeBucketView: Loaded medication buckets:', {
@@ -102,6 +118,8 @@ export default function TimeBucketView({
         
       } catch (error) {
         console.error('Error loading today\'s medication buckets:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Failed to load medications';
+        setError(errorMessage);
       } finally {
         setIsLoading(false);
       }
@@ -126,6 +144,26 @@ export default function TimeBucketView({
     return () => clearInterval(interval);
   }, [patientId, date]);
 
+  // Monitor online status
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      // Refresh data when coming back online
+      if (!isLoading) {
+        loadTodaysBuckets();
+      }
+    };
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [isLoading]);
+
   // Refresh when refreshTrigger changes (triggered by parent component)
   useEffect(() => {
     if (refreshTrigger > 0) {
@@ -141,6 +179,13 @@ export default function TimeBucketView({
   ) => {
     try {
       setProcessingAction(eventId);
+      setError(null); // Clear any previous errors
+      
+      // Check if online
+      if (!isOnline) {
+        setError('You are offline. Please check your internet connection and try again.');
+        return;
+      }
       
       let result;
       switch (action) {
@@ -198,15 +243,21 @@ export default function TimeBucketView({
             console.log('🔄 Force refreshing buckets after medication action');
             
             // Directly call the API without smart refresh to ensure fresh data
-            const bucketsResult = await medicationCalendarApi.getTodayMedicationBuckets(date, { forceFresh: true });
+            const bucketsResult = await medicationCalendarApi.getTodayMedicationBuckets(date, {
+              forceFresh: true,
+              patientId: patientId || undefined
+            });
             if (bucketsResult.success && bucketsResult.data) {
               setBuckets(bucketsResult.data);
+              setError(null);
               console.log('✅ Buckets refreshed successfully after action');
             } else {
               console.error('❌ Failed to refresh buckets:', bucketsResult.error);
+              setError(bucketsResult.error || 'Failed to refresh medication data');
             }
           } catch (error) {
             console.error('❌ Error refreshing after action:', error);
+            setError(error instanceof Error ? error.message : 'Failed to refresh medication data');
           } finally {
             setIsLoading(false);
           }
@@ -215,12 +266,22 @@ export default function TimeBucketView({
         onMedicationAction?.(eventId, action);
       } else {
         console.error(`❌ ${action} action failed:`, result?.error);
-        alert(`Failed to ${action} medication: ${result?.error || 'Unknown error'}`);
+        const errorMessage = result?.error || 'Unknown error occurred';
+        setError(`Failed to ${action} medication: ${errorMessage}`);
       }
       
     } catch (error) {
       console.error('Error performing medication action:', error);
-      alert(`Failed to ${action} medication. Please try again.`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      
+      // Handle specific error types
+      if (errorMessage.includes('Authentication')) {
+        setError('Your session has expired. Please sign in again.');
+      } else if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
+        setError('Network error. Please check your connection and try again.');
+      } else {
+        setError(`Failed to ${action} medication: ${errorMessage}`);
+      }
     } finally {
       setProcessingAction(null);
     }
@@ -337,6 +398,30 @@ export default function TimeBucketView({
     );
   }
 
+  if (error) {
+    return (
+      <div className="text-center py-8 bg-red-50 rounded-lg border border-red-200">
+        <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+        <h4 className="text-lg font-medium text-red-900 mb-2">Error Loading Medications</h4>
+        <p className="text-red-700 mb-4">{error}</p>
+        <div className="flex items-center justify-center space-x-4">
+          <button
+            onClick={() => loadTodaysBuckets()}
+            className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+          >
+            Try Again
+          </button>
+          {!isOnline && (
+            <div className="flex items-center text-red-600">
+              <WifiOff className="w-4 h-4 mr-1" />
+              <span className="text-sm">Offline</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (!buckets) {
     return (
       <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
@@ -429,37 +514,58 @@ export default function TimeBucketView({
 
   return (
     <div className="space-y-4">
-      {/* Summary Header */}
+      {/* Simplified Summary Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <h3 className="text-lg font-semibold text-gray-900">Today's Medications</h3>
-          <div className="flex items-center space-x-2 text-sm">
-            {overdueMedications > 0 && (
-              <span className="flex items-center space-x-1 text-red-600">
-                <AlertTriangle className="w-3 h-3" />
-                <span>{overdueMedications} overdue</span>
-              </span>
-            )}
-            {nowMedications > 0 && (
-              <span className="flex items-center space-x-1 text-orange-600">
-                <Bell className="w-3 h-3" />
-                <span>{nowMedications} due now</span>
-              </span>
-            )}
-            <span className="text-gray-500">
-              {totalMedications} total
+        <div className="flex items-center space-x-3">
+          {overdueMedications > 0 && (
+            <span className="flex items-center space-x-1 px-2 py-1 bg-red-100 text-red-800 rounded-md text-sm">
+              <AlertTriangle className="w-4 h-4" />
+              <span>{overdueMedications} overdue</span>
             </span>
-          </div>
+          )}
+          {nowMedications > 0 && (
+            <span className="flex items-center space-x-1 px-2 py-1 bg-orange-100 text-orange-800 rounded-md text-sm">
+              <Bell className="w-4 h-4" />
+              <span>{nowMedications} due now</span>
+            </span>
+          )}
+          {overdueMedications === 0 && nowMedications === 0 && totalMedications > 0 && (
+            <span className="flex items-center space-x-1 px-2 py-1 bg-green-100 text-green-800 rounded-md text-sm">
+              <CheckCircle className="w-4 h-4" />
+              <span>All caught up!</span>
+            </span>
+          )}
         </div>
         
         <div className="text-xs text-gray-500">
-          Last updated: {new Date(buckets.lastUpdated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          {totalMedications} medication{totalMedications !== 1 ? 's' : ''} today
         </div>
       </div>
 
-      {/* Time Buckets */}
+      {/* Error Banner */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="flex items-start space-x-3">
+            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-red-800 text-sm">{error}</p>
+              <button
+                onClick={() => {
+                  setError(null);
+                  loadTodaysBuckets();
+                }}
+                className="mt-2 text-red-600 hover:text-red-800 text-sm underline"
+              >
+                Try again
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Simplified Time Buckets */}
       {orderedBuckets.length === 0 ? (
-        <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
+        <div className="text-center py-8 bg-green-50 rounded-lg border border-green-200">
           <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
           <h4 className="text-lg font-medium text-gray-900 mb-2">All caught up!</h4>
           <p className="text-gray-500">
@@ -473,34 +579,27 @@ export default function TimeBucketView({
               key={bucket.key}
               className={`rounded-lg border ${bucket.color} transition-all duration-200`}
             >
-              {/* Bucket Header */}
+              {/* Simplified Bucket Header */}
               <div
-                className="flex items-center justify-between p-4 cursor-pointer"
+                className="flex items-center justify-between p-3 cursor-pointer"
                 onClick={() => toggleBucketExpansion(bucket.key)}
               >
                 <div className="flex items-center space-x-3">
                   {bucket.icon}
                   <div>
                     <h4 className="font-medium text-gray-900">
-                      {bucket.label} ({bucket.events.length})
+                      {bucket.label}
                     </h4>
                     {bucket.timeRange && (
-                      <p className="text-sm text-gray-600">{bucket.timeRange}</p>
+                      <p className="text-xs text-gray-600">{bucket.timeRange}</p>
                     )}
                   </div>
                 </div>
                 
                 <div className="flex items-center space-x-2">
-                  {bucket.key === 'overdue' && bucket.events.length > 0 && (
-                    <span className="text-xs text-red-600 font-medium">
-                      Action needed
-                    </span>
-                  )}
-                  {bucket.key === 'now' && bucket.events.length > 0 && (
-                    <span className="text-xs text-orange-600 font-medium">
-                      Due now
-                    </span>
-                  )}
+                  <span className="text-sm font-medium text-gray-700">
+                    {bucket.events.length}
+                  </span>
                   {expandedBuckets.has(bucket.key) ? (
                     <ChevronUp className="w-4 h-4 text-gray-400" />
                   ) : (
@@ -509,39 +608,32 @@ export default function TimeBucketView({
                 </div>
               </div>
 
-              {/* Bucket Content */}
+              {/* Simplified Bucket Content */}
               {expandedBuckets.has(bucket.key) && (
-                <div className="px-4 pb-4 space-y-3">
+                <div className="px-3 pb-3 space-y-2">
                   {bucket.events.map((event) => (
                     <div
                       key={event.id}
-                      className="bg-white rounded-lg border border-gray-200 p-4"
+                      className="bg-white rounded-lg border border-gray-200 p-3"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <div className="flex items-center space-x-2 mb-2">
+                          <div className="flex items-center space-x-2 mb-1">
                             <h5 className="font-medium text-gray-900">
                               {event.medicationName}
                             </h5>
                             {event.isPartOfPack && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                <Package className="w-3 h-3 mr-1" />
-                                {event.packName}
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                Pack
                               </span>
                             )}
                           </div>
                           
-                          <p className="text-sm text-gray-600 mb-2">
+                          <p className="text-sm text-gray-600 mb-1">
                             {event.dosageAmount}
                           </p>
                           
-                          {event.instructions && (
-                            <p className="text-xs text-gray-500 mb-2">
-                              {event.instructions}
-                            </p>
-                          )}
-                          
-                          <div className="flex items-center space-x-4 text-sm">
+                          <div className="flex items-center space-x-3 text-sm">
                             <span className="flex items-center space-x-1 text-blue-600">
                               <Clock className="w-3 h-3" />
                               <span>{formatTime(new Date(event.scheduledDateTime))}</span>
@@ -552,54 +644,67 @@ export default function TimeBucketView({
                             }`}>
                               {getTimeUntil(new Date(event.scheduledDateTime))}
                             </span>
-                            
-                            {event.snoozeCount > 0 && (
-                              <span className="text-xs text-yellow-600">
-                                Snoozed {event.snoozeCount}x
-                              </span>
-                            )}
                           </div>
                         </div>
                         
-                        {/* Quick Actions - only show for actionable medications */}
-                        {bucket.key !== 'completed' && (
-                          <QuickActionButtons
-                            event={event}
-                            onTake={() => handleTake(event.id)}
-                            onSnooze={(minutes: number, reason?: string) => handleSnooze(event.id, minutes, reason)}
-                            onSkip={(reason: string, notes?: string) => handleSkip(event.id, reason, notes)}
-                            onReschedule={(newTime: Date, reason: string, isOneTime: boolean) => handleReschedule(event.id, newTime, reason, isOneTime)}
-                            isProcessing={processingAction === event.id}
-                            compactMode={compactMode}
-                          />
-                        )}
+                        {/* Permission-based Actions */}
+                        {bucket.key !== 'completed' && (() => {
+                          const canEdit = hasPermission('canEdit');
+                          
+                          // Debug logging for permission issues
+                          console.log('🔍 TimeBucketView: Permission check for medication action buttons:', {
+                            eventId: event.id,
+                            medicationName: event.medicationName,
+                            userRole,
+                            canEdit,
+                            bucketKey: bucket.key,
+                            activePatientAccess: activePatientAccess ? {
+                              patientName: activePatientAccess.patientName,
+                              permissions: activePatientAccess.permissions,
+                              accessLevel: activePatientAccess.accessLevel
+                            } : null
+                          });
+                          
+                          if (canEdit) {
+                            return (
+                              <QuickActionButtons
+                                event={event}
+                                onTake={() => handleTake(event.id)}
+                                onSnooze={(minutes: number, reason?: string) => handleSnooze(event.id, minutes, reason)}
+                                onSkip={(reason: string, notes?: string) => handleSkip(event.id, reason, notes)}
+                                onReschedule={(newTime: Date, reason: string, isOneTime: boolean) => handleReschedule(event.id, newTime, reason, isOneTime)}
+                                isProcessing={processingAction === event.id}
+                                compactMode={true}
+                                useEnhancedTakeButton={true}
+                                error={processingAction === event.id && error ? error : undefined}
+                                onClearError={() => setError(null)}
+                              />
+                            );
+                          } else {
+                            // Show permission message for family members without edit access
+                            return (
+                              <div className="flex items-center space-x-2 text-xs text-gray-500">
+                                <Lock className="w-3 h-3" />
+                                <span>View only access</span>
+                              </div>
+                            );
+                          }
+                        })()}
                         
-                        {/* Status indicator for completed medications */}
+                        {/* Simplified Status for completed medications */}
                         {bucket.key === 'completed' && (
-                          <div className="flex items-center space-x-2">
+                          <div className="flex items-center">
                             {event.status === 'taken' && (
-                              <span className="flex items-center space-x-1 text-green-600 text-sm">
-                                <CheckCircle className="w-4 h-4" />
-                                <span>Taken</span>
-                              </span>
+                              <CheckCircle className="w-5 h-5 text-green-600" />
                             )}
                             {event.status === 'missed' && (
-                              <span className="flex items-center space-x-1 text-red-600 text-sm">
-                                <AlertTriangle className="w-4 h-4" />
-                                <span>Missed</span>
-                              </span>
+                              <AlertTriangle className="w-5 h-5 text-red-600" />
                             )}
                             {event.status === 'skipped' && (
-                              <span className="flex items-center space-x-1 text-yellow-600 text-sm">
-                                <Package className="w-4 h-4" />
-                                <span>Skipped</span>
-                              </span>
+                              <Package className="w-5 h-5 text-yellow-600" />
                             )}
                             {event.status === 'late' && (
-                              <span className="flex items-center space-x-1 text-orange-600 text-sm">
-                                <Clock className="w-4 h-4" />
-                                <span>Late</span>
-                              </span>
+                              <Clock className="w-5 h-5 text-orange-600" />
                             )}
                           </div>
                         )}

@@ -8,6 +8,9 @@ import * as admin from 'firebase-admin';
 import sgMail from '@sendgrid/mail';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+// Import unified medication API
+import unifiedMedicationApi from './api/unified/unifiedMedicationApi';
+
 // Initialize Admin SDK once
 if (!admin.apps.length) {
 	admin.initializeApp();
@@ -60,10 +63,10 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Rate limiting - configured for Firebase Functions with more permissive limits
+// Enhanced rate limiting with circuit breaker logic for medication operations
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 300, // Increased from 100 to 300 requests per 15 minutes
+    max: 500, // Increased from 300 to 500 requests per 15 minutes for medication operations
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => {
@@ -71,35 +74,99 @@ const limiter = rateLimit({
         return req.headers['x-forwarded-for'] as string || req.ip || 'unknown';
     },
     skip: (req) => {
-        // Skip rate limiting for health checks
-        return req.path === '/api/health';
+        // Skip rate limiting for health checks and critical medication operations
+        const skipPaths = [
+            '/health',
+            '/medication-calendar/events',
+            '/medications',
+            '/medication-calendar/check-missing-events'
+        ];
+        return skipPaths.some(path => req.path.includes(path));
     },
     handler: (req, res) => {
-        // Custom handler for rate limit exceeded
-        console.log('⚠️ Rate limit exceeded for:', req.ip, req.path);
+        // Enhanced handler with medication-specific logic
+        const isMedicationRequest = req.path.includes('medication');
+        console.log('⚠️ Rate limit exceeded for:', req.ip, req.path, 'isMedication:', isMedicationRequest);
+        
+        // More lenient handling for medication operations
+        const retryAfter = isMedicationRequest ? 30 : 60; // Shorter retry for medication ops
+        
         res.status(429).json({
             success: false,
             error: 'Too many requests, please try again later.',
-            retryAfter: 60 // Fixed retry after 60 seconds
+            retryAfter,
+            isMedicationOperation: isMedicationRequest,
+            suggestion: isMedicationRequest ? 'Medication operations have priority - retry in 30 seconds' : 'General rate limit - retry in 60 seconds'
         });
     }
 });
 app.use(limiter); // Apply to all routes, not just /api/
 
-// Simple auth middleware for functions
+// Enhanced auth middleware with comprehensive error logging
 async function authenticate(req: express.Request, res: express.Response, next: express.NextFunction) {
 	try {
+		// Enhanced logging for unified medication API requests
+		const isUnifiedMedicationAPI = req.path.includes('/unified-medication');
+		if (isUnifiedMedicationAPI) {
+			console.log('🔐 UNIFIED API AUTH CHECK:', {
+				path: req.path,
+				method: req.method,
+				hasAuthHeader: !!req.headers.authorization,
+				timestamp: new Date().toISOString()
+			});
+		}
+
 		const authHeader = req.headers.authorization || '';
 		const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
 		if (!token) {
-			return res.status(401).json({ success: false, error: 'Access token required' });
+			console.error('❌ Authentication failed - no token:', {
+				path: req.path,
+				method: req.method,
+				ip: req.ip,
+				userAgent: req.headers['user-agent'],
+				isUnifiedAPI: isUnifiedMedicationAPI,
+				timestamp: new Date().toISOString()
+			});
+			return res.status(401).json({
+				success: false,
+				error: 'Access token required',
+				errorCode: 'AUTH_TOKEN_MISSING',
+				timestamp: new Date().toISOString()
+			});
 		}
 		const decoded = await admin.auth().verifyIdToken(token);
 		// Attach to request
 		(req as any).user = decoded;
+		
+		// Enhanced success logging for unified medication API
+		if (isUnifiedMedicationAPI) {
+			console.log('✅ UNIFIED API AUTH SUCCESS:', {
+				path: req.path,
+				method: req.method,
+				userId: decoded.uid,
+				email: decoded.email,
+				timestamp: new Date().toISOString()
+			});
+		}
+		
 		return next();
 	} catch (err) {
-		return res.status(403).json({ success: false, error: 'Invalid or expired token' });
+		const isUnifiedMedicationAPI = req.path.includes('/unified-medication');
+		console.error('❌ Authentication failed - invalid token:', {
+			path: req.path,
+			method: req.method,
+			ip: req.ip,
+			error: err instanceof Error ? err.message : 'Unknown error',
+			errorCode: (err as any)?.code || 'Unknown code',
+			isUnifiedAPI: isUnifiedMedicationAPI,
+			timestamp: new Date().toISOString()
+		});
+		return res.status(403).json({
+			success: false,
+			error: 'Invalid or expired token',
+			errorCode: 'AUTH_TOKEN_INVALID',
+			timestamp: new Date().toISOString()
+		});
 	}
 }
 
@@ -2461,9 +2528,21 @@ app.get('/medication-calendar/events', authenticate, async (req, res) => {
 		}
 	} catch (error) {
 		console.error('❌ Error getting medication calendar events:', error);
+		console.error('❌ Calendar events error details:', {
+			error: error instanceof Error ? error.message : 'Unknown error',
+			stack: error instanceof Error ? error.stack : 'No stack',
+			userId: (req as any)?.user?.uid || 'Unknown',
+			patientId: req.query?.patientId || 'None',
+			queryParams: req.query,
+			requestPath: req.path,
+			timestamp: new Date().toISOString()
+		});
 		res.status(500).json({
 			success: false,
-			error: 'Internal server error'
+			error: 'Internal server error',
+			details: error instanceof Error ? error.message : 'Unknown error',
+			errorCode: 'GET_CALENDAR_EVENTS_FAILED',
+			timestamp: new Date().toISOString()
 		});
 	}
 });
@@ -2532,7 +2611,7 @@ app.get('/medication-calendar/adherence', authenticate, async (req, res) => {
 	}
 });
 
-// Mark medication as taken
+// Mark medication as taken with enhanced error logging
 app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req, res) => {
 	try {
 		console.log('🚀 === MARK MEDICATION AS TAKEN - START ===');
@@ -2540,7 +2619,16 @@ app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req,
 		const userId = (req as any).user.uid;
 		const { takenAt, notes } = req.body;
 		
-		console.log('💊 Marking medication as taken:', { eventId, userId, takenAt, notes });
+		console.log('💊 Marking medication as taken:', {
+			eventId,
+			userId,
+			takenAt,
+			notes,
+			requestPath: req.path,
+			requestMethod: req.method,
+			userAgent: req.headers['user-agent'],
+			timestamp: new Date().toISOString()
+		});
 		console.log('💊 Request body type check:', {
 			takenAtType: typeof takenAt,
 			notesType: typeof notes,
@@ -2801,18 +2889,27 @@ app.post('/medication-calendar/events/:eventId/taken', authenticate, async (req,
 		console.error('❌ === MARK MEDICATION AS TAKEN - FATAL ERROR ===');
 		console.error('❌ Error marking medication as taken:', error);
 		console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack trace');
-		console.error('❌ Error details:', {
+		console.error('❌ Comprehensive error details:', {
 			message: error instanceof Error ? error.message : 'Unknown error',
 			code: (error as any)?.code || 'Unknown code',
 			name: error instanceof Error ? error.name : 'Unknown name',
 			eventId: req.params?.eventId || 'Unknown eventId',
 			userId: (req as any)?.user?.uid || 'Unknown userId',
-			requestBody: req.body
+			requestBody: req.body,
+			requestPath: req.path,
+			requestMethod: req.method,
+			userAgent: req.headers['user-agent'],
+			timestamp: new Date().toISOString(),
+			firestoreRegion: 'us-central1',
+			functionMemory: '512MB'
 		});
 		res.status(500).json({
 			success: false,
 			error: 'Internal server error',
-			details: error instanceof Error ? error.message : 'Unknown error'
+			details: error instanceof Error ? error.message : 'Unknown error',
+			errorCode: 'MARK_TAKEN_FAILED',
+			timestamp: new Date().toISOString(),
+			eventId: req.params?.eventId
 		});
 	}
 });
@@ -3418,16 +3515,29 @@ app.put('/patients/preferences/medication-timing', authenticate, async (req, res
 		const patientId = (req as any).user.uid;
 		const updateData = req.body;
 		
-		// Validate time slots if they're being updated
+		// Enhanced validation for time slots including 2 AM default prevention
 		if (updateData.timeSlots && updateData.workSchedule) {
 			const validation = validateTimeSlots(updateData.timeSlots, updateData.workSchedule);
-			if (!validation.isValid) {
-				console.error('❌ Invalid time slot configuration in update:', validation.errors);
+			const twoAMValidation = validateAndPrevent2AMDefaults(updateData.timeSlots, updateData.workSchedule);
+			
+			if (!validation.isValid || !twoAMValidation.isValid) {
+				const allErrors = [...validation.errors, ...twoAMValidation.errors];
+				console.error('❌ Invalid time slot configuration in update:', allErrors);
 				return res.status(400).json({
 					success: false,
 					error: 'Invalid time slot configuration',
-					details: validation.errors
+					details: allErrors,
+					suggestedFixes: twoAMValidation.fixes
 				});
+			}
+			
+			// Apply any automatic fixes for 2 AM issues
+			if (Object.keys(twoAMValidation.fixes).length > 0) {
+				console.log('🔧 Applying automatic fixes for 2 AM default issues:', twoAMValidation.fixes);
+				updateData.timeSlots = {
+					...updateData.timeSlots,
+					...twoAMValidation.fixes
+				};
 			}
 		}
 		
@@ -3469,18 +3579,49 @@ app.put('/patients/preferences/medication-timing', authenticate, async (req, res
 function validateTimeSlots(timeSlots: any, workSchedule: string): { isValid: boolean; errors: string[] } {
 	const errors: string[] = [];
 	
-	// Check for the problematic 2 AM default time issue
+	// Enhanced validation for the problematic 2 AM default time issue
 	if (workSchedule === 'night_shift') {
+		// Check for the specific 2 AM default time issue
 		if (timeSlots.evening?.defaultTime === '02:00') {
 			errors.push('Night shift evening slot should not default to 2 AM - use 00:00 (midnight) instead');
 		}
+		
+		// Check for the incorrect evening slot range
 		if (timeSlots.evening?.start === '01:00' && timeSlots.evening?.end === '04:00') {
 			errors.push('Night shift evening slot should be 23:00-02:00, not 01:00-04:00');
 		}
+		
+		// Check for incorrect bedtime default
 		if (timeSlots.bedtime?.defaultTime === '06:00') {
 			errors.push('Night shift bedtime slot should default to 08:00, not 06:00');
 		}
+		
+		// Additional validation: Check for any 2 AM times in any slot for night shift
+		Object.entries(timeSlots).forEach(([slotName, config]: [string, any]) => {
+			if (config?.defaultTime === '02:00' && slotName !== 'evening') {
+				errors.push(`Night shift ${slotName} slot should not default to 2 AM - this may cause scheduling conflicts`);
+			}
+			if (config?.start === '02:00' || config?.end === '02:00') {
+				if (slotName !== 'evening') {
+					errors.push(`Night shift ${slotName} slot should not use 2 AM as start/end time - this may cause confusion with evening slot`);
+				}
+			}
+		});
+		
+		// Validate that evening slot uses correct configuration
+		if (timeSlots.evening && timeSlots.evening.defaultTime !== '00:00') {
+			if (timeSlots.evening.start === '23:00' && timeSlots.evening.end === '02:00') {
+				errors.push('Night shift evening slot (23:00-02:00) should default to 00:00 (midnight), not ' + timeSlots.evening.defaultTime);
+			}
+		}
 	}
+	
+	// General validation: Warn about any 2 AM default times regardless of work schedule
+	Object.entries(timeSlots).forEach(([slotName, config]: [string, any]) => {
+		if (config?.defaultTime === '02:00' && workSchedule !== 'night_shift') {
+			errors.push(`${slotName} slot defaulting to 2 AM is unusual for ${workSchedule} schedule - please verify this is intentional`);
+		}
+	});
 	
 	// Validate time format (HH:MM)
 	const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
@@ -3522,6 +3663,62 @@ function validateTimeSlots(timeSlots: any, workSchedule: string): { isValid: boo
 	};
 }
 
+// Enhanced validation function specifically for preventing 2 AM default time issues
+function validateAndPrevent2AMDefaults(timeSlots: any, workSchedule: string): { isValid: boolean; errors: string[]; fixes: any } {
+	const errors: string[] = [];
+	const fixes: any = {};
+	
+	console.log('🔍 Validating time slots for 2 AM default issues:', { workSchedule, timeSlots });
+	
+	// Check each time slot for problematic 2 AM defaults
+	Object.entries(timeSlots).forEach(([slotName, config]: [string, any]) => {
+		if (config?.defaultTime === '02:00') {
+			if (workSchedule === 'night_shift' && slotName === 'evening') {
+				// This is the known issue - evening slot should default to 00:00 (midnight)
+				errors.push(`CRITICAL: Night shift evening slot defaulting to 2 AM instead of midnight (00:00)`);
+				fixes[slotName] = { ...config, defaultTime: '00:00' };
+			} else if (workSchedule === 'night_shift') {
+				// Other slots in night shift shouldn't default to 2 AM
+				errors.push(`WARNING: Night shift ${slotName} slot defaulting to 2 AM may cause confusion`);
+				// Suggest appropriate defaults based on slot
+				const suggestedDefaults: Record<string, string> = {
+					morning: '15:00',
+					noon: '20:00',
+					bedtime: '08:00'
+				};
+				fixes[slotName] = { ...config, defaultTime: suggestedDefaults[slotName] || '08:00' };
+			} else {
+				// Standard schedule shouldn't have 2 AM defaults
+				errors.push(`WARNING: ${slotName} slot defaulting to 2 AM is unusual for ${workSchedule} schedule`);
+				fixes[slotName] = { ...config, defaultTime: '08:00' }; // Default to 8 AM
+			}
+		}
+	});
+	
+	// Specific validation for night shift evening slot
+	if (workSchedule === 'night_shift' && timeSlots.evening) {
+		const evening = timeSlots.evening;
+		
+		// Check for the exact problematic configuration
+		if (evening.start === '01:00' && evening.end === '04:00' && evening.defaultTime === '02:00') {
+			errors.push('CRITICAL: Detected exact problematic night shift configuration (01:00-04:00 defaulting to 02:00)');
+			fixes.evening = { start: '23:00', end: '02:00', defaultTime: '00:00', label: 'Late Evening' };
+		}
+		
+		// Ensure evening slot uses correct range and default
+		if (evening.start === '23:00' && evening.end === '02:00' && evening.defaultTime !== '00:00') {
+			errors.push(`Night shift evening slot (23:00-02:00) should default to 00:00, not ${evening.defaultTime}`);
+			fixes.evening = { ...evening, defaultTime: '00:00' };
+		}
+	}
+	
+	return {
+		isValid: errors.length === 0,
+		errors,
+		fixes
+	};
+}
+
 // Reset patient preferences to defaults
 app.post('/patients/preferences/medication-timing/reset-defaults', authenticate, async (req, res) => {
 	try {
@@ -3539,6 +3736,14 @@ app.post('/patients/preferences/medication-timing/reset-defaults', authenticate,
 			evening: { start: '17:00', end: '20:00', defaultTime: '18:00', label: 'Evening' },
 			bedtime: { start: '21:00', end: '23:59', defaultTime: '22:00', label: 'Bedtime' }
 		};
+		
+		// 🔥 CRITICAL VALIDATION: Ensure no 2 AM default times are ever set
+		Object.entries(defaultTimeSlots).forEach(([slotName, config]) => {
+			if (config.defaultTime === '02:00') {
+				console.error(`🚨 CRITICAL ERROR: ${slotName} slot has problematic 2 AM default time in ${workSchedule} schedule`);
+				throw new Error(`Invalid default time configuration: ${slotName} slot cannot default to 2 AM`);
+			}
+		});
 		
 		// Validate the time slots configuration
 		const validation = validateTimeSlots(defaultTimeSlots, workSchedule);
@@ -5046,10 +5251,21 @@ app.get('/medications', authenticate, async (req, res) => {
 			data: medications
 		});
 	} catch (error) {
-		console.error('Error getting medications:', error);
+		console.error('❌ Error getting medications:', error);
+		console.error('❌ Get medications error details:', {
+			error: error instanceof Error ? error.message : 'Unknown error',
+			stack: error instanceof Error ? error.stack : 'No stack',
+			userId: (req as any)?.user?.uid || 'Unknown',
+			patientId: req.query?.patientId || 'None',
+			requestPath: req.path,
+			timestamp: new Date().toISOString()
+		});
 		res.status(500).json({
 			success: false,
-			error: 'Internal server error'
+			error: 'Internal server error',
+			details: error instanceof Error ? error.message : 'Unknown error',
+			errorCode: 'GET_MEDICATIONS_FAILED',
+			timestamp: new Date().toISOString()
 		});
 	}
 });
@@ -5212,10 +5428,22 @@ app.post('/medications', authenticate, async (req, res) => {
 			}
 		});
 	} catch (error) {
-		console.error('Error adding medication:', error);
+		console.error('❌ Error adding medication:', error);
+		console.error('❌ Add medication error details:', {
+			error: error instanceof Error ? error.message : 'Unknown error',
+			stack: error instanceof Error ? error.stack : 'No stack',
+			userId: (req as any)?.user?.uid || 'Unknown',
+			medicationName: req.body?.name || 'Unknown',
+			requestBody: req.body,
+			requestPath: req.path,
+			timestamp: new Date().toISOString()
+		});
 		res.status(500).json({
 			success: false,
-			error: 'Internal server error'
+			error: 'Internal server error',
+			details: error instanceof Error ? error.message : 'Unknown error',
+			errorCode: 'ADD_MEDICATION_FAILED',
+			timestamp: new Date().toISOString()
 		});
 	}
 });
@@ -5278,7 +5506,7 @@ app.post('/medications/bulk-create-schedules', authenticate, async (req, res) =>
 			errors: [] as string[]
 		};
 		
-		// Process each medication
+		// Process each medication with enhanced validation
 		for (const medication of medications) {
 			try {
 				results.processed++;
@@ -5294,6 +5522,9 @@ app.post('/medications/bulk-create-schedules', authenticate, async (req, res) =>
 					reminderTimes: medication.reminderTimes
 				});
 				
+				// Enhanced validation with detailed feedback
+				const validationIssues: string[] = [];
+				
 				// Skip PRN medications
 				if (medication.isPRN) {
 					console.log(`⏭️ SKIP REASON: PRN medication: ${medication.name}`);
@@ -5301,31 +5532,36 @@ app.post('/medications/bulk-create-schedules', authenticate, async (req, res) =>
 					continue;
 				}
 				
-				// 🔍 DIAGNOSTIC: Check frequency field
+				// 🔍 ENHANCED: Check frequency field with suggestions
 				if (!medication.frequency || typeof medication.frequency !== 'string' || medication.frequency.trim() === '') {
-					console.log(`⏭️ SKIP REASON: Missing or invalid frequency for medication: ${medication.name}`, {
-						frequency: medication.frequency,
-						frequencyType: typeof medication.frequency,
-						frequencyLength: medication.frequency?.length || 0
-					});
-					results.skipped++;
-					results.errors.push(`${medication.name}: Missing or invalid frequency field`);
-					continue;
+					validationIssues.push('Missing frequency - add dosing frequency (e.g., "twice daily", "once daily")');
 				}
 				
-				// 🔍 DIAGNOSTIC: Check dosage field
+				// 🔍 ENHANCED: Check dosage field with suggestions
 				if (!medication.dosage || typeof medication.dosage !== 'string' || medication.dosage.trim() === '') {
-					console.log(`⏭️ SKIP REASON: Missing or invalid dosage for medication: ${medication.name}`, {
-						dosage: medication.dosage,
-						dosageType: typeof medication.dosage,
-						dosageLength: medication.dosage?.length || 0
-					});
+					validationIssues.push('Missing dosage - add dosage amount (e.g., "5mg", "1 tablet")');
+				}
+				
+				// 🔍 ENHANCED: Check reminder times if provided
+				if (medication.reminderTimes && Array.isArray(medication.reminderTimes)) {
+					const invalidTimes = medication.reminderTimes.filter((time: any) =>
+						typeof time !== 'string' || !/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(time)
+					);
+					if (invalidTimes.length > 0) {
+						validationIssues.push(`Invalid reminder times: ${invalidTimes.join(', ')} - use HH:MM format`);
+					}
+				}
+				
+				// If there are validation issues, skip with detailed error
+				if (validationIssues.length > 0) {
+					const errorMessage = `${medication.name}: ${validationIssues.join('; ')}`;
+					console.log(`⏭️ SKIP REASON: Validation issues for medication: ${medication.name}`, validationIssues);
 					results.skipped++;
-					results.errors.push(`${medication.name}: Missing or invalid dosage field`);
+					results.errors.push(errorMessage);
 					continue;
 				}
 				
-				// Check if schedule already exists
+				// Check if schedule already exists (enhanced check)
 				const existingScheduleQuery = await firestore.collection('medication_schedules')
 					.where('medicationId', '==', medication.id)
 					.where('isActive', '==', true)
@@ -5333,9 +5569,29 @@ app.post('/medications/bulk-create-schedules', authenticate, async (req, res) =>
 					.get();
 				
 				if (!existingScheduleQuery.empty) {
-					console.log(`⏭️ SKIP REASON: Schedule already exists for medication: ${medication.name}`);
-					results.skipped++;
-					continue;
+					// Check if existing schedule is valid
+					const existingSchedule = existingScheduleQuery.docs[0].data();
+					const hasValidTimes = existingSchedule.times && Array.isArray(existingSchedule.times) && existingSchedule.times.length > 0;
+					const hasValidFrequency = existingSchedule.frequency && typeof existingSchedule.frequency === 'string';
+					const hasValidDosage = existingSchedule.dosageAmount && typeof existingSchedule.dosageAmount === 'string';
+					
+					if (hasValidTimes && hasValidFrequency && hasValidDosage) {
+						console.log(`⏭️ SKIP REASON: Valid schedule already exists for medication: ${medication.name}`);
+						results.skipped++;
+						continue;
+					} else {
+						console.log(`⚠️ REPAIR NEEDED: Invalid existing schedule for medication: ${medication.name}`, {
+							hasValidTimes,
+							hasValidFrequency,
+							hasValidDosage,
+							existingTimes: existingSchedule.times,
+							existingFrequency: existingSchedule.frequency,
+							existingDosage: existingSchedule.dosageAmount
+						});
+						results.errors.push(`${medication.name}: Existing schedule has validation issues and needs manual review`);
+						results.skipped++;
+						continue;
+					}
 				}
 				
 				// Generate default times based on frequency
@@ -5469,7 +5725,7 @@ app.post('/medications/bulk-create-schedules', authenticate, async (req, res) =>
 	}
 });
 
-// Update medication
+// Update medication with enhanced error logging
 app.put('/medications/:medicationId', authenticate, async (req, res) => {
 	try {
 		console.log('🚀 === MEDICATION UPDATE DEBUG START ===');
@@ -5482,7 +5738,11 @@ app.put('/medications/:medicationId', authenticate, async (req, res) => {
 			userId,
 			updateDataKeys: Object.keys(updateData),
 			updateDataTypes: Object.fromEntries(Object.entries(updateData).map(([k, v]) => [k, typeof v])),
-			rawUpdateData: updateData
+			rawUpdateData: updateData,
+			requestPath: req.path,
+			requestMethod: req.method,
+			userAgent: req.headers['user-agent'],
+			timestamp: new Date().toISOString()
 		});
 		
 		// Get the medication document
@@ -5540,28 +5800,76 @@ app.put('/medications/:medicationId', authenticate, async (req, res) => {
 			
 			try {
 				if (key === 'prescribedDate' || key === 'startDate' || key === 'endDate') {
-					// Only convert if the value is a valid date string
-					if (updateData[key] && typeof updateData[key] === 'string') {
-						try {
-							const dateValue = new Date(updateData[key]);
-							if (isNaN(dateValue.getTime())) {
-								console.warn(`⚠️ Invalid date string for ${key}:`, updateData[key]);
-								// Skip invalid dates
-							} else {
-								updatedMedication[key] = admin.firestore.Timestamp.fromDate(dateValue);
-								console.log(`✅ Converted ${key} to timestamp:`, dateValue.toISOString());
-							}
-						} catch (dateError) {
-							console.warn(`⚠️ Date conversion error for ${key}:`, dateError);
-							// Skip invalid dates
-						}
-					} else if (updateData[key] instanceof Date) {
-						updatedMedication[key] = admin.firestore.Timestamp.fromDate(updateData[key]);
-						console.log(`✅ Converted ${key} Date object to timestamp`);
-					} else if (updateData[key] === null || updateData[key] === undefined) {
-						// Allow null/undefined for optional date fields
+					// Enhanced date validation with comprehensive error handling
+					const dateValue = updateData[key];
+					
+					// Skip if explicitly null or undefined
+					if (dateValue === null || dateValue === undefined) {
 						updatedMedication[key] = null;
-						console.log(`✅ Set ${key} to null`);
+						console.log(`✅ Set ${key} to null (explicit null/undefined)`);
+						return;
+					}
+					
+					// Skip if empty string
+					if (dateValue === '') {
+						console.log(`⚠️ Skipping empty string for ${key}`);
+						return;
+					}
+					
+					// Validate and convert date strings with comprehensive checks
+					if (typeof dateValue === 'string') {
+						const trimmedDate = dateValue.trim();
+						
+						// Check for obviously invalid patterns
+						if (trimmedDate.length < 4 ||
+							trimmedDate === 'Invalid Date' ||
+							trimmedDate === 'null' ||
+							trimmedDate === 'undefined' ||
+							/^[0-9]{1,2}$/.test(trimmedDate)) { // Just a number
+							console.warn(`⚠️ Invalid date pattern for ${key}:`, trimmedDate);
+							return;
+						}
+						
+						try {
+							const parsedDate = new Date(trimmedDate);
+							
+							// Comprehensive date validation
+							if (isNaN(parsedDate.getTime())) {
+								console.warn(`⚠️ Invalid date string for ${key}:`, trimmedDate);
+								return;
+							}
+							
+							// Additional sanity checks for reasonable date ranges
+							const year = parsedDate.getFullYear();
+							if (year < 1900 || year > 2100) {
+								console.warn(`⚠️ Date year out of reasonable range for ${key}:`, year);
+								return;
+							}
+							
+							// Convert to Firestore timestamp
+							updatedMedication[key] = admin.firestore.Timestamp.fromDate(parsedDate);
+							console.log(`✅ Converted ${key} to timestamp:`, parsedDate.toISOString());
+							
+						} catch (dateError) {
+							console.error(`❌ Date conversion error for ${key}:`, {
+								value: trimmedDate,
+								error: dateError instanceof Error ? dateError.message : 'Unknown error'
+							});
+							// Skip invalid dates instead of failing the entire request
+							return;
+						}
+					} else if (dateValue instanceof Date) {
+						// Validate Date object
+						if (isNaN(dateValue.getTime())) {
+							console.warn(`⚠️ Invalid Date object for ${key}:`, dateValue);
+							return;
+						}
+						
+						updatedMedication[key] = admin.firestore.Timestamp.fromDate(dateValue);
+						console.log(`✅ Converted ${key} Date object to timestamp`);
+					} else {
+						console.warn(`⚠️ Unexpected date type for ${key}:`, typeof dateValue, dateValue);
+						return;
 					}
 				} else {
 					// For non-date fields, copy directly with validation
@@ -8291,13 +8599,289 @@ app.get('/medication-calendar/missed-stats', authenticate, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error getting missed medication statistics:', error);
+    console.error('❌ Error getting missed medication statistics:', error);
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      endpoint: 'missed-stats',
+      timestamp: new Date().toISOString()
     });
   }
 });
+
+// Check for missing medication calendar events (MISSING ENDPOINT FIX)
+app.get('/medication-calendar/check-missing-events', authenticate, async (req, res) => {
+  try {
+    console.log('🔍 === CHECK MISSING EVENTS ENDPOINT START ===');
+    const currentUserId = (req as any).user.uid;
+    const { patientId, startDate, endDate, autoFix = 'false' } = req.query;
+    
+    // Determine target patient
+    const targetPatientId = patientId as string || currentUserId;
+    
+    console.log('🔍 Checking missing events for patient:', targetPatientId, 'requested by:', currentUserId);
+    
+    // Check access permissions
+    if (targetPatientId !== currentUserId) {
+      const familyAccess = await firestore.collection('family_calendar_access')
+        .where('familyMemberId', '==', currentUserId)
+        .where('patientId', '==', targetPatientId)
+        .where('status', '==', 'active')
+        .get();
+      
+      if (familyAccess.empty) {
+        console.log('❌ Access denied for user:', currentUserId, 'to patient:', targetPatientId);
+        return res.status(403).json({
+          success: false,
+          error: 'Access denied'
+        });
+      }
+    }
+    
+    // Set date range (default to last 7 days and next 30 days)
+    const defaultStartDate = new Date();
+    defaultStartDate.setDate(defaultStartDate.getDate() - 7);
+    const defaultEndDate = new Date();
+    defaultEndDate.setDate(defaultEndDate.getDate() + 30);
+    
+    const queryStartDate = startDate ? new Date(startDate as string) : defaultStartDate;
+    const queryEndDate = endDate ? new Date(endDate as string) : defaultEndDate;
+    
+    console.log('📅 Date range for missing events check:', {
+      startDate: queryStartDate.toISOString(),
+      endDate: queryEndDate.toISOString()
+    });
+    
+    // Get all active medication schedules for the patient
+    const schedulesQuery = await firestore.collection('medication_schedules')
+      .where('patientId', '==', targetPatientId)
+      .where('isActive', '==', true)
+      .where('isPaused', '==', false)
+      .get();
+    
+    const schedules = schedulesQuery.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        medicationId: data.medicationId,
+        medicationName: data.medicationName,
+        patientId: data.patientId,
+        frequency: data.frequency,
+        times: data.times,
+        daysOfWeek: data.daysOfWeek,
+        dayOfMonth: data.dayOfMonth,
+        startDate: data.startDate,
+        endDate: data.endDate,
+        isActive: data.isActive,
+        isPaused: data.isPaused,
+        dosageAmount: data.dosageAmount,
+        instructions: data.instructions,
+        reminderMinutesBefore: data.reminderMinutesBefore,
+        ...data
+      };
+    });
+    
+    console.log('📊 Found', schedules.length, 'active medication schedules');
+    
+    const missingEventsReport = {
+      schedulesChecked: schedules.length,
+      missingEventsBySchedule: [] as any[],
+      totalMissingEvents: 0,
+      eventsGenerated: 0,
+      errors: [] as string[],
+      dateRange: {
+        startDate: queryStartDate,
+        endDate: queryEndDate
+      }
+    };
+    
+    // Check each schedule for missing events
+    for (const schedule of schedules) {
+      try {
+        console.log('🔍 Checking schedule:', schedule.id, 'for medication:', schedule.medicationName);
+        
+        // Get existing events for this schedule in the date range
+        const existingEventsQuery = await firestore.collection('medication_calendar_events')
+          .where('medicationScheduleId', '==', schedule.id)
+          .where('scheduledDateTime', '>=', admin.firestore.Timestamp.fromDate(queryStartDate))
+          .where('scheduledDateTime', '<=', admin.firestore.Timestamp.fromDate(queryEndDate))
+          .get();
+        
+        const existingEvents = existingEventsQuery.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          scheduledDateTime: doc.data().scheduledDateTime?.toDate()
+        }));
+        
+        console.log('📅 Found', existingEvents.length, 'existing events for schedule:', schedule.id);
+        
+        // Calculate expected events based on schedule frequency
+        const expectedEvents = calculateExpectedEvents(schedule, queryStartDate, queryEndDate);
+        const missingEvents = findMissingEvents(expectedEvents, existingEvents);
+        
+        if (missingEvents.length > 0) {
+          console.log('⚠️ Found', missingEvents.length, 'missing events for schedule:', schedule.id);
+          
+          const scheduleReport = {
+            scheduleId: schedule.id,
+            medicationId: schedule.medicationId,
+            medicationName: schedule.medicationName,
+            frequency: schedule.frequency,
+            expectedEvents: expectedEvents.length,
+            existingEvents: existingEvents.length,
+            missingEvents: missingEvents.length,
+            missingEventDetails: missingEvents.map(event => ({
+              scheduledDateTime: event.scheduledDateTime,
+              dosageAmount: event.dosageAmount,
+              reason: 'missing_from_calendar'
+            }))
+          };
+          
+          missingEventsReport.missingEventsBySchedule.push(scheduleReport);
+          missingEventsReport.totalMissingEvents += missingEvents.length;
+          
+          // Auto-generate missing events if requested
+          if (autoFix === 'true') {
+            try {
+              console.log('🔧 Auto-generating', missingEvents.length, 'missing events for schedule:', schedule.id);
+              
+              const batch = firestore.batch();
+              missingEvents.forEach(event => {
+                const eventRef = firestore.collection('medication_calendar_events').doc();
+                batch.set(eventRef, {
+                  ...event,
+                  createdAt: admin.firestore.Timestamp.now(),
+                  updatedAt: admin.firestore.Timestamp.now(),
+                  autoGenerated: true,
+                  autoGeneratedReason: 'missing_events_check'
+                });
+              });
+              
+              await batch.commit();
+              missingEventsReport.eventsGenerated += missingEvents.length;
+              console.log('✅ Auto-generated', missingEvents.length, 'missing events');
+              
+            } catch (generateError) {
+              console.error('❌ Error auto-generating events:', generateError);
+              missingEventsReport.errors.push(`Failed to generate events for ${schedule.medicationName}: ${generateError instanceof Error ? generateError.message : 'Unknown error'}`);
+            }
+          }
+        }
+        
+      } catch (scheduleError) {
+        console.error('❌ Error checking schedule:', schedule.id, scheduleError);
+        missingEventsReport.errors.push(`Error checking schedule ${schedule.medicationName}: ${scheduleError instanceof Error ? scheduleError.message : 'Unknown error'}`);
+      }
+    }
+    
+    console.log('✅ Missing events check completed:', {
+      totalMissing: missingEventsReport.totalMissingEvents,
+      schedulesWithMissing: missingEventsReport.missingEventsBySchedule.length,
+      eventsGenerated: missingEventsReport.eventsGenerated,
+      errors: missingEventsReport.errors.length
+    });
+    
+    res.json({
+      success: true,
+      data: missingEventsReport,
+      message: `Found ${missingEventsReport.totalMissingEvents} missing events across ${missingEventsReport.missingEventsBySchedule.length} schedules`
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in check missing events:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      endpoint: 'check-missing-events',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Helper function to calculate expected events for a schedule
+function calculateExpectedEvents(schedule: any, startDate: Date, endDate: Date): any[] {
+  const events = [];
+  const currentDate = new Date(Math.max(startDate.getTime(), schedule.startDate?.toDate?.()?.getTime() || startDate.getTime()));
+  const scheduleEndDate = schedule.endDate?.toDate?.() || endDate;
+  const actualEndDate = new Date(Math.min(endDate.getTime(), scheduleEndDate.getTime()));
+  
+  while (currentDate <= actualEndDate) {
+    let shouldCreateEvent = false;
+    
+    // Check if we should create an event for this date based on frequency
+    switch (schedule.frequency) {
+      case 'daily':
+      case 'once_daily':
+      case 'twice_daily':
+      case 'three_times_daily':
+      case 'four_times_daily':
+        shouldCreateEvent = true;
+        break;
+      case 'weekly':
+        if (schedule.daysOfWeek && schedule.daysOfWeek.includes(currentDate.getDay())) {
+          shouldCreateEvent = true;
+        }
+        break;
+      case 'monthly':
+        if (currentDate.getDate() === (schedule.dayOfMonth || 1)) {
+          shouldCreateEvent = true;
+        }
+        break;
+      case 'as_needed':
+        // Don't generate automatic events for PRN medications
+        shouldCreateEvent = false;
+        break;
+    }
+    
+    if (shouldCreateEvent && schedule.times) {
+      // Create events for each time in the schedule
+      for (const time of schedule.times) {
+        const [hours, minutes] = time.split(':').map(Number);
+        const eventDateTime = new Date(currentDate);
+        eventDateTime.setHours(hours, minutes, 0, 0);
+        
+        // Only include events within our date range
+        if (eventDateTime >= startDate && eventDateTime <= endDate) {
+          events.push({
+            medicationScheduleId: schedule.id,
+            medicationId: schedule.medicationId,
+            medicationName: schedule.medicationName,
+            patientId: schedule.patientId,
+            scheduledDateTime: admin.firestore.Timestamp.fromDate(eventDateTime),
+            dosageAmount: schedule.dosageAmount,
+            instructions: schedule.instructions || '',
+            status: 'scheduled',
+            reminderMinutesBefore: schedule.reminderMinutesBefore || [15, 5],
+            isRecurring: true,
+            eventType: 'medication'
+          });
+        }
+      }
+    }
+    
+    // Move to next day
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+  
+  return events;
+}
+
+// Helper function to find missing events by comparing expected vs existing
+function findMissingEvents(expectedEvents: any[], existingEvents: any[]): any[] {
+  const existingTimes = new Set();
+  existingEvents.forEach(event => {
+    if (event.scheduledDateTime) {
+      existingTimes.add(event.scheduledDateTime.toISOString());
+    }
+  });
+  
+  return expectedEvents.filter(expectedEvent => {
+    const expectedTimeISO = expectedEvent.scheduledDateTime.toDate().toISOString();
+    return !existingTimes.has(expectedTimeISO);
+  });
+}
 
 // ===== DRUG SAFETY API ENDPOINTS =====
 
@@ -8669,13 +9253,55 @@ function isContraindicated(medication: any, contraindication: any): boolean {
   return medName.includes(contraindicatedMed) || contraindicatedMed.includes(medName);
 }
 
-// Error handling middleware
+// Enhanced error handling middleware with comprehensive logging
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Unhandled error:', err);
+  console.error('❌ === UNHANDLED ERROR CAUGHT ===');
+  console.error('❌ Unhandled error:', err);
+  console.error('❌ Comprehensive error context:', {
+    message: err.message,
+    stack: err.stack,
+    name: err.name,
+    requestPath: req.path,
+    requestMethod: req.method,
+    requestBody: req.body,
+    requestQuery: req.query,
+    requestParams: req.params,
+    userId: (req as any)?.user?.uid || 'Unknown',
+    userAgent: req.headers['user-agent'],
+    timestamp: new Date().toISOString(),
+    errorCode: (err as any)?.code || 'UNHANDLED_ERROR'
+  });
   res.status(500).json({
     success: false,
-    error: 'Internal server error'
+    error: 'Internal server error',
+    details: err.message,
+    errorCode: 'UNHANDLED_ERROR',
+    timestamp: new Date().toISOString()
   });
+});
+
+// ===== UNIFIED MEDICATION API INTEGRATION =====
+
+// Mount unified medication API with authentication middleware
+app.use('/unified-medication', authenticate, unifiedMedicationApi);
+
+// Backward compatibility routes (redirect to unified API) with authentication
+app.use('/medication-commands', authenticate, (req, res, next) => {
+  console.log('🔄 Redirecting legacy /medication-commands to unified API');
+  req.url = `/unified-medication${req.url}`;
+  unifiedMedicationApi(req, res, next);
+});
+
+app.use('/medication-events', authenticate, (req, res, next) => {
+  console.log('🔄 Redirecting legacy /medication-events to unified API');
+  req.url = `/unified-medication${req.url}`;
+  unifiedMedicationApi(req, res, next);
+});
+
+app.use('/medication-views', authenticate, (req, res, next) => {
+  console.log('🔄 Redirecting legacy /medication-views to unified API');
+  req.url = `/unified-medication${req.url}`;
+  unifiedMedicationApi(req, res, next);
 });
 
 // 404 handler

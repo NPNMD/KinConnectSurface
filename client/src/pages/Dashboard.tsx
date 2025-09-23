@@ -290,8 +290,12 @@ export default function Dashboard() {
       
       console.log('🔍 Dashboard: Fetching today\'s medication buckets');
 
+      const effectivePatientId = getEffectivePatientId();
+      console.log('🔍 Dashboard: Using effective patient ID for medication buckets:', effectivePatientId);
+      
       const result = await medicationCalendarApi.getTodayMedicationBuckets(now, {
-        patientId: getEffectivePatientId() || undefined
+        patientId: effectivePatientId || undefined,
+        forceFresh: false
       });
 
       console.log('🔍 Dashboard: Medication buckets result:', result);

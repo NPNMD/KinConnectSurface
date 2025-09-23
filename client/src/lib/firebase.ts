@@ -154,14 +154,83 @@ export const getCurrentUser = (): User | null => {
   return auth.currentUser;
 };
 
-// Get ID token for API calls
-export const getIdToken = async (): Promise<string | null> => {
+// Get ID token for API calls with refresh and validation
+export const getIdToken = async (forceRefresh: boolean = false): Promise<string | null> => {
   try {
     const user = auth.currentUser;
-    if (!user) return null;
-    return await user.getIdToken();
-  } catch (error) {
-    console.error('Error getting ID token:', error);
+    if (!user) {
+      console.warn('🔐 No authenticated user found when requesting ID token');
+      return null;
+    }
+
+    // Force refresh token if requested or if token is close to expiry
+    const token = await user.getIdToken(forceRefresh);
+    
+    // Validate token format (basic check)
+    if (!token || typeof token !== 'string' || token.length < 100) {
+      console.error('🔐 Invalid token format received');
+      return null;
+    }
+
+    // Check if token is expired by parsing the payload (basic validation)
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      const now = Math.floor(Date.now() / 1000);
+      
+      if (payload.exp && payload.exp < now) {
+        console.warn('🔐 Token is expired, forcing refresh');
+        return await user.getIdToken(true); // Force refresh
+      }
+      
+      // If token expires within 5 minutes, proactively refresh
+      if (payload.exp && payload.exp - now < 300) {
+        console.log('🔐 Token expires soon, proactively refreshing');
+        return await user.getIdToken(true);
+      }
+    } catch (parseError) {
+      console.warn('🔐 Could not parse token payload for validation:', parseError);
+      // Continue with token as-is if parsing fails
+    }
+
+    console.log('🔐 Valid token obtained for user:', user.email);
+    return token;
+  } catch (error: any) {
+    console.error('🔐 Error getting ID token:', error);
+    
+    // Handle specific auth errors
+    if (error.code === 'auth/user-token-expired') {
+      console.log('🔐 Token expired, attempting refresh');
+      try {
+        const user = auth.currentUser;
+        if (user) {
+          return await user.getIdToken(true);
+        }
+      } catch (refreshError) {
+        console.error('🔐 Failed to refresh expired token:', refreshError);
+      }
+    }
+    
     return null;
+  }
+};
+
+// Validate current authentication state
+export const validateAuthState = async (): Promise<{ isValid: boolean; user: User | null; error?: string }> => {
+  try {
+    const user = auth.currentUser;
+    if (!user) {
+      return { isValid: false, user: null, error: 'No authenticated user' };
+    }
+
+    // Try to get a fresh token to validate auth state
+    const token = await getIdToken(false);
+    if (!token) {
+      return { isValid: false, user: null, error: 'Could not obtain valid token' };
+    }
+
+    return { isValid: true, user };
+  } catch (error: any) {
+    console.error('🔐 Auth state validation failed:', error);
+    return { isValid: false, user: null, error: error.message || 'Authentication validation failed' };
   }
 };

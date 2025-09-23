@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  X, 
-  Clock, 
-  AlertTriangle, 
-  CheckCircle, 
+import {
+  X,
+  Clock,
+  AlertTriangle,
+  CheckCircle,
   Calendar,
   Pill,
   Package,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Lock
 } from 'lucide-react';
 import { MedicationCalendarEvent, SkipReason, EnhancedMedicationCalendarEvent } from '@shared/types';
 import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
@@ -39,7 +40,7 @@ export default function MissedMedicationsModal({
   onClose,
   onMedicationAction
 }: MissedMedicationsModalProps) {
-  const { getEffectivePatientId } = useFamily();
+  const { getEffectivePatientId, hasPermission, userRole, activePatientAccess } = useFamily();
   const [missedMedications, setMissedMedications] = useState<(MedicationCalendarEvent | EnhancedMedicationCalendarEvent)[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [processingEventId, setProcessingEventId] = useState<string | null>(null);
@@ -320,30 +321,60 @@ export default function MissedMedicationsModal({
                               </div>
                             </div>
                             
-                            {/* Action Buttons */}
+                            {/* Permission-based Action Buttons */}
                             <div className="flex flex-col space-y-2 ml-4">
-                              <button
-                                onClick={() => handleMarkAsTakenLate(medication.id)}
-                                disabled={processingEventId === medication.id}
-                                className="px-3 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                {processingEventId === medication.id ? (
-                                  <div className="flex items-center space-x-1">
-                                    <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
-                                    <span>Taking...</span>
-                                  </div>
-                                ) : (
-                                  'Mark as Taken Late'
-                                )}
-                              </button>
-                              
-                              <button
-                                onClick={() => setShowSkipModal(medication.id)}
-                                disabled={processingEventId === medication.id}
-                                className="px-3 py-1.5 bg-gray-600 text-white text-sm rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                Skip with Reason
-                              </button>
+                              {(() => {
+                                const canEdit = hasPermission('canEdit');
+                                
+                                // Debug logging for permission checks
+                                console.log('🔍 MissedMedicationsModal: Permission check for medication actions:', {
+                                  eventId: medication.id,
+                                  medicationName: medication.medicationName,
+                                  userRole,
+                                  canEdit,
+                                  activePatientAccess: activePatientAccess ? {
+                                    patientName: activePatientAccess.patientName,
+                                    permissions: activePatientAccess.permissions,
+                                    accessLevel: activePatientAccess.accessLevel
+                                  } : null
+                                });
+                                
+                                if (!canEdit) {
+                                  return (
+                                    <div className="flex items-center space-x-2 text-xs text-gray-500 px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
+                                      <Lock className="w-3 h-3" />
+                                      <span>View only access</span>
+                                    </div>
+                                  );
+                                }
+                                
+                                return (
+                                  <>
+                                    <button
+                                      onClick={() => handleMarkAsTakenLate(medication.id)}
+                                      disabled={processingEventId === medication.id}
+                                      className="px-3 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      {processingEventId === medication.id ? (
+                                        <div className="flex items-center space-x-1">
+                                          <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                                          <span>Taking...</span>
+                                        </div>
+                                      ) : (
+                                        'Mark as Taken Late'
+                                      )}
+                                    </button>
+                                    
+                                    <button
+                                      onClick={() => setShowSkipModal(medication.id)}
+                                      disabled={processingEventId === medication.id}
+                                      className="px-3 py-1.5 bg-gray-600 text-white text-sm rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      Skip with Reason
+                                    </button>
+                                  </>
+                                );
+                              })()}
                             </div>
                           </div>
                         </div>
