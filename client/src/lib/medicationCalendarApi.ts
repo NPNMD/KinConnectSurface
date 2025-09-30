@@ -10,7 +10,7 @@ import type {
   EnhancedMedicationCalendarEvent,
   SkipReason
 } from '@shared/types';
-import { getIdToken } from './firebase';
+import { getIdToken, validateAuthState } from './firebase';
 import { rateLimitedFetch, RateLimitedAPI } from './rateLimiter';
 import { requestDebouncer } from './requestDebouncer';
 
@@ -19,18 +19,81 @@ const API_BASE = 'https://us-central1-claritystream-uldp9.cloudfunctions.net/api
 // Add diagnostic logging
 console.log('🔧 MedicationCalendarApi: Using API base URL:', API_BASE);
 
-// Helper function to get authenticated headers
-async function getAuthHeaders(): Promise<HeadersInit> {
-  const token = await getIdToken();
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-  };
+// Enhanced helper function to get authenticated headers with validation
+async function getAuthHeaders(forceRefresh: boolean = false): Promise<HeadersInit> {
+  try {
+    // Validate auth state first
+    const authValidation = await validateAuthState();
+    if (!authValidation.isValid) {
+      console.error('🔐 Authentication validation failed:', authValidation.error);
+      throw new Error(authValidation.error || 'Authentication required');
+    }
 
-  if (token) {
+    const token = await getIdToken(forceRefresh);
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+
+    if (!token) {
+      console.error('🔐 Failed to obtain authentication token');
+      throw new Error('Failed to obtain authentication token');
+    }
+
     headers.Authorization = `Bearer ${token}`;
+    console.log('🔐 Authentication headers prepared successfully');
+    
+    return headers;
+  } catch (error) {
+    console.error('🔐 Error preparing auth headers:', error);
+    throw error;
   }
+}
 
-  return headers;
+// Enhanced error handling for API responses
+function handleApiError(error: any, context: string): ApiResponse<any> {
+  console.error(`❌ ${context}:`, error);
+  
+  // Handle authentication errors specifically
+  if (error.status === 401 || error.statusCode === 401 || error.message?.includes('Authentication')) {
+    return {
+      success: false,
+      error: 'Authentication expired. Please sign in again.'
+    };
+  }
+  
+  if (error.status === 403 || error.statusCode === 403) {
+    return {
+      success: false,
+      error: 'Access denied. You may not have permission for this action.'
+    };
+  }
+  
+  if (error.status === 429 || error.statusCode === 429) {
+    return {
+      success: false,
+      error: 'Too many requests. Please wait a moment and try again.'
+    };
+  }
+  
+  if (error.status >= 500 || error.statusCode >= 500) {
+    return {
+      success: false,
+      error: 'Server error. Please try again in a few moments.'
+    };
+  }
+  
+  // Network or other errors
+  if (error.message?.includes('fetch') || error.message?.includes('network')) {
+    return {
+      success: false,
+      error: 'Network error. Please check your connection and try again.'
+    };
+  }
+  
+  return {
+    success: false,
+    error: error.message || 'An unexpected error occurred. Please try again.'
+  };
 }
 
 class MedicationCalendarApi {
@@ -59,11 +122,7 @@ class MedicationCalendarApi {
         }
       );
     } catch (error) {
-      console.error('Error fetching medication schedules:', error);
-      return {
-        success: false,
-        error: 'Failed to fetch medication schedules'
-      };
+      return handleApiError(error, 'Get medication schedules');
     }
   }
 
@@ -97,10 +156,18 @@ class MedicationCalendarApi {
       const validation = this.validateScheduleData(scheduleData);
       if (!validation.isValid) {
         console.error('❌ MedicationCalendarApi: Schedule validation failed:', validation.errors);
+        console.warn('⚠️ MedicationCalendarApi: Validation warnings:', validation.warnings);
+        console.info('💡 MedicationCalendarApi: Repair suggestions:', validation.repairSuggestions);
+        
         return {
           success: false,
-          error: `Validation failed: ${validation.errors.join(', ')}`
+          error: `Validation failed: ${validation.errors.join(', ')}. Suggestions: ${validation.repairSuggestions.join('; ')}`
         };
+      }
+      
+      // Log warnings even if validation passes
+      if (validation.warnings.length > 0) {
+        console.warn('⚠️ MedicationCalendarApi: Schedule validation warnings:', validation.warnings);
       }
       
       console.log('✅ MedicationCalendarApi: Schedule validation passed');
@@ -297,7 +364,7 @@ class MedicationCalendarApi {
     }
   }
 
-  // Mark medication as taken
+  // Mark medication as taken with enhanced error handling and user feedback
   async markMedicationTaken(
     eventId: string,
     takenAt?: Date,
@@ -306,8 +373,18 @@ class MedicationCalendarApi {
     try {
       console.log('🔧 MedicationCalendarApi: Marking medication as taken:', { eventId, takenAt, notes });
       
+      // Validate eventId
+      if (!eventId || typeof eventId !== 'string' || eventId.trim().length === 0) {
+        console.error('❌ Invalid eventId provided:', eventId);
+        return {
+          success: false,
+          error: 'Invalid medication event ID. Please refresh the page and try again.'
+        };
+      }
+      
+      // Get authenticated headers (will throw if auth fails)
       const headers = await getAuthHeaders();
-      console.log('🔧 MedicationCalendarApi: Headers prepared for mark taken request');
+      console.log('🔧 MedicationCalendarApi: Authentication validated for mark taken request');
       
       // Build request body without undefined values
       const requestBody: any = {};
@@ -335,6 +412,12 @@ class MedicationCalendarApi {
 
       console.log('🔧 MedicationCalendarApi: Mark taken response:', result);
       
+      // Handle authentication errors in response
+      if (!result.success && (result.error?.includes('Authentication') || result.error?.includes('Unauthorized'))) {
+        console.error('🔐 Authentication error in mark taken response');
+        return handleApiError({ status: 401, message: result.error }, 'Mark medication taken');
+      }
+      
       // If successful, clear relevant caches to force refresh
       if (result.success) {
         console.log('🗑️ Clearing medication caches after successful mark taken');
@@ -354,15 +437,13 @@ class MedicationCalendarApi {
         requestDebouncer.reset();
         
         console.log('✅ Caches cleared, UI should refresh immediately');
+      } else {
+        console.error('❌ Mark taken failed:', result.error);
       }
       
       return result;
     } catch (error) {
-      console.error('❌ MedicationCalendarApi: Error marking medication as taken:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to mark medication as taken'
-      };
+      return handleApiError(error, 'Mark medication taken');
     }
   }
 
@@ -507,27 +588,41 @@ class MedicationCalendarApi {
 
   // ===== TIME BUCKET ORGANIZATION API =====
 
-  // Get today's medications organized by time buckets
+  // Get today's medications organized by time buckets with enhanced patient ID handling
   async getTodayMedicationBuckets(
     date?: Date,
-    options?: { forceFresh?: boolean; patientId?: string }
+    options?: { forceFresh?: boolean; patientId?: string; retryCount?: number }
   ): Promise<ApiResponse<TodayMedicationBuckets>> {
+    const retryCount = options?.retryCount || 0;
+    const maxRetries = 3;
+    
     try {
       const targetDate = date || new Date();
+      console.log('🔍 MedicationCalendarApi: Getting today\'s medication buckets', {
+        date: targetDate.toISOString().split('T')[0],
+        patientId: options?.patientId,
+        forceFresh: options?.forceFresh,
+        retryCount
+      });
+      
       const headers = await getAuthHeaders();
       
       const params = new URLSearchParams();
       params.append('date', targetDate.toISOString().split('T')[0]);
       
+      // Always include patientId if provided
       if (options?.patientId) {
         params.append('patientId', options.patientId);
+        console.log('🔍 MedicationCalendarApi: Using explicit patientId:', options.patientId);
       }
 
       const url = `${API_BASE}/medication-calendar/events/today-buckets?${params}`;
+      console.log('🔍 MedicationCalendarApi: Request URL:', url);
 
       // Allow bypassing cache for immediate post-action refreshes
       if (options?.forceFresh) {
-        return await rateLimitedFetch<ApiResponse<TodayMedicationBuckets>>(
+        console.log('🔄 MedicationCalendarApi: Force fresh request (bypassing cache)');
+        const result = await rateLimitedFetch<ApiResponse<TodayMedicationBuckets>>(
           url,
           {
             method: 'GET',
@@ -538,9 +633,17 @@ class MedicationCalendarApi {
             priority: 'high'
           }
         );
+        
+        // If successful, try to generate missing calendar events
+        if (result.success && result.data) {
+          console.log('✅ MedicationCalendarApi: Successfully loaded buckets, checking for missing events');
+          this.ensureMissingCalendarEventsInBackground();
+        }
+        
+        return result;
       }
 
-      return await rateLimitedFetch<ApiResponse<TodayMedicationBuckets>>(
+      const result = await rateLimitedFetch<ApiResponse<TodayMedicationBuckets>>(
         url,
         {
           method: 'GET',
@@ -553,12 +656,36 @@ class MedicationCalendarApi {
           cacheTTL: 30000 // 30 seconds cache for today's data
         }
       );
+      
+      // If successful, try to generate missing calendar events in background
+      if (result.success && result.data) {
+        console.log('✅ MedicationCalendarApi: Successfully loaded buckets from cache/API');
+        this.ensureMissingCalendarEventsInBackground();
+      } else if (!result.success && retryCount < maxRetries) {
+        console.warn(`⚠️ MedicationCalendarApi: Bucket fetch failed, retrying (${retryCount + 1}/${maxRetries})`);
+        // Exponential backoff retry
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+        return this.getTodayMedicationBuckets(date, { ...options, retryCount: retryCount + 1 });
+      }
+      
+      return result;
     } catch (error) {
       console.error('❌ MedicationCalendarApi: Error fetching time buckets:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch time buckets'
-      };
+      
+      // Retry logic for network errors
+      if (retryCount < maxRetries && (
+        error instanceof Error && (
+          error.message.includes('fetch') ||
+          error.message.includes('network') ||
+          error.message.includes('timeout')
+        )
+      )) {
+        console.warn(`⚠️ MedicationCalendarApi: Network error, retrying (${retryCount + 1}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+        return this.getTodayMedicationBuckets(date, { ...options, retryCount: retryCount + 1 });
+      }
+      
+      return handleApiError(error, 'Get today\'s medication buckets');
     }
   }
 
@@ -851,63 +978,156 @@ class MedicationCalendarApi {
     return [15, 5]; // 15 minutes and 5 minutes before
   }
 
-  // Validate schedule data before submission
+  // Enhanced validation with detailed feedback and repair suggestions
   validateScheduleData(scheduleData: Partial<NewMedicationSchedule>): {
     isValid: boolean;
     errors: string[];
+    warnings: string[];
+    repairSuggestions: string[];
   } {
     console.log('🔍 MedicationCalendarApi: Validating schedule data:', scheduleData);
     
     const errors: string[] = [];
+    const warnings: string[] = [];
+    const repairSuggestions: string[] = [];
 
+    // Critical validation errors
     if (!scheduleData.medicationId) {
       errors.push('Medication ID is required');
+      repairSuggestions.push('Ensure the medication exists and has a valid ID');
     }
 
     if (!scheduleData.frequency) {
       errors.push('Frequency is required');
+      repairSuggestions.push('Set a valid frequency (daily, twice_daily, weekly, etc.)');
+    } else {
+      // Validate frequency format
+      const validFrequencies = ['daily', 'twice_daily', 'three_times_daily', 'four_times_daily', 'weekly', 'monthly', 'as_needed'];
+      if (!validFrequencies.includes(scheduleData.frequency)) {
+        warnings.push(`Unusual frequency: ${scheduleData.frequency}. Consider using standard frequencies.`);
+      }
     }
 
     if (!scheduleData.times || scheduleData.times.length === 0) {
       errors.push('At least one time is required');
+      repairSuggestions.push('Add reminder times (e.g., ["07:00", "19:00"] for twice daily)');
     } else {
       // Validate time format
       const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+      const invalidTimes: string[] = [];
+      
       for (const time of scheduleData.times) {
         if (!timeRegex.test(time)) {
-          errors.push(`Invalid time format: ${time}. Use HH:MM format`);
+          invalidTimes.push(time);
         }
+      }
+      
+      if (invalidTimes.length > 0) {
+        errors.push(`Invalid time format: ${invalidTimes.join(', ')}. Use HH:MM format (e.g., 07:00, 19:30)`);
+        repairSuggestions.push('Fix time formats to use 24-hour HH:MM format');
       }
       
       // Check for duplicate times
       const uniqueTimes = new Set(scheduleData.times);
       if (uniqueTimes.size !== scheduleData.times.length) {
         errors.push('Duplicate times are not allowed');
+        repairSuggestions.push('Remove duplicate reminder times');
+      }
+      
+      // Validate frequency vs times count consistency
+      if (scheduleData.frequency && scheduleData.times.length > 0) {
+        const expectedCounts: Record<string, number> = {
+          'daily': 1,
+          'twice_daily': 2,
+          'three_times_daily': 3,
+          'four_times_daily': 4
+        };
+        
+        const expectedCount = expectedCounts[scheduleData.frequency];
+        if (expectedCount && scheduleData.times.length !== expectedCount) {
+          warnings.push(`${scheduleData.frequency} typically uses ${expectedCount} time${expectedCount !== 1 ? 's' : ''}, but ${scheduleData.times.length} provided`);
+        }
       }
     }
 
     if (!scheduleData.dosageAmount) {
       errors.push('Dosage amount is required');
+      repairSuggestions.push('Specify dosage amount (e.g., "1 tablet", "5mg", "2 capsules")');
+    } else if (typeof scheduleData.dosageAmount !== 'string' || scheduleData.dosageAmount.trim().length === 0) {
+      errors.push('Dosage amount must be a non-empty string');
+      repairSuggestions.push('Provide a valid dosage description');
     }
 
     if (!scheduleData.startDate) {
       errors.push('Start date is required');
+      repairSuggestions.push('Set a start date for the medication schedule');
+    } else {
+      // Validate start date is not in the past (allow today)
+      const startDate = new Date(scheduleData.startDate);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (startDate < today) {
+        warnings.push('Start date is in the past. Schedule will begin from today.');
+      }
     }
 
-    if (scheduleData.frequency === 'weekly' && (!scheduleData.daysOfWeek || scheduleData.daysOfWeek.length === 0)) {
-      errors.push('Days of week are required for weekly frequency');
+    // Frequency-specific validation
+    if (scheduleData.frequency === 'weekly') {
+      if (!scheduleData.daysOfWeek || scheduleData.daysOfWeek.length === 0) {
+        errors.push('Days of week are required for weekly frequency');
+        repairSuggestions.push('Select which days of the week to take this medication');
+      } else {
+        // Validate days of week format
+        const validDays = [0, 1, 2, 3, 4, 5, 6];
+        const invalidDays = scheduleData.daysOfWeek.filter(day => !validDays.includes(day));
+        if (invalidDays.length > 0) {
+          errors.push(`Invalid days of week: ${invalidDays.join(', ')}. Use 0-6 (Sunday=0)`);
+        }
+      }
     }
 
-    if (scheduleData.frequency === 'monthly' && !scheduleData.dayOfMonth) {
-      errors.push('Day of month is required for monthly frequency');
+    if (scheduleData.frequency === 'monthly') {
+      if (!scheduleData.dayOfMonth) {
+        errors.push('Day of month is required for monthly frequency');
+        repairSuggestions.push('Select which day of the month to take this medication');
+      } else if (scheduleData.dayOfMonth < 1 || scheduleData.dayOfMonth > 31) {
+        errors.push('Day of month must be between 1 and 31');
+        repairSuggestions.push('Choose a valid day of the month (1-31)');
+      }
+    }
+
+    // Validate end date if provided
+    if (scheduleData.endDate && scheduleData.startDate) {
+      const startDate = new Date(scheduleData.startDate);
+      const endDate = new Date(scheduleData.endDate);
+      
+      if (endDate <= startDate) {
+        errors.push('End date must be after start date');
+        repairSuggestions.push('Set an end date that comes after the start date');
+      }
+    }
+
+    // Validate reminder settings
+    if (scheduleData.reminderMinutesBefore) {
+      const invalidReminders = scheduleData.reminderMinutesBefore.filter(minutes =>
+        typeof minutes !== 'number' || minutes < 0 || minutes > 1440
+      );
+      
+      if (invalidReminders.length > 0) {
+        errors.push('Reminder minutes must be numbers between 0 and 1440 (24 hours)');
+        repairSuggestions.push('Set valid reminder times (e.g., [15, 5] for 15 and 5 minutes before)');
+      }
     }
 
     const validationResult = {
       isValid: errors.length === 0,
-      errors
+      errors,
+      warnings,
+      repairSuggestions
     };
     
-    console.log('🔍 MedicationCalendarApi: Validation result:', validationResult);
+    console.log('🔍 MedicationCalendarApi: Enhanced validation result:', validationResult);
     
     return validationResult;
   }
@@ -1081,6 +1301,587 @@ class MedicationCalendarApi {
     } catch (error) {
       console.error('Error creating bulk schedules:', error);
       return { success: false, error: 'Failed to create bulk schedules' };
+    }
+  }
+
+  // Generate missing calendar events for existing schedules
+  async generateMissingCalendarEvents(): Promise<ApiResponse<{
+    processed: number;
+    generated: number;
+    skipped: number;
+    errors: string[];
+  }>> {
+    try {
+      console.log('🔧 MedicationCalendarApi: Generating missing calendar events');
+      
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/medication-calendar/generate-missing-events`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+      });
+      
+      const result = await response.json();
+      
+      console.log('🔧 MedicationCalendarApi: Generate missing events response:', result);
+      
+      // Clear caches on successful generation
+      if (result.success && result.data && result.data.generated > 0) {
+        console.log(`✅ Generated ${result.data.generated} missing calendar events`);
+        RateLimitedAPI.clearCache('today_buckets');
+        RateLimitedAPI.clearCache('calendar_events');
+        RateLimitedAPI.clearCache('medication_schedules');
+        requestDebouncer.reset();
+      }
+      
+      return result;
+    } catch (error) {
+      return handleApiError(error, 'Generate missing calendar events');
+    }
+  }
+
+  // Check for medications with schedules but no calendar events
+  async checkMissingCalendarEvents(): Promise<ApiResponse<{
+    medicationsWithoutEvents: Array<{
+      medicationId: string;
+      medicationName: string;
+      scheduleId: string;
+      frequency: string;
+      lastEventDate?: string;
+    }>;
+    totalCount: number;
+  }>> {
+    try {
+      console.log('🔧 MedicationCalendarApi: Checking for missing calendar events');
+      
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/medication-calendar/check-missing-events`, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+      });
+      
+      const result = await response.json();
+      
+      console.log('🔧 MedicationCalendarApi: Missing events check response:', result);
+      
+      if (result.success && result.data && result.data.totalCount > 0) {
+        console.warn(`⚠️ Found ${result.data.totalCount} medications with schedules but no calendar events`);
+      }
+      
+      return result;
+    } catch (error) {
+      return handleApiError(error, 'Check missing calendar events');
+    }
+  }
+
+  // Ensure calendar events exist for a specific medication schedule
+  async ensureCalendarEventsForSchedule(scheduleId: string): Promise<ApiResponse<{
+    generated: number;
+    alreadyExists: boolean;
+  }>> {
+    try {
+      console.log('🔧 MedicationCalendarApi: Ensuring calendar events for schedule:', scheduleId);
+      
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/medication-calendar/schedules/${scheduleId}/ensure-events`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+      });
+      
+      const result = await response.json();
+      
+      console.log('🔧 MedicationCalendarApi: Ensure events response:', result);
+      
+      // Clear caches if events were generated
+      if (result.success && result.data && result.data.generated > 0) {
+        console.log(`✅ Generated ${result.data.generated} calendar events for schedule ${scheduleId}`);
+        RateLimitedAPI.clearCache('today_buckets');
+        RateLimitedAPI.clearCache('calendar_events');
+        requestDebouncer.reset();
+      }
+      
+      return result;
+    } catch (error) {
+      return handleApiError(error, 'Ensure calendar events for schedule');
+    }
+  }
+
+  // ===== BACKGROUND OPERATIONS =====
+
+  // Ensure missing calendar events are generated in the background
+  private async ensureMissingCalendarEventsInBackground(): Promise<void> {
+    try {
+      console.log('🔍 MedicationCalendarApi: Checking for missing calendar events in background');
+      
+      // Check if there are medications with schedules but no calendar events
+      const checkResult = await this.checkMissingCalendarEvents();
+      
+      if (checkResult.success && checkResult.data && checkResult.data.totalCount > 0) {
+        console.log(`⚠️ Found ${checkResult.data.totalCount} medications with missing calendar events`);
+        
+        // Generate missing events
+        const generateResult = await this.generateMissingCalendarEvents();
+        
+        if (generateResult.success && generateResult.data && generateResult.data.generated > 0) {
+          console.log(`✅ Generated ${generateResult.data.generated} missing calendar events in background`);
+        }
+      } else {
+        console.log('✅ No missing calendar events found');
+      }
+    } catch (error) {
+      console.warn('⚠️ Background calendar event generation failed:', error);
+      // Don't throw - this is a background operation
+    }
+  }
+
+  // Enhanced method to get effective patient ID with better error handling
+  async getEffectivePatientId(): Promise<string | null> {
+    try {
+      // Import auth here to avoid circular dependency
+      const { auth } = await import('./firebase');
+      
+      // Try to get from current user context
+      const user = auth.currentUser;
+      if (!user) {
+        console.warn('🔐 No authenticated user found');
+        return null;
+      }
+
+      // For now, return the user's UID as the patient ID
+      // This will be enhanced when family context is properly integrated
+      return user.uid;
+    } catch (error) {
+      console.error('❌ Error getting effective patient ID:', error);
+      return null;
+    }
+  }
+
+  // Enhanced cache management with selective clearing
+  clearMedicationCaches(patientId?: string): void {
+    try {
+      console.log('🗑️ Clearing medication caches', { patientId });
+      
+      // Clear all medication-related caches
+      RateLimitedAPI.clearCache('today_buckets');
+      RateLimitedAPI.clearCache('calendar_events');
+      RateLimitedAPI.clearCache('medication_schedules');
+      
+      // Clear patient-specific caches if patientId provided
+      if (patientId) {
+        RateLimitedAPI.clearCache(`today_buckets_${patientId}`);
+        RateLimitedAPI.clearCache(`calendar_events_${patientId}`);
+        RateLimitedAPI.clearCache(`medication_schedules_${patientId}`);
+      }
+      
+      // Reset request debouncer
+      requestDebouncer.reset();
+      
+      console.log('✅ Medication caches cleared successfully');
+    } catch (error) {
+      console.warn('⚠️ Error clearing medication caches:', error);
+    }
+  }
+
+  // Enhanced method to validate and repair data pipeline
+  async validateAndRepairDataPipeline(patientId?: string): Promise<{
+    isValid: boolean;
+    issues: string[];
+    repaired: string[];
+  }> {
+    const issues: string[] = [];
+    const repaired: string[] = [];
+    
+    try {
+      console.log('🔍 Validating medication data pipeline', { patientId });
+      
+      // Step 1: Check for medications with schedules but no calendar events
+      const missingEventsCheck = await this.checkMissingCalendarEvents();
+      if (missingEventsCheck.success && missingEventsCheck.data && missingEventsCheck.data.totalCount > 0) {
+        issues.push(`${missingEventsCheck.data.totalCount} medications have schedules but no calendar events`);
+        
+        // Attempt to repair by generating missing events
+        const generateResult = await this.generateMissingCalendarEvents();
+        if (generateResult.success && generateResult.data && generateResult.data.generated > 0) {
+          repaired.push(`Generated ${generateResult.data.generated} missing calendar events`);
+        }
+      }
+      
+      // Step 2: Validate today's medication buckets
+      const bucketsResult = await this.getTodayMedicationBuckets(new Date(), {
+        forceFresh: true,
+        patientId
+      });
+      
+      if (!bucketsResult.success) {
+        issues.push(`Failed to load today's medication buckets: ${bucketsResult.error}`);
+      } else if (bucketsResult.data) {
+        const totalMeds = (bucketsResult.data.now?.length || 0) +
+                         (bucketsResult.data.dueSoon?.length || 0) +
+                         (bucketsResult.data.morning?.length || 0) +
+                         (bucketsResult.data.noon?.length || 0) +
+                         (bucketsResult.data.evening?.length || 0) +
+                         (bucketsResult.data.bedtime?.length || 0) +
+                         (bucketsResult.data.overdue?.length || 0) +
+                         (bucketsResult.data.completed?.length || 0);
+        
+        console.log(`✅ Today's medication buckets loaded successfully (${totalMeds} total medications)`);
+      }
+      
+      // Step 3: Clear caches to ensure fresh data
+      this.clearMedicationCaches(patientId);
+      repaired.push('Cleared medication caches for fresh data');
+      
+      const isValid = issues.length === 0;
+      
+      console.log('🔍 Data pipeline validation complete', {
+        isValid,
+        issuesCount: issues.length,
+        repairedCount: repaired.length
+      });
+      
+      return { isValid, issues, repaired };
+      
+    } catch (error) {
+      console.error('❌ Error validating data pipeline:', error);
+      issues.push(`Validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return { isValid: false, issues, repaired };
+    }
+  }
+
+  // ===== SCHEDULE REPAIR AND DIAGNOSTIC TOOLS =====
+
+  // Diagnose schedule issues for a specific medication
+  async diagnoseMedicationScheduleIssues(medicationId: string): Promise<ApiResponse<{
+    medicationId: string;
+    medicationName: string;
+    hasSchedules: boolean;
+    scheduleCount: number;
+    validSchedules: number;
+    invalidSchedules: number;
+    issues: Array<{
+      scheduleId: string;
+      type: 'validation' | 'inactive' | 'paused' | 'missing_events';
+      severity: 'error' | 'warning' | 'info';
+      description: string;
+      repairAction: string;
+    }>;
+    recommendations: string[];
+  }>> {
+    try {
+      console.log('🔍 Diagnosing schedule issues for medication:', medicationId);
+      
+      // Get schedules for this medication
+      const schedulesResponse = await this.getMedicationSchedulesByMedicationId(medicationId);
+      
+      if (!schedulesResponse.success) {
+        return {
+          success: false,
+          error: 'Failed to fetch medication schedules'
+        };
+      }
+      
+      const schedules = schedulesResponse.data || [];
+      const issues: any[] = [];
+      const recommendations: string[] = [];
+      let validSchedules = 0;
+      let invalidSchedules = 0;
+      
+      // Analyze each schedule
+      for (const schedule of schedules) {
+        const validation = this.validateScheduleData(schedule);
+        
+        if (!validation.isValid) {
+          invalidSchedules++;
+          issues.push({
+            scheduleId: schedule.id,
+            type: 'validation',
+            severity: 'error',
+            description: `Validation errors: ${validation.errors.join(', ')}`,
+            repairAction: `Fix validation issues: ${validation.repairSuggestions.join('; ')}`
+          });
+        } else {
+          validSchedules++;
+        }
+        
+        // Check if schedule is inactive
+        if (!schedule.isActive) {
+          issues.push({
+            scheduleId: schedule.id,
+            type: 'inactive',
+            severity: 'warning',
+            description: 'Schedule is marked as inactive',
+            repairAction: 'Activate the schedule or remove it if no longer needed'
+          });
+        }
+        
+        // Check if schedule is paused
+        if (schedule.isPaused) {
+          const pausedUntil = schedule.pausedUntil ? new Date(schedule.pausedUntil) : null;
+          const isPermanentlyPaused = !pausedUntil || pausedUntil < new Date();
+          
+          issues.push({
+            scheduleId: schedule.id,
+            type: 'paused',
+            severity: isPermanentlyPaused ? 'warning' : 'info',
+            description: pausedUntil
+              ? `Schedule paused until ${pausedUntil.toLocaleDateString()}`
+              : 'Schedule is paused indefinitely',
+            repairAction: isPermanentlyPaused
+              ? 'Resume the schedule or set a specific resume date'
+              : 'Schedule will auto-resume on the specified date'
+          });
+        }
+      }
+      
+      // Generate recommendations
+      if (schedules.length === 0) {
+        recommendations.push('Create a medication schedule to enable reminders');
+      } else if (validSchedules === 0) {
+        recommendations.push('Fix validation issues in existing schedules');
+      } else if (invalidSchedules > 0) {
+        recommendations.push(`Fix ${invalidSchedules} invalid schedule${invalidSchedules !== 1 ? 's' : ''}`);
+      }
+      
+      const diagnosticResult = {
+        medicationId,
+        medicationName: 'Unknown', // Will be filled by caller if needed
+        hasSchedules: schedules.length > 0,
+        scheduleCount: schedules.length,
+        validSchedules,
+        invalidSchedules,
+        issues,
+        recommendations
+      };
+      
+      console.log('🔍 Diagnostic complete for medication:', medicationId, diagnosticResult);
+      
+      return {
+        success: true,
+        data: diagnosticResult
+      };
+      
+    } catch (error) {
+      return handleApiError(error, 'Diagnose medication schedule issues');
+    }
+  }
+
+  // Repair schedule issues for a specific medication
+  async repairMedicationScheduleIssues(medicationId: string, repairOptions?: {
+    createMissingSchedule?: boolean;
+    fixValidationIssues?: boolean;
+    activateInactiveSchedules?: boolean;
+    resumePausedSchedules?: boolean;
+  }): Promise<ApiResponse<{
+    medicationId: string;
+    repairsApplied: string[];
+    issuesRemaining: string[];
+    newScheduleCreated: boolean;
+    schedulesFixed: number;
+  }>> {
+    try {
+      console.log('🔧 Repairing schedule issues for medication:', medicationId, repairOptions);
+      
+      const repairsApplied: string[] = [];
+      const issuesRemaining: string[] = [];
+      let newScheduleCreated = false;
+      let schedulesFixed = 0;
+      
+      // First, diagnose the issues
+      const diagnosticResponse = await this.diagnoseMedicationScheduleIssues(medicationId);
+      
+      if (!diagnosticResponse.success || !diagnosticResponse.data) {
+        return {
+          success: false,
+          error: 'Failed to diagnose medication issues'
+        };
+      }
+      
+      const diagnostic = diagnosticResponse.data;
+      
+      // Repair 1: Create missing schedule if needed
+      if (!diagnostic.hasSchedules && repairOptions?.createMissingSchedule) {
+        try {
+          const bulkResult = await this.createBulkSchedules();
+          if (bulkResult.success && bulkResult.data && bulkResult.data.created > 0) {
+            repairsApplied.push('Created missing medication schedule');
+            newScheduleCreated = true;
+            schedulesFixed++;
+          }
+        } catch (error) {
+          issuesRemaining.push('Failed to create missing schedule');
+        }
+      }
+      
+      // Repair 2: Fix validation issues (would require backend support)
+      if (diagnostic.invalidSchedules > 0 && repairOptions?.fixValidationIssues) {
+        issuesRemaining.push(`${diagnostic.invalidSchedules} schedule(s) have validation issues that require manual review`);
+      }
+      
+      // Repair 3: Activate inactive schedules (would require backend support)
+      if (repairOptions?.activateInactiveSchedules) {
+        const inactiveIssues = diagnostic.issues.filter(issue => issue.type === 'inactive');
+        if (inactiveIssues.length > 0) {
+          issuesRemaining.push(`${inactiveIssues.length} inactive schedule(s) require manual activation`);
+        }
+      }
+      
+      // Repair 4: Resume paused schedules (would require backend support)
+      if (repairOptions?.resumePausedSchedules) {
+        const pausedIssues = diagnostic.issues.filter(issue => issue.type === 'paused');
+        if (pausedIssues.length > 0) {
+          issuesRemaining.push(`${pausedIssues.length} paused schedule(s) require manual resumption`);
+        }
+      }
+      
+      const repairResult = {
+        medicationId,
+        repairsApplied,
+        issuesRemaining,
+        newScheduleCreated,
+        schedulesFixed
+      };
+      
+      console.log('🔧 Repair complete for medication:', medicationId, repairResult);
+      
+      return {
+        success: true,
+        data: repairResult
+      };
+      
+    } catch (error) {
+      return handleApiError(error, 'Repair medication schedule issues');
+    }
+  }
+
+  // Comprehensive schedule health check for all medications
+  async performScheduleHealthCheck(patientId?: string): Promise<ApiResponse<{
+    patientId: string | null;
+    totalMedications: number;
+    medicationsWithReminders: number;
+    medicationsWithValidSchedules: number;
+    medicationsNeedingRepair: number;
+    overallHealthScore: number;
+    issues: Array<{
+      medicationId: string;
+      medicationName: string;
+      issueType: string;
+      severity: string;
+      description: string;
+    }>;
+    recommendations: string[];
+    repairActions: string[];
+  }>> {
+    try {
+      console.log('🏥 Performing comprehensive schedule health check...');
+      
+      const effectivePatientId = patientId || await this.getEffectivePatientId();
+      
+      if (!effectivePatientId) {
+        return {
+          success: false,
+          error: 'Unable to determine patient ID'
+        };
+      }
+      
+      // Get all medications
+      const headers = await getAuthHeaders();
+      const medicationsResponse = await fetch(`${API_BASE}/medications?patientId=${effectivePatientId}`, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+      });
+      
+      if (!medicationsResponse.ok) {
+        return {
+          success: false,
+          error: 'Failed to fetch medications'
+        };
+      }
+      
+      const medicationsData = await medicationsResponse.json();
+      const medications = medicationsData.data || [];
+      
+      const medicationsWithReminders = medications.filter((med: any) =>
+        med.hasReminders && med.isActive && !med.isPRN
+      );
+      
+      const issues: any[] = [];
+      const recommendations: string[] = [];
+      const repairActions: string[] = [];
+      let medicationsWithValidSchedules = 0;
+      
+      // Check each medication with reminders
+      for (const medication of medicationsWithReminders) {
+        const diagnosticResponse = await this.diagnoseMedicationScheduleIssues(medication.id);
+        
+        if (diagnosticResponse.success && diagnosticResponse.data) {
+          const diagnostic = diagnosticResponse.data;
+          
+          if (diagnostic.validSchedules > 0) {
+            medicationsWithValidSchedules++;
+          }
+          
+          // Add issues to overall report
+          diagnostic.issues.forEach(issue => {
+            issues.push({
+              medicationId: medication.id,
+              medicationName: medication.name,
+              issueType: issue.type,
+              severity: issue.severity,
+              description: issue.description
+            });
+          });
+          
+          // Add recommendations
+          diagnostic.recommendations.forEach(rec => {
+            if (!recommendations.includes(rec)) {
+              recommendations.push(rec);
+            }
+          });
+        }
+      }
+      
+      // Calculate health score (0-100)
+      const healthScore = medicationsWithReminders.length > 0
+        ? Math.round((medicationsWithValidSchedules / medicationsWithReminders.length) * 100)
+        : 100;
+      
+      // Generate repair actions
+      if (medicationsWithValidSchedules < medicationsWithReminders.length) {
+        repairActions.push('Run bulk schedule creation to fix missing schedules');
+      }
+      
+      if (issues.filter(i => i.severity === 'error').length > 0) {
+        repairActions.push('Review and fix validation errors in existing schedules');
+      }
+      
+      if (issues.filter(i => i.issueType === 'paused').length > 0) {
+        repairActions.push('Resume paused schedules that should be active');
+      }
+      
+      const healthCheckResult = {
+        patientId: effectivePatientId,
+        totalMedications: medications.length,
+        medicationsWithReminders: medicationsWithReminders.length,
+        medicationsWithValidSchedules,
+        medicationsNeedingRepair: medicationsWithReminders.length - medicationsWithValidSchedules,
+        overallHealthScore: healthScore,
+        issues,
+        recommendations,
+        repairActions
+      };
+      
+      console.log('🏥 Schedule health check complete:', healthCheckResult);
+      
+      return {
+        success: true,
+        data: healthCheckResult
+      };
+      
+    } catch (error) {
+      return handleApiError(error, 'Perform schedule health check');
     }
   }
 }

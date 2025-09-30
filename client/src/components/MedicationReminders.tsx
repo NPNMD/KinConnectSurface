@@ -1,20 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Bell, 
-  Clock, 
-  CheckCircle, 
-  X, 
-  AlertTriangle, 
+import {
+  Bell,
+  Clock,
+  CheckCircle,
+  X,
+  AlertTriangle,
   Calendar,
   Pill,
   Plus,
-  MoreHorizontal
+  MoreHorizontal,
+  Lock
 } from 'lucide-react';
 import type { MedicationCalendarEvent } from '@shared/types';
 import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
+import { useFamily } from '@/contexts/FamilyContext';
 
 interface MedicationRemindersProps {
-  patientId: string;
+  patientId?: string;
   showUpcoming?: boolean;
   showOverdue?: boolean;
   showCompleted?: boolean;
@@ -35,6 +37,9 @@ export default function MedicationReminders({
   const [takingMedication, setTakingMedication] = useState<string | null>(null);
   const [showNotes, setShowNotes] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
+  
+  // Add family context for permission checks
+  const { hasPermission, userRole, activePatientAccess } = useFamily();
 
   useEffect(() => {
     loadReminders();
@@ -55,10 +60,12 @@ export default function MedicationReminders({
       const startOfDay = new Date(now);
       startOfDay.setHours(0, 0, 0, 0);
 
-      // Get today's medication events
+      // Get today's medication events with proper patient ID
       const result = await medicationCalendarApi.getMedicationCalendarEvents({
         startDate: startOfDay,
-        endDate: endOfDay
+        endDate: endOfDay,
+        patientId: patientId || undefined,
+        forceFresh: false
       });
 
       if (result.success && result.data) {
@@ -122,7 +129,12 @@ export default function MedicationReminders({
         const now = new Date();
         const endOfDay = new Date(now); endOfDay.setHours(23,59,59,999);
         const startOfDay = new Date(now); startOfDay.setHours(0,0,0,0);
-        const refreshed = await medicationCalendarApi.getMedicationCalendarEvents({ startDate: startOfDay, endDate: endOfDay, forceFresh: true });
+        const refreshed = await medicationCalendarApi.getMedicationCalendarEvents({
+          startDate: startOfDay,
+          endDate: endOfDay,
+          forceFresh: true,
+          patientId: patientId || undefined
+        });
         if (refreshed.success && refreshed.data) {
           const events = refreshed.data;
           const upcoming: MedicationCalendarEvent[] = [];
@@ -249,65 +261,91 @@ export default function MedicationReminders({
           </div>
         </div>
         
-        {!isCompleted && (
-          <div className="flex items-center space-x-2">
-            {showNotes === event.id ? (
+        {!isCompleted && (() => {
+          const canEdit = hasPermission('canEdit');
+          
+          // Debug logging for permission checks
+          console.log('🔍 MedicationReminders: Permission check for medication actions:', {
+            eventId: event.id,
+            medicationName: event.medicationName,
+            userRole,
+            canEdit,
+            activePatientAccess: activePatientAccess ? {
+              patientName: activePatientAccess.patientName,
+              permissions: activePatientAccess.permissions,
+              accessLevel: activePatientAccess.accessLevel
+            } : null
+          });
+          
+          if (!canEdit) {
+            return (
+              <div className="flex items-center space-x-2 text-xs text-gray-500">
+                <Lock className="w-3 h-3" />
+                <span>View only access</span>
+              </div>
+            );
+          }
+          
+          return (
             <div className="flex items-center space-x-2">
-              <input
-                type="text"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Add notes (optional)"
-                className="text-sm border border-gray-300 rounded px-2 py-1 w-32"
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter') {
-                    handleMarkAsTakenWithNotes(event);
-                  }
-                }}
-              />
-              <button
-                onClick={() => handleMarkAsTakenWithNotes(event)}
-                disabled={takingMedication === event.id}
-                className="p-1 text-green-600 hover:text-green-800 disabled:opacity-50"
-              >
-                <CheckCircle className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => {
-                  setShowNotes(null);
-                  setNotes('');
-                }}
-                className="p-1 text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          ) : (
-            <>
-              <button
-                onClick={() => handleMarkAsTaken(event)}
-                disabled={takingMedication === event.id}
-                className="p-2 text-green-600 hover:text-green-800 hover:bg-green-100 rounded-md disabled:opacity-50"
-                title="Mark as taken"
-              >
-                {takingMedication === event.id ? (
-                  <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
-                ) : (
+              {showNotes === event.id ? (
+              <div className="flex items-center space-x-2">
+                <input
+                  type="text"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Add notes (optional)"
+                  className="text-sm border border-gray-300 rounded px-2 py-1 w-32"
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handleMarkAsTakenWithNotes(event);
+                    }
+                  }}
+                />
+                <button
+                  onClick={() => handleMarkAsTakenWithNotes(event)}
+                  disabled={takingMedication === event.id}
+                  className="p-1 text-green-600 hover:text-green-800 disabled:opacity-50"
+                >
                   <CheckCircle className="w-4 h-4" />
-                )}
-              </button>
-              
-              <button
-                onClick={() => setShowNotes(event.id)}
-                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md"
-                title="Add notes"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
-              </>
-            )}
-          </div>
-        )}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowNotes(null);
+                    setNotes('');
+                  }}
+                  className="p-1 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => handleMarkAsTaken(event)}
+                  disabled={takingMedication === event.id}
+                  className="p-2 text-green-600 hover:text-green-800 hover:bg-green-100 rounded-md disabled:opacity-50"
+                  title="Mark as taken"
+                >
+                  {takingMedication === event.id ? (
+                    <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <CheckCircle className="w-4 h-4" />
+                  )}
+                </button>
+                
+                <button
+                  onClick={() => setShowNotes(event.id)}
+                  className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md"
+                  title="Add notes"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+                </>
+              )}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

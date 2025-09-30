@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, Calendar, CheckCircle, Loader2, Bell } from 'lucide-react';
+import { AlertTriangle, Calendar, CheckCircle, Loader2, Bell, Wrench } from 'lucide-react';
 import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
+import { quickScheduleDiagnostic, autoRepairMedicationSchedules } from '@/lib/medicationScheduleFixes';
 import type { Medication } from '@shared/types';
 
 interface UnscheduledMedicationsAlertProps {
@@ -16,15 +17,17 @@ export default function UnscheduledMedicationsAlert({
   const [isCreatingSchedules, setIsCreatingSchedules] = useState(false);
   const [bulkCreateResult, setBulkCreateResult] = useState<any>(null);
   const [showAlert, setShowAlert] = useState(false);
+  const [isRunningDiagnostic, setIsRunningDiagnostic] = useState(false);
+  const [diagnosticResult, setDiagnosticResult] = useState<any>(null);
 
-  // Check for unscheduled medications
+  // Check for unscheduled medications with enhanced validation
   useEffect(() => {
     const checkUnscheduledMedications = async () => {
       try {
-        // Find medications with reminders enabled but no schedules
-        const medicationsWithReminders = medications.filter(med => 
-          med.hasReminders && 
-          med.isActive && 
+        // Find medications with reminders enabled but no valid schedules
+        const medicationsWithReminders = medications.filter(med =>
+          med.hasReminders &&
+          med.isActive &&
           !med.isPRN
         );
 
@@ -33,15 +36,53 @@ export default function UnscheduledMedicationsAlert({
           return;
         }
 
-        // Check which medications have schedules
+        console.log('🔍 Checking schedules for medications with reminders:', medicationsWithReminders.map(m => m.name));
+
+        // Check which medications have valid schedules
         const unscheduled: Medication[] = [];
+        const scheduledButInvalid: Medication[] = [];
         
         for (const medication of medicationsWithReminders) {
           try {
             const schedulesResponse = await medicationCalendarApi.getMedicationSchedulesByMedicationId(medication.id);
-            if (schedulesResponse.success && schedulesResponse.data && schedulesResponse.data.length === 0) {
+            
+            if (!schedulesResponse.success) {
+              console.warn('Failed to check schedules for medication:', medication.name, schedulesResponse.error);
               unscheduled.push(medication);
+              continue;
             }
+
+            const schedules = schedulesResponse.data || [];
+            
+            if (schedules.length === 0) {
+              console.log('No schedules found for medication:', medication.name);
+              unscheduled.push(medication);
+              continue;
+            }
+
+            // Check if any schedule is valid and active
+            const hasValidSchedule = schedules.some(schedule => {
+              const validation = medicationCalendarApi.validateScheduleData(schedule);
+              const isActive = schedule.isActive && !schedule.isPaused;
+              
+              if (!validation.isValid) {
+                console.warn('Invalid schedule found for medication:', medication.name, 'errors:', validation.errors);
+              }
+              
+              return validation.isValid && isActive;
+            });
+
+            if (!hasValidSchedule) {
+              console.log('No valid active schedules for medication:', medication.name);
+              if (schedules.length > 0) {
+                scheduledButInvalid.push(medication);
+              } else {
+                unscheduled.push(medication);
+              }
+            } else {
+              console.log('Valid schedule found for medication:', medication.name);
+            }
+            
           } catch (error) {
             console.warn('Error checking schedules for medication:', medication.name, error);
             // Assume unscheduled if we can't check
@@ -49,8 +90,18 @@ export default function UnscheduledMedicationsAlert({
           }
         }
 
-        setUnscheduledMedications(unscheduled);
-        setShowAlert(unscheduled.length > 0);
+        // Combine truly unscheduled and those with invalid schedules
+        const allProblematicMedications = [...unscheduled, ...scheduledButInvalid];
+        
+        console.log('🔍 Schedule check results:', {
+          totalWithReminders: medicationsWithReminders.length,
+          unscheduled: unscheduled.length,
+          scheduledButInvalid: scheduledButInvalid.length,
+          totalProblematic: allProblematicMedications.length
+        });
+
+        setUnscheduledMedications(allProblematicMedications);
+        setShowAlert(allProblematicMedications.length > 0);
         
       } catch (error) {
         console.error('Error checking unscheduled medications:', error);
@@ -67,22 +118,107 @@ export default function UnscheduledMedicationsAlert({
     setBulkCreateResult(null);
 
     try {
+      console.log('🔧 Starting bulk schedule creation for medications:', unscheduledMedications.map(m => m.name));
+      
       const result = await medicationCalendarApi.createBulkSchedules();
+      console.log('🔧 Bulk schedule creation result:', result);
+      
       setBulkCreateResult(result);
       
-      if (result.success && result.data && result.data.created > 0) {
-        // Wait a moment for the backend to process, then refresh
-        setTimeout(() => {
-          setShowAlert(false);
-          setUnscheduledMedications([]);
-          onSchedulesCreated?.();
-        }, 1000);
+      if (result.success && result.data) {
+        const { created, skipped, errors } = result.data;
+        
+        // Enhanced feedback based on results
+        if (created > 0) {
+          console.log(`✅ Successfully created ${created} schedules`);
+          // Wait a moment for the backend to process, then refresh
+          setTimeout(() => {
+            setShowAlert(false);
+            setUnscheduledMedications([]);
+            onSchedulesCreated?.();
+          }, 1500);
+        } else if (skipped > 0 && created === 0) {
+          console.log(`⚠️ No new schedules created - ${skipped} medications already have schedules`);
+          // Force refresh the schedule detection to update the UI
+          setTimeout(() => {
+            // Re-run the schedule check to update the alert
+            const recheckEvent = new Event('recheck-schedules');
+            window.dispatchEvent(recheckEvent);
+          }, 500);
+        }
+        
+        if (errors && errors.length > 0) {
+          console.warn('⚠️ Schedule creation errors:', errors);
+        }
       }
     } catch (error) {
       console.error('Error creating bulk schedules:', error);
       setBulkCreateResult({
         success: false,
-        error: 'Failed to create schedules'
+        error: 'Failed to create schedules. Please check your medication details and try again.'
+      });
+    } finally {
+      setIsCreatingSchedules(false);
+    }
+  };
+
+  const handleRunDiagnostic = async () => {
+    setIsRunningDiagnostic(true);
+    setDiagnosticResult(null);
+
+    try {
+      console.log('🔍 Running schedule diagnostic...');
+      const diagnostic = await quickScheduleDiagnostic(medications);
+      setDiagnosticResult(diagnostic);
+      
+      console.log('🔍 Diagnostic result:', diagnostic);
+    } catch (error) {
+      console.error('Error running diagnostic:', error);
+      setDiagnosticResult({
+        summary: 'Diagnostic failed',
+        issues: ['Unable to run diagnostic'],
+        recommendations: ['Check console for errors'],
+        canAutoFix: false
+      });
+    } finally {
+      setIsRunningDiagnostic(false);
+    }
+  };
+
+  const handleAutoRepair = async () => {
+    setIsCreatingSchedules(true);
+    setBulkCreateResult(null);
+
+    try {
+      console.log('🔧 Running auto-repair...');
+      const repairResult = await autoRepairMedicationSchedules(medications);
+      
+      setBulkCreateResult({
+        success: repairResult.success,
+        data: {
+          created: repairResult.medicationsFixed,
+          processed: repairResult.medicationsProcessed,
+          skipped: repairResult.medicationsProcessed - repairResult.medicationsFixed,
+          errors: repairResult.remainingIssues
+        },
+        message: repairResult.success
+          ? `Auto-repair completed: ${repairResult.fixesApplied.join('; ')}`
+          : `Auto-repair had issues: ${repairResult.remainingIssues.join('; ')}`
+      });
+      
+      if (repairResult.success && repairResult.medicationsFixed > 0) {
+        setTimeout(() => {
+          setShowAlert(false);
+          setUnscheduledMedications([]);
+          onSchedulesCreated?.();
+        }, 1500);
+      }
+      
+    } catch (error) {
+      console.error('Error running auto-repair:', error);
+      setBulkCreateResult({
+        success: false,
+        error: 'Auto-repair failed. Please try manual schedule creation.'
       });
     } finally {
       setIsCreatingSchedules(false);
@@ -124,17 +260,48 @@ export default function UnscheduledMedicationsAlert({
 
           {bulkCreateResult && (
             <div className={`p-3 rounded-md mb-3 ${
-              bulkCreateResult.success 
-                ? 'bg-green-100 border border-green-200' 
+              bulkCreateResult.success
+                ? (bulkCreateResult.data?.created > 0 ? 'bg-green-100 border border-green-200' : 'bg-blue-100 border border-blue-200')
                 : 'bg-red-100 border border-red-200'
             }`}>
               {bulkCreateResult.success ? (
-                <div className="flex items-center space-x-2">
-                  <CheckCircle className="w-4 h-4 text-green-600" />
-                  <p className="text-sm text-green-800">
-                    Successfully created {bulkCreateResult.data?.created || 0} schedule{bulkCreateResult.data?.created !== 1 ? 's' : ''}!
-                    {bulkCreateResult.data?.skipped > 0 && ` (${bulkCreateResult.data.skipped} skipped)`}
-                  </p>
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle className="w-4 h-4 text-green-600" />
+                    <p className="text-sm text-green-800">
+                      {bulkCreateResult.data?.created > 0 ? (
+                        <>Successfully created {bulkCreateResult.data.created} schedule{bulkCreateResult.data.created !== 1 ? 's' : ''}!</>
+                      ) : (
+                        <>Schedule creation completed</>
+                      )}
+                    </p>
+                  </div>
+                  
+                  {bulkCreateResult.data?.skipped > 0 && (
+                    <div className="text-xs text-blue-700 bg-blue-50 p-2 rounded">
+                      <strong>{bulkCreateResult.data.skipped} medication{bulkCreateResult.data.skipped !== 1 ? 's' : ''} skipped:</strong>
+                      <br />
+                      {bulkCreateResult.data.created === 0 ? (
+                        'These medications already have valid schedules. If you\'re still seeing them as unscheduled, there may be validation issues with the existing schedules.'
+                      ) : (
+                        'These medications already had valid schedules.'
+                      )}
+                    </div>
+                  )}
+                  
+                  {bulkCreateResult.data?.errors && bulkCreateResult.data.errors.length > 0 && (
+                    <div className="text-xs text-orange-700 bg-orange-50 p-2 rounded">
+                      <strong>Issues encountered:</strong>
+                      <ul className="list-disc list-inside mt-1">
+                        {bulkCreateResult.data.errors.slice(0, 3).map((error: string, index: number) => (
+                          <li key={index}>{error}</li>
+                        ))}
+                        {bulkCreateResult.data.errors.length > 3 && (
+                          <li>...and {bulkCreateResult.data.errors.length - 3} more</li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="flex items-center space-x-2">
@@ -147,10 +314,56 @@ export default function UnscheduledMedicationsAlert({
             </div>
           )}
 
-          <div className="flex items-center space-x-3">
+          {diagnosticResult && (
+            <div className="p-3 rounded-md mb-3 bg-gray-50 border border-gray-200">
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Wrench className="w-4 h-4 text-gray-600" />
+                  <p className="text-sm font-medium text-gray-800">Diagnostic Results</p>
+                </div>
+                
+                <p className="text-sm text-gray-700">{diagnosticResult.summary}</p>
+                
+                {diagnosticResult.issues.length > 0 && (
+                  <div className="text-xs text-gray-600">
+                    <strong>Issues found:</strong>
+                    <ul className="list-disc list-inside mt-1">
+                      {diagnosticResult.issues.map((issue: string, index: number) => (
+                        <li key={index}>{issue}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                {diagnosticResult.recommendations.length > 0 && (
+                  <div className="text-xs text-blue-600">
+                    <strong>Recommendations:</strong>
+                    <ul className="list-disc list-inside mt-1">
+                      {diagnosticResult.recommendations.slice(0, 3).map((rec: string, index: number) => (
+                        <li key={index}>{rec}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                {diagnosticResult.canAutoFix && (
+                  <button
+                    onClick={handleAutoRepair}
+                    disabled={isCreatingSchedules}
+                    className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-blue-700 bg-blue-100 hover:bg-blue-200 disabled:opacity-50"
+                  >
+                    <Wrench className="w-3 h-3 mr-1" />
+                    Auto-Repair Issues
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center space-x-3 flex-wrap gap-2">
             <button
               onClick={handleCreateSchedules}
-              disabled={isCreatingSchedules}
+              disabled={isCreatingSchedules || isRunningDiagnostic}
               className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isCreatingSchedules ? (
@@ -162,6 +375,24 @@ export default function UnscheduledMedicationsAlert({
                 <>
                   <Calendar className="w-4 h-4 mr-2" />
                   Create Schedules Automatically
+                </>
+              )}
+            </button>
+            
+            <button
+              onClick={handleRunDiagnostic}
+              disabled={isCreatingSchedules || isRunningDiagnostic}
+              className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isRunningDiagnostic ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Diagnosing...
+                </>
+              ) : (
+                <>
+                  <Wrench className="w-4 h-4 mr-2" />
+                  Diagnose Issues
                 </>
               )}
             </button>

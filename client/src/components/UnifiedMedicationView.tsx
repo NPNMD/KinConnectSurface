@@ -9,11 +9,13 @@ import {
   Bell,
   BellOff,
   Settings,
-  Info
+  Info,
+  Lock
 } from 'lucide-react';
 import type { Medication, MedicationCalendarEvent, MedicationSchedule } from '@shared/types';
 import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
+import { useFamily } from '@/contexts/FamilyContext';
 import LoadingSpinner from './LoadingSpinner';
 import { parseFrequencyToScheduleType, generateDefaultTimesForFrequency, validateFrequencyParsing } from '@/utils/medicationFrequencyUtils';
 
@@ -33,8 +35,8 @@ interface MedicationWithStatus extends Medication {
   hasActiveSchedule: boolean;
 }
 
-export default function UnifiedMedicationView({ 
-  patientId, 
+export default function UnifiedMedicationView({
+  patientId,
   medications,
   maxItems = 10,
   showCreateScheduleButton = true,
@@ -44,6 +46,9 @@ export default function UnifiedMedicationView({
   const [isLoading, setIsLoading] = useState(true);
   const [takingMedication, setTakingMedication] = useState<string | null>(null);
   const [creatingSchedule, setCreatingSchedule] = useState<string | null>(null);
+  
+  // Add family context for permission checks
+  const { hasPermission, userRole, activePatientAccess } = useFamily();
 
   useEffect(() => {
     loadMedicationsWithStatus();
@@ -423,50 +428,81 @@ export default function UnifiedMedicationView({
                 </div>
               </div>
               
-              {/* Action Buttons */}
+              {/* Permission-based Action Buttons */}
               <div className="flex items-center space-x-2">
-                {/* Mark as Taken Button (only for scheduled medications with upcoming doses) */}
-                {medication.scheduleStatus === 'scheduled' && medication.nextDose && (
-                  <button
-                    onClick={() => handleMarkMedicationTaken(medication.nextDose!.id)}
-                    disabled={takingMedication === medication.nextDose!.id}
-                    className="p-2 text-green-600 hover:text-green-800 hover:bg-green-100 rounded-md disabled:opacity-50 transition-colors"
-                    title="Mark as taken"
-                  >
-                    {takingMedication === medication.nextDose!.id ? (
-                      <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <CheckCircle className="w-4 h-4" />
-                    )}
-                  </button>
-                )}
+                {(() => {
+                  const canEdit = hasPermission('canEdit');
+                  
+                  // Debug logging for permission checks
+                  console.log('🔍 UnifiedMedicationView: Permission check for medication actions:', {
+                    medicationId: medication.id,
+                    medicationName: medication.name,
+                    userRole,
+                    canEdit,
+                    scheduleStatus: medication.scheduleStatus,
+                    activePatientAccess: activePatientAccess ? {
+                      patientName: activePatientAccess.patientName,
+                      permissions: activePatientAccess.permissions,
+                      accessLevel: activePatientAccess.accessLevel
+                    } : null
+                  });
+                  
+                  if (!canEdit) {
+                    return (
+                      <div className="flex items-center space-x-2 text-xs text-gray-500">
+                        <Lock className="w-3 h-3" />
+                        <span>View only access</span>
+                      </div>
+                    );
+                  }
+                  
+                  return (
+                    <>
+                      {/* Mark as Taken Button (only for scheduled medications with upcoming doses) */}
+                      {medication.scheduleStatus === 'scheduled' && medication.nextDose && (
+                        <button
+                          onClick={() => handleMarkMedicationTaken(medication.nextDose!.id)}
+                          disabled={takingMedication === medication.nextDose!.id}
+                          className="p-2 text-green-600 hover:text-green-800 hover:bg-green-100 rounded-md disabled:opacity-50 transition-colors"
+                          title="Mark as taken"
+                        >
+                          {takingMedication === medication.nextDose!.id ? (
+                            <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <CheckCircle className="w-4 h-4" />
+                          )}
+                        </button>
+                      )}
 
-                {/* Create Schedule Button (only for unscheduled medications) */}
-                {medication.scheduleStatus === 'unscheduled' && showCreateScheduleButton && (
-                  <button
-                    onClick={() => handleCreateSchedule(medication)}
-                    disabled={creatingSchedule === medication.id}
-                    className="flex items-center space-x-1 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
-                    title="Create medication schedule"
-                  >
-                    {creatingSchedule === medication.id ? (
-                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <Plus className="w-3 h-3" />
-                    )}
-                    <span>Schedule</span>
-                  </button>
-                )}
+                      {/* Create Schedule Button (only for unscheduled medications) */}
+                      {medication.scheduleStatus === 'unscheduled' && showCreateScheduleButton && (
+                        <button
+                          onClick={() => handleCreateSchedule(medication)}
+                          disabled={creatingSchedule === medication.id}
+                          className="flex items-center space-x-1 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
+                          title="Create medication schedule"
+                        >
+                          {creatingSchedule === medication.id ? (
+                            <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <Plus className="w-3 h-3" />
+                          )}
+                          <span>Schedule</span>
+                        </button>
+                      )}
 
-                {/* Settings Button (for scheduled medications) */}
-                {medication.scheduleStatus === 'scheduled' && (
-                  <button
-                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
-                    title="Manage schedule"
-                  >
-                    <Settings className="w-4 h-4" />
-                  </button>
-                )}
+                      {/* Settings Button (for scheduled medications) */}
+                      {medication.scheduleStatus === 'scheduled' && (
+                        <button
+                          className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
+                          title="Manage schedule"
+                        >
+                          <Settings className="w-4 h-4" />
+                        </button>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </div>
 
