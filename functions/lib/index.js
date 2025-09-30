@@ -5547,7 +5547,29 @@ async function processVisitSummaryWithAI(doctorSummary, treatmentPlan) {
         }
         // Initialize Google AI
         const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        // Available Gemini models in order of preference
+        const GEMINI_MODELS = [
+            'gemini-1.5-flash-latest',
+            'gemini-1.5-flash-001',
+            'gemini-1.5-pro-latest',
+            'gemini-1.5-pro-001'
+        ];
+        // Find the first available model
+        let selectedModel = 'gemini-1.5-flash-latest'; // Default
+        for (const modelName of GEMINI_MODELS) {
+            try {
+                const testModel = genAI.getGenerativeModel({ model: modelName });
+                // Test with a simple prompt
+                await testModel.generateContent('Test');
+                selectedModel = modelName;
+                break;
+            }
+            catch (error) {
+                console.warn(`Model ${modelName} not available, trying next...`);
+                continue;
+            }
+        }
+        const model = genAI.getGenerativeModel({ model: selectedModel });
         const prompt = `
 You are a medical assistant helping to process doctor visit notes.
 Please analyze the following visit summary and provide a structured response.
@@ -5597,7 +5619,7 @@ Focus on medical accuracy and patient safety. Extract specific, actionable infor
                     candidatesTokenCount: text.length,
                     totalTokenCount: prompt.length + text.length,
                     processingTime: Date.now(),
-                    model: 'gemini-1.5-flash'
+                    model: selectedModel
                 }
             };
         }
@@ -5611,7 +5633,7 @@ Focus on medical accuracy and patient safety. Extract specific, actionable infor
                 metadata: {
                     promptTokenCount: prompt.length,
                     processingTime: 1000,
-                    model: 'gemini-1.5-flash-fallback'
+                    model: `${selectedModel}-fallback`
                 }
             };
         }

@@ -23,11 +23,62 @@ const googleAIKey = defineSecret('GOOGLE_AI_API_KEY');
 // Initialize Google Generative AI at runtime, not at module load
 let genAI: GoogleGenerativeAI;
 
+// Available Gemini models in order of preference
+const GEMINI_MODELS = [
+  'gemini-2.5-flash',      // Fastest, most cost-effective
+  'gemini-2.0-flash-exp',  // Experimental fast model
+  'gemini-2.5-pro',        // Highest quality
+  'gemini-2.0-flash'       // Stable fast model
+] as const;
+
 function getGenAI(): GoogleGenerativeAI {
   if (!genAI) {
     genAI = new GoogleGenerativeAI(googleAIKey.value() || process.env.GOOGLE_AI_API_KEY || '');
   }
   return genAI;
+}
+
+// Test model availability and return the first working model
+async function getAvailableModel(): Promise<string> {
+  const ai = getGenAI();
+  
+  for (const modelName of GEMINI_MODELS) {
+    try {
+      logger.info('🧪 Testing model availability:', { model: modelName });
+      
+      const model = ai.getGenerativeModel({
+        model: modelName,
+        generationConfig: {
+          temperature: 0.1,
+          topP: 0.8,
+          topK: 40,
+          maxOutputTokens: 100 // Small test
+        }
+      });
+      
+      // Test with a simple prompt to verify the model works
+      const testResult = await model.generateContent('Test prompt: respond with "OK"');
+      const testResponse = await testResult.response;
+      const testText = testResponse.text();
+      
+      if (testText) {
+        logger.info('✅ Model available and working:', {
+          model: modelName,
+          testResponse: testText.substring(0, 50)
+        });
+        return modelName;
+      }
+    } catch (error: any) {
+      logger.warn('❌ Model not available:', {
+        model: modelName,
+        error: error.message,
+        code: error.code
+      });
+      continue;
+    }
+  }
+  
+  throw new Error('No available Gemini models found. Please check your API key and model access.');
 }
 
 // AI Summarization worker triggered by Pub/Sub messages
@@ -60,9 +111,23 @@ export const summarizeVisit = onMessagePublished({
       throw new Error('Transcript too short for meaningful summarization');
     }
 
-    // Get generative model
+    // Get available model with fallback logic
+    let selectedModel: string;
+    try {
+      selectedModel = await getAvailableModel();
+      logger.info('🎯 Selected working model:', { model: selectedModel, visitId });
+    } catch (modelError: any) {
+      logger.error('❌ No available models found:', {
+        visitId,
+        error: modelError.message,
+        availableModels: GEMINI_MODELS
+      });
+      throw new Error(`Google AI models unavailable: ${modelError.message}`);
+    }
+
+    // Get generative model with selected working model
     const model = getGenAI().getGenerativeModel({
-      model: 'gemini-1.5-flash',
+      model: selectedModel,
       generationConfig: {
         temperature: 0.1, // Low temperature for consistent medical analysis
         topP: 0.8,
@@ -86,30 +151,105 @@ export const summarizeVisit = onMessagePublished({
 
     logger.info('📤 Sending request to Google AI', {
       visitId,
-      model: 'gemini-1.5-flash',
+      model: selectedModel,
       promptLength: prompt.length,
       transcriptLength: transcript.length
     });
 
-    // Generate AI summary with retry logic
+    // Generate AI summary with enhanced retry logic and model fallback
     let aiResponse;
     let retryCount = 0;
     const maxRetries = 3;
+    let currentModel = selectedModel;
 
     while (retryCount < maxRetries) {
       try {
         const result = await model.generateContent(prompt);
         const response = await result.response;
         aiResponse = response.text();
+        
+        logger.info('✅ AI response received successfully', {
+          visitId,
+          model: currentModel,
+          responseLength: aiResponse?.length || 0,
+          attempt: retryCount + 1
+        });
         break;
         
       } catch (aiError: any) {
         retryCount++;
         logger.warn(`⚠️ Google AI error (attempt ${retryCount}/${maxRetries})`, {
           visitId,
+          model: currentModel,
           error: aiError.message,
-          code: aiError.code
+          code: aiError.code,
+          details: aiError.details
         });
+
+        // If this is a model-specific error and we have more models to try
+        if ((aiError.message?.includes('not found') || aiError.message?.includes('not supported')) && retryCount < maxRetries) {
+          logger.warn('🔄 Model-specific error detected, trying next model', {
+            visitId,
+            failedModel: currentModel,
+            error: aiError.message
+          });
+          
+          // Try to get the next available model
+          try {
+            const currentModelIndex = GEMINI_MODELS.indexOf(currentModel as any);
+            const nextModelIndex = currentModelIndex + 1;
+            
+            if (nextModelIndex < GEMINI_MODELS.length) {
+              const nextModel = GEMINI_MODELS[nextModelIndex];
+              logger.info('🔄 Switching to next model:', {
+                visitId,
+                from: currentModel,
+                to: nextModel
+              });
+              
+              currentModel = nextModel;
+              // Recreate model with new name
+              const newModel = getGenAI().getGenerativeModel({
+                model: currentModel,
+                generationConfig: {
+                  temperature: 0.1,
+                  topP: 0.8,
+                  topK: 40,
+                  maxOutputTokens: 2048
+                },
+                safetySettings: [
+                  {
+                    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                    threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE
+                  },
+                  {
+                    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                    threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE
+                  }
+                ]
+              });
+              
+              // Try with the new model
+              const result = await newModel.generateContent(prompt);
+              const response = await result.response;
+              aiResponse = response.text();
+              
+              logger.info('✅ AI response received with fallback model', {
+                visitId,
+                model: currentModel,
+                responseLength: aiResponse?.length || 0,
+                attempt: retryCount + 1
+              });
+              break;
+            }
+          } catch (fallbackError: any) {
+            logger.error('❌ Fallback model also failed:', {
+              visitId,
+              model: currentModel,
+              error: fallbackError.message
+            });
+          }
+        }
 
         if (retryCount >= maxRetries) {
           throw aiError;
@@ -149,7 +289,7 @@ export const summarizeVisit = onMessagePublished({
         summarization: {
           completedAt: new Date(),
           service: 'google-ai',
-          model: 'gemini-1.5-flash'
+          model: currentModel
         }
       },
       results: summaryData

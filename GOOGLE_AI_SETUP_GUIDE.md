@@ -2,6 +2,14 @@
 
 This guide will walk you through setting up Google AI (Gemini) API for the visit summary feature in KinConnect.
 
+## ⚠️ Prerequisites
+
+Before starting, ensure you have:
+- A Google account
+- Firebase CLI installed (`npm install -g firebase-tools`)
+- Access to your Firebase project
+- Node.js installed (for running verification scripts)
+
 ## 🔑 Getting Your Google AI API Key
 
 ### Step 1: Access Google AI Studio
@@ -15,12 +23,13 @@ This guide will walk you through setting up Google AI (Gemini) API for the visit
 4. Copy the generated API key (it starts with `AIza...`)
 5. **Important**: Store this key securely - you won't be able to see it again
 
-### Step 3: Enable the Generative AI API
+### Step 3: Enable the Generative Language API
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Select your project
 3. Navigate to **APIs & Services > Library**
 4. Search for "Generative Language API" or "Gemini API"
 5. Click on it and press **"Enable"**
+6. **Wait 5-10 minutes** for the API to be fully enabled
 
 ## 🔧 Configuring the API Key in Firebase
 
@@ -81,44 +90,84 @@ Check the Firebase Console > Functions to ensure the new visit summary endpoints
 - `DELETE /visit-summaries/:patientId/:summaryId`
 - `POST /visit-summaries/:patientId/:summaryId/retry-ai`
 
-## 🧪 Testing the Integration
+## ✅ Verification Steps
 
-### 1. Test API Key Configuration
-Create a test file to verify the Google AI integration:
+### 1. Run the Verification Script
+We've created a comprehensive verification script to test your setup:
 
-```javascript
-// test-google-ai.js
-const fetch = require('node-fetch');
+```bash
+# Set your API key temporarily for testing
+export GOOGLE_AI_API_KEY=your_api_key_here
 
-const testGoogleAI = async () => {
-  try {
-    const response = await fetch('YOUR_FIREBASE_FUNCTIONS_URL/api/visit-summaries', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer YOUR_FIREBASE_ID_TOKEN'
-      },
-      body: JSON.stringify({
-        patientId: 'test-patient-id',
-        visitDate: new Date().toISOString(),
-        doctorSummary: 'Patient presented with mild headache. Physical exam normal.',
-        treatmentPlan: 'Rest and hydration. Follow up if symptoms persist.',
-        providerName: 'Dr. Test',
-        visitType: 'scheduled'
-      })
-    });
-    
-    const result = await response.json();
-    console.log('Visit summary created:', result);
-  } catch (error) {
-    console.error('Test failed:', error);
-  }
-};
-
-testGoogleAI();
+# Run the verification script
+node scripts/verify-google-ai-setup.cjs
 ```
 
-### 2. Check Function Logs
+The script will check:
+- ✅ If the API key is set
+- ✅ If the API key format is valid
+- ✅ If the API is accessible
+- ✅ Which Gemini models are available
+- ✅ If the Generative Language API is enabled
+
+### 2. Expected Output
+If everything is configured correctly, you should see:
+
+```
+🔍 Google AI API Setup Verification
+============================================================
+Step 1: Checking API Key
+✅ GOOGLE_AI_API_KEY is set
+ℹ️  Key format: AIzaSyBxxx...xxxx
+
+Step 2: Validating API Key Format
+✅ API key format looks correct
+
+Step 3: Testing API Connectivity
+ℹ️  Testing connection to Google AI API...
+✅ Successfully connected to Google AI API
+ℹ️  Found 5 available models
+
+Step 4: Testing Model Availability
+ℹ️  Testing which Gemini models are available...
+
+  Testing gemini-1.5-flash-latest... ✅ Available
+  Testing gemini-1.5-flash-001... ✅ Available
+  Testing gemini-1.5-pro-latest... ✅ Available
+  Testing gemini-1.5-pro-001... ✅ Available
+  Testing gemini-pro... ✅ Available
+
+📊 Verification Summary
+✅ 5 model(s) available
+
+💡 Recommendations
+✅ Your Google AI API is properly configured!
+```
+
+### 3. Troubleshooting Verification Failures
+
+#### If API key is not set:
+```bash
+# Set it temporarily
+export GOOGLE_AI_API_KEY=your_api_key_here
+
+# Or set it permanently in your shell profile
+echo 'export GOOGLE_AI_API_KEY=your_api_key_here' >> ~/.bashrc
+source ~/.bashrc
+```
+
+#### If API returns 403 (Forbidden):
+- The Generative Language API is not enabled
+- Go to: https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com
+- Click "Enable"
+- Wait 5-10 minutes and run verification again
+
+#### If no models are available:
+- The API was just enabled - wait 5-10 minutes
+- Check your Google Cloud project has billing enabled (free tier is sufficient)
+- Verify you're using the correct API key
+
+### 4. Check Function Logs (After Deployment)
 ```bash
 firebase functions:log --only api
 ```
@@ -166,34 +215,128 @@ const GOOGLE_AI_CONFIG = {
 
 ### Common Issues
 
-#### 1. "API key not found" Error
-- Verify the secret is set: `firebase functions:secrets:access GOOGLE_AI_API_KEY`
-- Redeploy functions: `firebase deploy --only functions`
+#### 1. "API key not found" Error in Firebase Functions
+**Symptoms**: Functions fail with "GOOGLE_AI_API_KEY is not defined"
+
+**Solution**:
+```bash
+# Verify the secret is set
+firebase functions:secrets:access GOOGLE_AI_API_KEY
+
+# If not set, set it now
+firebase functions:secrets:set GOOGLE_AI_API_KEY
+
+# Redeploy functions
+firebase deploy --only functions
+```
 
 #### 2. "Generative AI API not enabled" Error
-- Enable the API in Google Cloud Console
-- Wait 5-10 minutes for propagation
+**Symptoms**: API returns 403 Forbidden or "API not enabled"
+
+**Solution**:
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Select your project
+3. Navigate to **APIs & Services > Library**
+4. Search for "Generative Language API"
+5. Click **"Enable"**
+6. **Wait 5-10 minutes** for propagation
+7. Run verification script again: `node scripts/verify-google-ai-setup.cjs`
 
 #### 3. "Quota exceeded" Error
-- Check usage in Google Cloud Console
-- Upgrade to paid tier if needed
+**Symptoms**: API returns 429 Too Many Requests
+
+**Solution**:
+- Check usage in [Google Cloud Console](https://console.cloud.google.com/apis/api/generativelanguage.googleapis.com/quotas)
+- Free tier: 60 requests per minute
+- If needed, upgrade to paid tier
 - Implement request queuing for high volume
 
 #### 4. "Invalid API key" Error
-- Regenerate API key in Google AI Studio
-- Update the secret in Firebase
+**Symptoms**: API returns 400 or 403 with "invalid API key"
+
+**Solution**:
+1. Verify API key format (should start with `AIza`)
+2. Regenerate API key in [Google AI Studio](https://aistudio.google.com/)
+3. Update the secret in Firebase:
+   ```bash
+   firebase functions:secrets:set GOOGLE_AI_API_KEY
+   ```
+4. Redeploy functions:
+   ```bash
+   firebase deploy --only functions
+   ```
+
+#### 5. "No available models" Error
+**Symptoms**: Verification script shows no models available
+
+**Solution**:
+1. Ensure Generative Language API is enabled
+2. Check your Google Cloud project has billing enabled (free tier works)
+3. Wait 5-10 minutes after enabling the API
+4. Verify you're using the correct Google Cloud project
+
+#### 6. Functions Deployment Fails
+**Symptoms**: `firebase deploy --only functions` fails
+
+**Solution**:
+```bash
+# Check if secret exists
+firebase functions:secrets:access GOOGLE_AI_API_KEY
+
+# If it doesn't exist, create it
+firebase functions:secrets:set GOOGLE_AI_API_KEY
+
+# Make sure you're in the right project
+firebase use --add
+
+# Try deploying again
+firebase deploy --only functions
+```
 
 ### Debug Commands
 ```bash
 # Check function logs
 firebase functions:log --only api
 
-# Test function locally
+# Test function locally (requires emulator setup)
 firebase emulators:start --only functions
 
-# Check secrets
+# Check if secret is accessible
 firebase functions:secrets:access GOOGLE_AI_API_KEY
+
+# List all secrets
+firebase functions:secrets:list
+
+# Run verification script
+node scripts/verify-google-ai-setup.cjs
+
+# Check Firebase project
+firebase projects:list
+firebase use
 ```
+
+### Getting Help
+
+If you're still experiencing issues:
+
+1. **Check the diagnostic logs**:
+   ```bash
+   firebase functions:log --only api
+   ```
+
+2. **Run the verification script with your API key**:
+   ```bash
+   GOOGLE_AI_API_KEY=your_key node scripts/verify-google-ai-setup.cjs
+   ```
+
+3. **Verify your Firebase project settings**:
+   - Ensure you're using the correct project: `firebase use`
+   - Check that Functions are enabled in Firebase Console
+
+4. **Check Google Cloud Console**:
+   - Verify billing is enabled (free tier is sufficient)
+   - Check API quotas and usage
+   - Ensure Generative Language API is enabled
 
 ## 📚 Additional Resources
 
@@ -202,12 +345,54 @@ firebase functions:secrets:access GOOGLE_AI_API_KEY
 - [Firebase Functions Secrets](https://firebase.google.com/docs/functions/config-env#secret-manager)
 - [Google Cloud Secret Manager](https://cloud.google.com/secret-manager/docs)
 
+## 🎯 Quick Start Checklist
+
+Use this checklist to ensure everything is set up correctly:
+
+- [ ] **Get API Key** from [Google AI Studio](https://aistudio.google.com/)
+- [ ] **Enable Generative Language API** in [Google Cloud Console](https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com)
+- [ ] **Wait 5-10 minutes** for API to be fully enabled
+- [ ] **Run verification script**: `GOOGLE_AI_API_KEY=your_key node scripts/verify-google-ai-setup.cjs`
+- [ ] **Verify models are available** (script should show ✅ for at least one model)
+- [ ] **Set Firebase Function secret**: `firebase functions:secrets:set GOOGLE_AI_API_KEY`
+- [ ] **Deploy functions**: `firebase deploy --only functions`
+- [ ] **Test in your app** by creating a visit summary
+- [ ] **Monitor logs**: `firebase functions:log --only api`
+
+## 📊 Cost Monitoring
+
+### Free Tier Limits
+- **60 requests per minute** (sufficient for most use cases)
+- **1,500 requests per day** (free tier)
+
+### Monitoring Usage
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Navigate to **APIs & Services > Dashboard**
+3. Click on **Generative Language API**
+4. View usage metrics and quotas
+
+### Cost Optimization Tips
+- Use `gemini-1.5-flash-latest` for faster, cheaper responses
+- Implement caching for repeated summaries
+- Set up usage alerts in Google Cloud Console
+- Monitor function execution times
+
 ## 🎯 Next Steps
 
-1. **Get API Key**: Follow steps above to get your Google AI API key
-2. **Set Secret**: Configure the key in Firebase Secrets
-3. **Deploy**: Deploy the updated functions
-4. **Test**: Create a test visit summary to verify integration
-5. **Monitor**: Watch logs and usage in Google Cloud Console
+1. ✅ **Get API Key**: Follow steps above to get your Google AI API key
+2. ✅ **Enable API**: Enable Generative Language API in Google Cloud Console
+3. ✅ **Verify Setup**: Run `node scripts/verify-google-ai-setup.cjs`
+4. ✅ **Set Secret**: Configure the key in Firebase Secrets
+5. ✅ **Deploy**: Deploy the updated functions
+6. ✅ **Test**: Create a test visit summary to verify integration
+7. ✅ **Monitor**: Watch logs and usage in Google Cloud Console
 
 The visit summary feature is now ready to use Google AI for intelligent processing of medical visit notes!
+
+## 📚 Additional Resources
+
+- [Google AI Studio](https://aistudio.google.com/) - Get API keys and test models
+- [Gemini API Documentation](https://ai.google.dev/docs) - Official API documentation
+- [Firebase Functions Secrets](https://firebase.google.com/docs/functions/config-env#secret-manager) - Managing secrets
+- [Google Cloud Console](https://console.cloud.google.com/) - Manage APIs and billing
+- [Generative Language API](https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com) - Enable the API

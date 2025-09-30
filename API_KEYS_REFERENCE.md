@@ -34,6 +34,46 @@ firebase functions:secrets:set GOOGLE_AI_API_KEY
 # Value: AIza...xxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
+**How to obtain:**
+1. Go to [Google AI Studio](https://aistudio.google.com/)
+2. Sign in with your Google account
+3. Click "Get API key" in the left sidebar
+4. Click "Create API key"
+5. Select "Create API key in new project" or choose existing project
+6. Copy the generated API key (starts with `AIza...`)
+
+**How to set as Firebase Function secret:**
+```bash
+# Install Firebase CLI if needed
+npm install -g firebase-tools
+
+# Login to Firebase
+firebase login
+
+# Set the secret
+firebase functions:secrets:set GOOGLE_AI_API_KEY
+# Paste your API key when prompted
+
+# Deploy functions to apply the secret
+firebase deploy --only functions
+```
+
+**Verification:**
+```bash
+# Check if secret is set
+firebase functions:secrets:access GOOGLE_AI_API_KEY
+
+# Run verification script
+node scripts/verify-google-ai-setup.cjs
+```
+
+**Enable the API:**
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Select your project
+3. Navigate to APIs & Services > Library
+4. Search for "Generative Language API"
+5. Click "Enable"
+
 ### **4. Google Cloud Speech-to-Text API**
 **Location**: Uses Firebase service account automatically
 **Used for**: Audio transcription (currently having issues)
