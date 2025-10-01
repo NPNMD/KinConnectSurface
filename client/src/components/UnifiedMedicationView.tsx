@@ -1,3 +1,20 @@
+/**
+ * @deprecated This component has been deprecated as of Phase 2 UX Consolidation.
+ * All functionality has been merged into MedicationManager.tsx
+ *
+ * This file is kept for reference only and should not be used in new code.
+ * Use MedicationManager instead, which now includes:
+ * - Inline schedule status badges (Scheduled/Unscheduled/Paused)
+ * - Today's dose information
+ * - Next scheduled dose time
+ * - Visual indicators for reminder status
+ * - Expandable past medications section
+ * - All CRUD operations
+ *
+ * Migration: Replace <UnifiedMedicationView /> with <MedicationManager />
+ * Date: 2025-09-30
+ */
+
 import React, { useState, useEffect } from 'react';
 import {
   Pill,
@@ -19,6 +36,9 @@ import { useFamily } from '@/contexts/FamilyContext';
 import LoadingSpinner from './LoadingSpinner';
 import { parseFrequencyToScheduleType, generateDefaultTimesForFrequency, validateFrequencyParsing } from '@/utils/medicationFrequencyUtils';
 
+/**
+ * @deprecated Use MedicationManager instead
+ */
 interface UnifiedMedicationViewProps {
   patientId: string;
   medications: Medication[];
@@ -35,6 +55,10 @@ interface MedicationWithStatus extends Medication {
   hasActiveSchedule: boolean;
 }
 
+/**
+ * @deprecated This component is deprecated. Use MedicationManager instead.
+ * All functionality from UnifiedMedicationView has been consolidated into MedicationManager.
+ */
 export default function UnifiedMedicationView({
   patientId,
   medications,

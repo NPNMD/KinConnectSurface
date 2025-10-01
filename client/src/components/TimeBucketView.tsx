@@ -362,7 +362,21 @@ export default function TimeBucketView({
   };
 
   const formatTime = (date: Date): string => {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const formatted = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    
+    // Debug logging for timezone issues
+    console.log('🔍 TIMEZONE DEBUG - formatTime:', {
+      inputDate: date,
+      inputISO: date.toISOString(),
+      inputTimestamp: date.getTime(),
+      formatted: formatted,
+      userTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      timezoneOffset: date.getTimezoneOffset(),
+      localeDateString: date.toLocaleDateString(),
+      localeTimeString: date.toLocaleTimeString()
+    });
+    
+    return formatted;
   };
 
   const getTimeUntil = (date: Date): string => {
@@ -636,7 +650,18 @@ export default function TimeBucketView({
                           <div className="flex items-center space-x-3 text-sm">
                             <span className="flex items-center space-x-1 text-blue-600">
                               <Clock className="w-3 h-3" />
-                              <span>{formatTime(new Date(event.scheduledDateTime))}</span>
+                              <span>{(() => {
+                                const scheduledDate = new Date(event.scheduledDateTime);
+                                console.log('🔍 TIMEZONE DEBUG - Event scheduled time:', {
+                                  eventId: event.id,
+                                  medicationName: event.medicationName,
+                                  scheduledDateTimeRaw: event.scheduledDateTime,
+                                  scheduledDateTimeParsed: scheduledDate.toISOString(),
+                                  scheduledDateTimeLocal: scheduledDate.toLocaleString(),
+                                  userTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+                                });
+                                return formatTime(scheduledDate);
+                              })()}</span>
                             </span>
                             
                             <span className={`text-xs ${

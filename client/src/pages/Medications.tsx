@@ -5,10 +5,7 @@ import {
   Heart,
   ArrowLeft,
   Pill,
-  Search,
-  Bell,
   Calendar,
-  CheckCircle,
   AlertTriangle,
   User,
   Users,
@@ -33,7 +30,6 @@ export default function Medications() {
   } = useFamily();
   const [medications, setMedications] = useState<Medication[]>([]);
   const [isLoadingMedications, setIsLoadingMedications] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [showMissedModal, setShowMissedModal] = useState(false);
   const [missedMedicationsCount, setMissedMedicationsCount] = useState(0);
@@ -243,25 +239,42 @@ export default function Medications() {
       );
       
       if (response.success) {
+        // Clear the medications cache to force fresh data
+        const cacheKey = 'medications_/medications';
+        if ('caches' in window) {
+          caches.open('api-cache').then(cache => {
+            cache.delete(cacheKey).then(() => {
+              console.log('✅ Cleared medications cache after deletion');
+            });
+          });
+        }
+        
+        // Update local state
         setMedications(prev => prev.filter(med => med.id !== id));
+        
+        // Force immediate refresh to ensure UI is in sync
+        await loadMedications();
+        
+        // Refresh related data
+        loadMissedMedicationsCount();
+        loadAdherenceStats();
+        setRefreshTrigger(prev => prev + 1);
+      } else {
+        // If backend delete failed, don't remove from UI
+        throw new Error('Failed to delete medication from server');
       }
     } catch (error) {
       console.error('Error deleting medication:', error);
+      // Show user-friendly error message
+      alert('Failed to delete medication. Please try again or contact support if the problem persists.');
       throw error;
     } finally {
       setIsLoadingMedications(false);
     }
   };
 
-  // Simplified filtering - just search active medications
-  const activeMedications = medications.filter(medication => {
-    const matchesSearch = medication.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         medication.genericName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         medication.brandName?.toLowerCase().includes(searchQuery.toLowerCase());
-    return medication.isActive && matchesSearch;
-  });
-
-  const inactiveMedications = medications.filter(med => !med.isActive);
+  // Get active medications
+  const activeMedications = medications.filter(med => med.isActive);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -283,7 +296,7 @@ export default function Medications() {
             </div>
             
             <div className="flex items-center space-x-2 text-sm text-gray-600">
-              <span>{activeMedications.length} active</span>
+              <span>{activeMedications.length} active medication{activeMedications.length !== 1 ? 's' : ''}</span>
             </div>
           </div>
         </div>
@@ -422,29 +435,8 @@ export default function Medications() {
           </div>
         </div>
 
-        {/* Simplified Search */}
-        <div className="mb-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input
-              type="text"
-              placeholder="Search medications..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-            />
-          </div>
-        </div>
-
-        {/* Simplified Medication Management Section */}
+        {/* Enhanced Medication Management Section */}
         <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Your Medications</h2>
-            <div className="text-sm text-gray-600">
-              {activeMedications.length} active
-            </div>
-          </div>
-          
           {hasPermission('canEdit') ? (
             <MedicationManager
               patientId={getEffectivePatientId() || ''}
@@ -465,16 +457,6 @@ export default function Medications() {
             </div>
           )}
         </div>
-
-        {/* Show inactive medications if any exist */}
-        {inactiveMedications.length > 0 && (
-          <div className="mt-6 bg-gray-50 rounded-lg border border-gray-200 p-4">
-            <h3 className="text-md font-medium text-gray-900 mb-3">Past Medications ({inactiveMedications.length})</h3>
-            <p className="text-sm text-gray-600">
-              You have {inactiveMedications.length} past or inactive medications in your history.
-            </p>
-          </div>
-        )}
       </main>
 
       {/* Mobile Bottom Navigation */}

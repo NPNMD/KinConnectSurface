@@ -1,27 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Calendar, 
-  Clock, 
-  Plus, 
-  Edit, 
-  Trash2, 
-  Play, 
-  Pause, 
-  Save, 
-  X, 
+import {
+  Calendar,
+  Clock,
+  Plus,
+  Edit,
+  Trash2,
+  Play,
+  Pause,
+  Save,
+  X,
   AlertTriangle,
   CheckCircle,
   Info,
   Bell
 } from 'lucide-react';
-import type { 
-  Medication, 
-  MedicationSchedule, 
+import type {
+  Medication,
+  MedicationSchedule,
   NewMedicationSchedule,
-  MedicationCalendarEvent 
+  MedicationCalendarEvent
 } from '@shared/types';
 import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
 import { parseFrequencyToScheduleType, generateDefaultTimesForFrequency, validateFrequencyParsing } from '@/utils/medicationFrequencyUtils';
+import { convertLocalTimesToUTC, convertUTCTimesToLocal, logTimezoneConversion } from '@/utils/timezoneUtils';
 
 interface MedicationScheduleManagerProps {
   medication: Medication;
@@ -328,13 +329,21 @@ export default function MedicationScheduleManager({
       console.log('🔍 MedicationScheduleManager: Submitting schedule data');
       console.log('🔍 MedicationScheduleManager: Medication ID:', medication.id);
       console.log('🔍 MedicationScheduleManager: Patient ID:', medication.patientId);
-      console.log('🔍 MedicationScheduleManager: Form data:', formData);
+      console.log('🔍 MedicationScheduleManager: Form data (local times):', formData);
+
+      // Convert local times to UTC before sending to backend
+      const utcTimes = convertLocalTimesToUTC(formData.times, new Date(formData.startDate));
+      
+      // Log the timezone conversion for debugging
+      formData.times.forEach((localTime, index) => {
+        logTimezoneConversion(localTime, utcTimes[index], 'Schedule Creation');
+      });
 
       const scheduleData: NewMedicationSchedule = {
         medicationId: medication.id,
         patientId: medication.patientId,
         frequency: formData.frequency,
-        times: formData.times,
+        times: utcTimes, // Use UTC times instead of local times
         daysOfWeek: formData.frequency === 'weekly' ? formData.daysOfWeek : undefined,
         dayOfMonth: formData.frequency === 'monthly' ? formData.dayOfMonth : undefined,
         startDate: new Date(formData.startDate),
@@ -347,7 +356,7 @@ export default function MedicationScheduleManager({
         isActive: true
       };
 
-      console.log('🔍 MedicationScheduleManager: Prepared schedule data:', scheduleData);
+      console.log('🔍 MedicationScheduleManager: Prepared schedule data (UTC times):', scheduleData);
 
       let result;
       if (editingScheduleId) {
@@ -379,9 +388,17 @@ export default function MedicationScheduleManager({
   };
 
   const handleEdit = (schedule: MedicationSchedule) => {
+    // Convert UTC times from schedule to local times for editing
+    const localTimes = convertUTCTimesToLocal(schedule.times, new Date(schedule.startDate));
+    
+    console.log('🔍 MedicationScheduleManager: Editing schedule, converting UTC to local:', {
+      utcTimes: schedule.times,
+      localTimes
+    });
+    
     setFormData({
       frequency: schedule.frequency,
-      times: schedule.times,
+      times: localTimes, // Use local times for the form
       daysOfWeek: schedule.daysOfWeek || [],
       dayOfMonth: schedule.dayOfMonth || 1,
       startDate: new Date(schedule.startDate).toISOString().split('T')[0],
@@ -427,7 +444,10 @@ export default function MedicationScheduleManager({
   };
 
   const formatTimes = (times: string[]): string => {
-    return times.map(time => {
+    // Convert UTC times to local for display
+    const localTimes = convertUTCTimesToLocal(times);
+    
+    return localTimes.map(time => {
       const [hours, minutes] = time.split(':');
       const hour = parseInt(hours);
       const ampm = hour >= 12 ? 'PM' : 'AM';

@@ -1132,6 +1132,60 @@ class MedicationCalendarApi {
     return validationResult;
   }
 
+  // Lenient validation for existing schedules - only checks critical functionality fields
+  validateExistingSchedule(schedule: Partial<MedicationSchedule>): {
+    isValid: boolean;
+    errors: string[];
+    warnings: string[];
+  } {
+    console.log('🔍 MedicationCalendarApi: Validating existing schedule (lenient mode):', schedule.id);
+    
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    // Critical checks - only what affects functionality
+    
+    // 1. Check if schedule is active
+    if (schedule.isActive === false) {
+      warnings.push('Schedule is inactive - will not generate events');
+    }
+    
+    // 2. Check if schedule is paused
+    if (schedule.isPaused === true) {
+      warnings.push('Schedule is paused - events will not be active');
+    }
+    
+    // 3. Check if schedule has reminder times (critical for functionality)
+    if (!schedule.times || schedule.times.length === 0) {
+      errors.push('Schedule has no reminder times - cannot generate events');
+    }
+    
+    // 4. Validate that times are in correct format (if they exist)
+    if (schedule.times && schedule.times.length > 0) {
+      const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+      const invalidTimes = schedule.times.filter(time => !timeRegex.test(time));
+      
+      if (invalidTimes.length > 0) {
+        errors.push(`Invalid time format in existing schedule: ${invalidTimes.join(', ')}`);
+      }
+    }
+    
+    // 5. Check if schedule has a frequency (needed for event generation)
+    if (!schedule.frequency) {
+      errors.push('Schedule has no frequency - cannot determine when to generate events');
+    }
+    
+    const validationResult = {
+      isValid: errors.length === 0,
+      errors,
+      warnings
+    };
+    
+    console.log('🔍 MedicationCalendarApi: Lenient validation result:', validationResult);
+    
+    return validationResult;
+  }
+
   // ===== GRACE PERIOD MANAGEMENT API =====
 
   // Get grace period configuration

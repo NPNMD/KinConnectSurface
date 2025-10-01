@@ -5270,6 +5270,91 @@ app.get('/medications', authenticate, async (req, res) => {
 	}
 });
 
+// Delete medication
+app.delete('/medications/:medicationId', authenticate, async (req, res) => {
+	try {
+		const { medicationId } = req.params;
+		const userId = (req as any).user.uid;
+		
+		console.log('🗑️ Deleting medication:', { medicationId, userId });
+		
+		// Get the medication document
+		const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+		
+		if (!medicationDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication not found'
+			});
+		}
+		
+		const medicationData = medicationDoc.data();
+		
+		// Check if user owns this medication
+		if (medicationData?.patientId !== userId) {
+			// Check family access with delete permissions
+			const familyAccess = await firestore.collection('family_calendar_access')
+				.where('familyMemberId', '==', userId)
+				.where('patientId', '==', medicationData?.patientId)
+				.where('status', '==', 'active')
+				.get();
+			
+			if (familyAccess.empty) {
+				return res.status(403).json({
+					success: false,
+					error: 'Access denied'
+				});
+			}
+			
+			// Check if user has delete permissions
+			const accessData = familyAccess.docs[0].data();
+			if (!accessData.permissions?.canDelete) {
+				return res.status(403).json({
+					success: false,
+					error: 'Insufficient permissions to delete medications'
+				});
+			}
+		}
+		
+		// Delete associated schedules
+		const schedulesQuery = await firestore.collection('medication_schedules')
+			.where('medicationId', '==', medicationId)
+			.get();
+		
+		const batch = firestore.batch();
+		schedulesQuery.docs.forEach(doc => {
+			batch.delete(doc.ref);
+		});
+		
+		// Delete associated calendar events
+		const eventsQuery = await firestore.collection('medication_calendar_events')
+			.where('medicationId', '==', medicationId)
+			.get();
+		
+		eventsQuery.docs.forEach(doc => {
+			batch.delete(doc.ref);
+		});
+		
+		// Delete the medication
+		batch.delete(medicationDoc.ref);
+		
+		await batch.commit();
+		
+		console.log('✅ Medication and associated data deleted successfully:', medicationId);
+		
+		res.json({
+			success: true,
+			message: 'Medication deleted successfully'
+		});
+	} catch (error) {
+		console.error('Error deleting medication:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
 // Add medication
 app.post('/medications', authenticate, async (req, res) => {
 	try {
@@ -5977,70 +6062,6 @@ app.put('/medications/:medicationId', authenticate, async (req, res) => {
 			success: false,
 			error: 'Internal server error',
 			details: error instanceof Error ? error.message : 'Unknown error'
-		});
-	}
-});
-
-// Delete medication
-app.delete('/medications/:medicationId', authenticate, async (req, res) => {
-	try {
-		const { medicationId } = req.params;
-		const userId = (req as any).user.uid;
-		
-		console.log('🗑️ Deleting medication:', { medicationId, userId });
-		
-		// Get the medication document
-		const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
-		
-		if (!medicationDoc.exists) {
-			return res.status(404).json({
-				success: false,
-				error: 'Medication not found'
-			});
-		}
-		
-		const medicationData = medicationDoc.data();
-		
-		// Check if user owns this medication
-		if (medicationData?.patientId !== userId) {
-			// Check family access with delete permissions
-			const familyAccess = await firestore.collection('family_calendar_access')
-				.where('familyMemberId', '==', userId)
-				.where('patientId', '==', medicationData?.patientId)
-				.where('status', '==', 'active')
-				.get();
-			
-			if (familyAccess.empty) {
-				return res.status(403).json({
-					success: false,
-					error: 'Access denied'
-				});
-			}
-			
-			// Check if user has delete permissions
-			const accessData = familyAccess.docs[0].data();
-			if (!accessData.permissions?.canDelete) {
-				return res.status(403).json({
-					success: false,
-					error: 'Insufficient permissions to delete medications'
-				});
-			}
-		}
-		
-		// Delete the medication
-		await medicationDoc.ref.delete();
-		
-		console.log('✅ Medication deleted successfully:', medicationId);
-		
-		res.json({
-			success: true,
-			message: 'Medication deleted successfully'
-		});
-	} catch (error) {
-		console.error('Error deleting medication:', error);
-		res.status(500).json({
-			success: false,
-			error: 'Internal server error'
 		});
 	}
 });

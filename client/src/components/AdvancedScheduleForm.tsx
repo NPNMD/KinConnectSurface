@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Clock, 
-  Coffee, 
-  Moon, 
-  Sun, 
-  Repeat, 
+import {
+  Clock,
+  Coffee,
+  Moon,
+  Sun,
+  Repeat,
   AlertTriangle,
   Info,
   Save,
   X,
   Settings
 } from 'lucide-react';
-import type { 
+import type {
   NewEnhancedMedicationSchedule,
   Medication,
   TimingType,
@@ -19,6 +19,7 @@ import type {
   SleepRelativeType,
   ScheduleConflict
 } from '@shared/types';
+import { convertLocalTimesToUTC, logTimezoneConversion } from '@/utils/timezoneUtils';
 
 interface AdvancedScheduleFormProps {
   medication: Medication;
@@ -127,11 +128,41 @@ export default function AdvancedScheduleForm({
     }
 
     try {
+      console.log('🔍 AdvancedScheduleForm: Submitting schedule with local times:', times);
+      
+      // Convert local times to UTC for absolute timing
+      const utcTimes = timingType === 'absolute' ? convertLocalTimesToUTC(times, new Date(startDate)) : [];
+      
+      // Log timezone conversions
+      if (timingType === 'absolute') {
+        times.forEach((localTime, index) => {
+          logTimezoneConversion(localTime, utcTimes[index], 'Advanced Schedule Creation');
+        });
+      }
+      
+      // Convert fallback times to UTC for meal/sleep relative timing
+      const utcMealFallbackTime = timingType === 'meal_relative'
+        ? convertLocalTimesToUTC([mealFallbackTime], new Date(startDate))[0]
+        : mealFallbackTime;
+        
+      const utcSleepFallbackTime = timingType === 'sleep_relative'
+        ? convertLocalTimesToUTC([sleepFallbackTime], new Date(startDate))[0]
+        : sleepFallbackTime;
+      
+      // Convert interval times to UTC
+      const utcIntervalStartTime = timingType === 'interval'
+        ? convertLocalTimesToUTC([intervalStartTime], new Date(startDate))[0]
+        : intervalStartTime;
+        
+      const utcIntervalEndTime = timingType === 'interval'
+        ? convertLocalTimesToUTC([intervalEndTime], new Date(startDate))[0]
+        : intervalEndTime;
+
       const scheduleData: NewEnhancedMedicationSchedule = {
         medicationId: medication.id,
         patientId: medication.patientId,
         frequency: frequency as any,
-        times: timingType === 'absolute' ? times : [],
+        times: utcTimes, // Use UTC times
         startDate: new Date(startDate),
         endDate: endDate ? new Date(endDate) : undefined,
         isIndefinite,
@@ -147,7 +178,7 @@ export default function AdvancedScheduleForm({
             mealType,
             offsetMinutes: mealOffset,
             isFlexible: true,
-            fallbackTime: mealFallbackTime
+            fallbackTime: utcMealFallbackTime // Use UTC fallback time
           }
         }),
         
@@ -155,20 +186,22 @@ export default function AdvancedScheduleForm({
           sleepRelativeTiming: {
             relativeTo: sleepRelativeTo,
             offsetMinutes: sleepOffset,
-            fallbackTime: sleepFallbackTime
+            fallbackTime: utcSleepFallbackTime // Use UTC fallback time
           }
         }),
         
         ...(timingType === 'interval' && {
           intervalTiming: {
             intervalHours,
-            startTime: intervalStartTime,
-            endTime: intervalEndTime,
+            startTime: utcIntervalStartTime, // Use UTC start time
+            endTime: utcIntervalEndTime, // Use UTC end time
             avoidSleepHours,
             maxDosesPerDay
           }
         })
       };
+
+      console.log('🔍 AdvancedScheduleForm: Prepared schedule data with UTC times:', scheduleData);
 
       await onSave(scheduleData);
     } catch (error) {

@@ -239,42 +239,46 @@ export async function validateMedicationScheduling(medication: Medication): Prom
       };
     }
 
-    // Get diagnostic for this medication
-    const diagnostic = await medicationCalendarApi.diagnoseMedicationScheduleIssues(medication.id);
+    // Check for calendar events (the actual functionality check)
+    const today = new Date();
+    const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
     
-    if (!diagnostic.success || !diagnostic.data) {
-      return {
-        isValid: false,
-        issues: ['Failed to check medication schedules'],
-        suggestions: ['Try refreshing and checking again'],
-        hasSchedules: false,
-        scheduleCount: 0
-      };
-    }
-
-    const data = diagnostic.data;
+    console.log('🔍 Checking calendar events for medication:', {
+      medicationId: medication.id,
+      medicationName: medication.name,
+      startDate: today.toISOString(),
+      endDate: nextWeek.toISOString()
+    });
+    
+    const eventsResponse = await medicationCalendarApi.getMedicationCalendarEvents({
+      medicationId: medication.id,
+      startDate: today,
+      endDate: nextWeek,
+      forceFresh: true
+    });
+    
+    console.log('🔍 Events response for', medication.name, ':', {
+      success: eventsResponse.success,
+      dataLength: eventsResponse.data?.length || 0,
+      error: eventsResponse.error
+    });
+    
     const issues: string[] = [];
     const suggestions: string[] = [];
+    let hasSchedules = false;
+    let scheduleCount = 0;
     
-    // Analyze the diagnostic results
-    if (!data.hasSchedules) {
-      issues.push('No schedules found for medication with reminders enabled');
-      suggestions.push('Create a medication schedule');
-    } else if (data.validSchedules === 0) {
-      issues.push('All schedules have validation errors');
-      suggestions.push('Fix validation issues in existing schedules');
-    } else if (data.invalidSchedules > 0) {
-      issues.push(`${data.invalidSchedules} schedule${data.invalidSchedules !== 1 ? 's have' : ' has'} validation errors`);
-      suggestions.push('Review and fix schedule validation issues');
+    // If medication has calendar events, it IS scheduled
+    if (eventsResponse.success && eventsResponse.data && eventsResponse.data.length > 0) {
+      hasSchedules = true;
+      scheduleCount = 1; // At least one functional schedule exists
+      console.log('✅ Medication has calendar events:', medication.name, 'events:', eventsResponse.data.length);
+    } else {
+      // No calendar events found - medication is not properly scheduled
+      issues.push('No calendar events found for medication with reminders enabled');
+      suggestions.push('Create a medication schedule to generate calendar events');
+      console.log('❌ No calendar events for medication:', medication.name);
     }
-
-    // Add specific issue descriptions
-    data.issues.forEach(issue => {
-      if (issue.severity === 'error') {
-        issues.push(issue.description);
-        suggestions.push(issue.repairAction);
-      }
-    });
 
     const isValid = issues.length === 0;
     
@@ -282,8 +286,8 @@ export async function validateMedicationScheduling(medication: Medication): Prom
       isValid,
       issues,
       suggestions: [...new Set(suggestions)], // Remove duplicates
-      hasSchedules: data.hasSchedules,
-      scheduleCount: data.scheduleCount
+      hasSchedules,
+      scheduleCount
     };
     
   } catch (error) {

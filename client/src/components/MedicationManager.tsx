@@ -1,8 +1,30 @@
-import React, { useState } from 'react';
-import { Plus, Edit, Trash2, Pill, Save, X, CheckCircle, Bell } from 'lucide-react';
-import { Medication, NewMedication } from '@shared/types';
+import React, { useState, useEffect } from 'react';
+import { 
+  Plus, 
+  Edit, 
+  Trash2, 
+  Pill, 
+  Save, 
+  X, 
+  CheckCircle, 
+  Bell, 
+  BellOff,
+  AlertTriangle,
+  Clock,
+  Calendar,
+  Info,
+  ChevronDown,
+  ChevronUp,
+  Settings,
+  Lock
+} from 'lucide-react';
+import { Medication, NewMedication, MedicationCalendarEvent, MedicationSchedule } from '@shared/types';
 import { DrugConcept } from '@/lib/drugApi';
+import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
+import { useFamily } from '@/contexts/FamilyContext';
+import { parseFrequencyToScheduleType, generateDefaultTimesForFrequency, validateFrequencyParsing } from '@/utils/medicationFrequencyUtils';
 import MedicationSearch from './MedicationSearch';
+import LoadingSpinner from './LoadingSpinner';
 
 interface MedicationManagerProps {
   patientId: string;
@@ -11,6 +33,15 @@ interface MedicationManagerProps {
   onUpdateMedication: (id: string, medication: Partial<Medication>) => Promise<void>;
   onDeleteMedication: (id: string) => Promise<void>;
   isLoading?: boolean;
+}
+
+// Enhanced medication with schedule status
+interface MedicationWithStatus extends Medication {
+  scheduleStatus: 'scheduled' | 'unscheduled' | 'paused';
+  todaysEvents: MedicationCalendarEvent[];
+  nextDose?: MedicationCalendarEvent;
+  schedules: MedicationSchedule[];
+  hasActiveSchedule: boolean;
 }
 
 // Simplified form data - only essential fields
@@ -67,15 +98,250 @@ export default function MedicationManager({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  
+  // Enhanced state for schedule status
+  const [medicationsWithStatus, setMedicationsWithStatus] = useState<MedicationWithStatus[]>([]);
+  const [isLoadingStatus, setIsLoadingStatus] = useState(true);
+  const [creatingSchedule, setCreatingSchedule] = useState<string | null>(null);
+  const [takingMedication, setTakingMedication] = useState<string | null>(null);
+  const [showPastMedications, setShowPastMedications] = useState(false);
+  
+  // Add family context for permission checks
+  const { hasPermission, userRole, activePatientAccess } = useFamily();
+
+  // Load medications with schedule status
+  useEffect(() => {
+    loadMedicationsWithStatus();
+  }, [patientId, medications]);
+
+  const loadMedicationsWithStatus = async () => {
+    try {
+      setIsLoadingStatus(true);
+      
+      // Get today's date range
+      const now = new Date();
+      const startOfDay = new Date(now);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(now);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Get all medication schedules for this patient
+      const schedulesResult = await medicationCalendarApi.getMedicationSchedules();
+      const allSchedules = schedulesResult.success ? schedulesResult.data || [] : [];
+      
+      if (!schedulesResult.success) {
+        console.warn('⚠️ Failed to fetch medication schedules:', schedulesResult.error);
+      }
+
+      // Get today's medication events
+      const eventsResult = await medicationCalendarApi.getMedicationCalendarEvents({
+        startDate: startOfDay,
+        endDate: endOfDay
+      });
+      const todaysEvents = eventsResult.success ? eventsResult.data || [] : [];
+
+      // Process each active medication to determine its status
+      const activeMeds = medications.filter(med => med.isActive);
+      const medicationsWithStatusData: MedicationWithStatus[] = activeMeds.map(medication => {
+        // Find schedules for this medication
+        const medicationSchedules = allSchedules.filter(schedule => 
+          schedule.medicationId === medication.id && schedule.isActive && !schedule.isPaused
+        );
+
+        // Find today's events for this medication
+        const medicationTodaysEvents = todaysEvents.filter(event => 
+          event.medicationId === medication.id
+        );
+
+        // Find next upcoming dose
+        const upcomingEvents = medicationTodaysEvents.filter(event => 
+          event.status === 'scheduled' && new Date(event.scheduledDateTime) > now
+        );
+        const nextDose = upcomingEvents.sort((a, b) => 
+          new Date(a.scheduledDateTime).getTime() - new Date(b.scheduledDateTime).getTime()
+        )[0];
+
+        // Determine schedule status
+        let scheduleStatus: 'scheduled' | 'unscheduled' | 'paused' = 'unscheduled';
+        const hasActiveSchedule = medicationSchedules.length > 0;
+        
+        if (hasActiveSchedule) {
+          const hasPausedSchedules = allSchedules.some(schedule => 
+            schedule.medicationId === medication.id && schedule.isPaused
+          );
+          scheduleStatus = hasPausedSchedules ? 'paused' : 'scheduled';
+        }
+
+        return {
+          ...medication,
+          scheduleStatus,
+          todaysEvents: medicationTodaysEvents,
+          nextDose,
+          schedules: medicationSchedules,
+          hasActiveSchedule
+        };
+      });
+
+      // Sort medications: scheduled first, then by next dose time, then alphabetically
+      medicationsWithStatusData.sort((a, b) => {
+        if (a.scheduleStatus === 'scheduled' && b.scheduleStatus !== 'scheduled') return -1;
+        if (a.scheduleStatus !== 'scheduled' && b.scheduleStatus === 'scheduled') return 1;
+        
+        if (a.nextDose && !b.nextDose) return -1;
+        if (!a.nextDose && b.nextDose) return 1;
+        
+        if (a.nextDose && b.nextDose) {
+          return new Date(a.nextDose.scheduledDateTime).getTime() - new Date(b.nextDose.scheduledDateTime).getTime();
+        }
+        
+        return a.name.localeCompare(b.name);
+      });
+
+      setMedicationsWithStatus(medicationsWithStatusData);
+    } catch (error) {
+      console.error('Error loading medications with status:', error);
+    } finally {
+      setIsLoadingStatus(false);
+    }
+  };
+
+  const handleMarkMedicationTaken = async (eventId: string) => {
+    try {
+      setTakingMedication(eventId);
+      
+      const result = await medicationCalendarApi.markMedicationTaken(eventId, new Date());
+      
+      if (result.success) {
+        await loadMedicationsWithStatus();
+      } else {
+        console.error('Failed to mark medication as taken:', result.error);
+        alert(`Failed to mark medication as taken: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error marking medication as taken:', error);
+      alert('An unexpected error occurred. Please try again.');
+    } finally {
+      setTakingMedication(null);
+    }
+  };
+
+  const handleCreateSchedule = async (medication: Medication) => {
+    try {
+      setCreatingSchedule(medication.id);
+      
+      const frequency = getScheduleFrequency(medication.frequency);
+      const times = getDefaultTimes(frequency);
+      
+      const scheduleData = {
+        medicationId: medication.id,
+        patientId: medication.patientId,
+        frequency,
+        times,
+        startDate: new Date(),
+        isIndefinite: true,
+        dosageAmount: medication.dosage,
+        instructions: medication.instructions || '',
+        generateCalendarEvents: true,
+        reminderMinutesBefore: [15, 5],
+        isActive: true
+      };
+
+      const result = await medicationCalendarApi.createMedicationSchedule(scheduleData);
+      
+      if (result.success) {
+        await loadMedicationsWithStatus();
+        window.dispatchEvent(new CustomEvent('medicationScheduleUpdated'));
+      } else {
+        console.error('Failed to create schedule:', result.error);
+        alert(`Failed to create schedule: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Error creating schedule:', error);
+      alert('Failed to create medication schedule. Please try again.');
+    } finally {
+      setCreatingSchedule(null);
+    }
+  };
+
+  const getScheduleFrequency = (medicationFrequency: string): 'daily' | 'twice_daily' | 'three_times_daily' | 'four_times_daily' | 'weekly' | 'monthly' | 'as_needed' => {
+    const parsedFrequency = parseFrequencyToScheduleType(medicationFrequency);
+    const generatedTimes = generateDefaultTimesForFrequency(parsedFrequency);
+    validateFrequencyParsing(medicationFrequency, parsedFrequency, generatedTimes);
+    return parsedFrequency;
+  };
+
+  const getDefaultTimes = (frequency: string): string[] => {
+    return medicationCalendarApi.generateDefaultTimes(frequency);
+  };
+
+  const formatTime = (date: Date): string => {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const getTimeUntil = (date: Date): string => {
+    const now = new Date();
+    const diffMs = date.getTime() - now.getTime();
+    
+    if (diffMs < 0) {
+      const overdueMins = Math.abs(Math.floor(diffMs / (1000 * 60)));
+      if (overdueMins < 60) {
+        return `${overdueMins}m overdue`;
+      } else {
+        const overdueHours = Math.floor(overdueMins / 60);
+        return `${overdueHours}h overdue`;
+      }
+    }
+    
+    const mins = Math.floor(diffMs / (1000 * 60));
+    if (mins < 60) {
+      return `in ${mins}m`;
+    } else {
+      const hours = Math.floor(mins / 60);
+      const remainingMins = mins % 60;
+      return remainingMins > 0 ? `in ${hours}h ${remainingMins}m` : `in ${hours}h`;
+    }
+  };
+
+  const getStatusIcon = (medication: MedicationWithStatus) => {
+    if (medication.scheduleStatus === 'scheduled') {
+      return <Bell className="w-4 h-4 text-green-600" />;
+    } else if (medication.scheduleStatus === 'paused') {
+      return <BellOff className="w-4 h-4 text-yellow-600" />;
+    } else {
+      return <AlertTriangle className="w-4 h-4 text-orange-600" />;
+    }
+  };
+
+  const getStatusText = (medication: MedicationWithStatus) => {
+    switch (medication.scheduleStatus) {
+      case 'scheduled':
+        return 'Scheduled';
+      case 'paused':
+        return 'Paused';
+      case 'unscheduled':
+        return 'No Schedule';
+      default:
+        return 'Unknown';
+    }
+  };
+
+  const getStatusColor = (medication: MedicationWithStatus) => {
+    switch (medication.scheduleStatus) {
+      case 'scheduled':
+        return 'bg-green-100 text-green-800 border-green-200';
+      case 'paused':
+        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      case 'unscheduled':
+        return 'bg-orange-100 text-orange-800 border-orange-200';
+      default:
+        return 'bg-gray-100 text-gray-800 border-gray-200';
+    }
+  };
 
   const handleDrugSelect = async (drug: DrugConcept) => {
-    console.log('🔍 Selected drug:', drug);
-    
-    // Clear previous validation errors
     setValidationErrors({});
     setDuplicateWarning(null);
     
-    // Check for duplicate medications
     const existingMed = medications.find(med =>
       med.name.toLowerCase() === drug.name.toLowerCase()
     );
@@ -84,7 +350,6 @@ export default function MedicationManager({
       setDuplicateWarning(`This medication (${drug.name}) is already in the patient's medication list.`);
     }
     
-    // Extract dosage from drug name
     const dosageMatch = drug.name.match(/(\d+(?:\.\d+)?)\s*(mg|mcg|g|ml|units?|iu)/i);
     const dosage = dosageMatch ? `${dosageMatch[1]}${dosageMatch[2].toLowerCase()}` : '';
     
@@ -101,7 +366,6 @@ export default function MedicationManager({
       [field]: value
     }));
     
-    // Clear validation error for this field
     if (validationErrors[field]) {
       setValidationErrors(prev => {
         const newErrors = { ...prev };
@@ -114,7 +378,6 @@ export default function MedicationManager({
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
     
-    // Required field validation
     if (!formData.name.trim()) errors.name = 'Medication name is required';
     if (!formData.dosage.trim()) errors.dosage = 'Dosage is required';
     if (!formData.frequency.trim()) errors.frequency = 'Frequency is required';
@@ -125,11 +388,8 @@ export default function MedicationManager({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('🔍 MedicationManager: Form submitted');
 
-    // Validate form before submission
     if (!validateForm()) {
-      console.log('❌ MedicationManager: Form validation failed');
       return;
     }
 
@@ -150,22 +410,17 @@ export default function MedicationManager({
         reminderTimes: formData.reminderTimes.length > 0 ? formData.reminderTimes : undefined,
       };
 
-      console.log('🔍 MedicationManager: Prepared medication data:', medicationData);
-
       if (editingMedicationId) {
-        console.log('🔍 MedicationManager: Updating medication:', editingMedicationId);
         await onUpdateMedication(editingMedicationId, medicationData);
         setEditingMedicationId(null);
       } else {
-        console.log('🔍 MedicationManager: Adding new medication');
         await onAddMedication(medicationData);
         setIsAddingMedication(false);
       }
 
-      console.log('✅ MedicationManager: Medication saved successfully');
-      handleCancel(); // Reset form and clear state
+      handleCancel();
     } catch (error) {
-      console.error('❌ MedicationManager: Error saving medication:', error);
+      console.error('Error saving medication:', error);
       if (!editingMedicationId) {
         setIsAddingMedication(false);
       }
@@ -223,41 +478,37 @@ export default function MedicationManager({
     }
   };
 
-  const handleToggleReminder = async (medication: Medication) => {
-    try {
-      const newReminderState = !medication.hasReminders;
-      const reminderTimes = newReminderState ? ['08:00'] : []; // Default to morning
-      
-      await onUpdateMedication(medication.id, {
-        hasReminders: newReminderState,
-        reminderTimes: reminderTimes
-      });
-
-      if (newReminderState) {
-        alert(`Reminders enabled for ${medication.name} at 8:00 AM. You can edit times when editing the medication.`);
-      } else {
-        alert(`Reminders disabled for ${medication.name}`);
-      }
-    } catch (error) {
-      console.error('Error toggling reminder:', error);
-      alert('Failed to update reminder settings. Please try again.');
-    }
-  };
-
-  const activeMedications = medications.filter(med => med.isActive);
   const inactiveMedications = medications.filter(med => !med.isActive);
+
+  if (isLoadingStatus) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <LoadingSpinner size="sm" />
+        <span className="ml-2 text-gray-600 text-sm">Loading medications...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Simplified Header */}
+      {/* Header with summary */}
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-gray-900">Medications</h3>
-        {!isAddingMedication && (
+        <div className="flex items-center space-x-4">
+          <h3 className="text-lg font-semibold text-gray-900">Medications</h3>
+          <div className="flex items-center space-x-2 text-sm text-gray-600">
+            <span className="flex items-center space-x-1">
+              <Bell className="w-3 h-3 text-green-600" />
+              <span>{medicationsWithStatus.filter(m => m.scheduleStatus === 'scheduled').length} scheduled</span>
+            </span>
+            <span className="flex items-center space-x-1">
+              <AlertTriangle className="w-3 h-3 text-orange-600" />
+              <span>{medicationsWithStatus.filter(m => m.scheduleStatus === 'unscheduled').length} unscheduled</span>
+            </span>
+          </div>
+        </div>
+        {!isAddingMedication && hasPermission('canEdit') && (
           <button
-            onClick={() => {
-              console.log('🔍 MedicationManager: Add Medication button clicked');
-              setIsAddingMedication(true);
-            }}
+            onClick={() => setIsAddingMedication(true)}
             className="btn-primary flex items-center space-x-2"
             disabled={isLoading}
           >
@@ -267,7 +518,7 @@ export default function MedicationManager({
         )}
       </div>
 
-      {/* Simplified Add/Edit Form */}
+      {/* Add/Edit Form */}
       {isAddingMedication && (
         <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
           <div className="flex items-center justify-between mb-4">
@@ -283,14 +534,12 @@ export default function MedicationManager({
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Duplicate Warning */}
             {duplicateWarning && (
               <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3 flex items-start space-x-2">
                 <div className="text-sm text-yellow-800">{duplicateWarning}</div>
               </div>
             )}
 
-            {/* Medication Search */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Search Medication</label>
               <MedicationSearch
@@ -300,7 +549,6 @@ export default function MedicationManager({
               />
             </div>
 
-            {/* Essential Fields Only */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Medication Name *</label>
@@ -379,7 +627,6 @@ export default function MedicationManager({
               />
             </div>
 
-            {/* Simplified Reminder Settings */}
             <div className="space-y-3">
               <div className="flex items-center space-x-2">
                 <input
@@ -413,7 +660,6 @@ export default function MedicationManager({
                     <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
                       <h5 className="text-sm font-medium text-blue-900 mb-3">Reminder Times</h5>
                       
-                      {/* Simple Time Preset Buttons */}
                       <div className="grid grid-cols-2 gap-2 mb-4">
                         {REMINDER_PRESETS.map((preset) => (
                           <button
@@ -432,7 +678,6 @@ export default function MedicationManager({
                         ))}
                       </div>
 
-                      {/* Selected Times Display */}
                       {formData.reminderTimes.length > 0 && (
                         <div>
                           <p className="text-xs text-blue-800 mb-2">Selected reminder times:</p>
@@ -500,69 +745,191 @@ export default function MedicationManager({
         </div>
       )}
 
-      {/* Simplified Active Medications List */}
-      {activeMedications.length > 0 && (
+      {/* Active Medications List with Enhanced Status */}
+      {medicationsWithStatus.length > 0 && (
         <div>
           <h4 className="text-md font-medium text-gray-900 mb-3">Active Medications</h4>
           <div className="space-y-3">
-            {activeMedications.map((medication) => (
+            {medicationsWithStatus.map((medication) => (
               <div
                 key={medication.id}
-                className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow"
+                className={`bg-white rounded-lg border p-4 ${
+                  medication.scheduleStatus === 'unscheduled' 
+                    ? 'border-orange-200 bg-orange-50' 
+                    : medication.scheduleStatus === 'paused'
+                    ? 'border-yellow-200 bg-yellow-50'
+                    : 'border-gray-200'
+                }`}
               >
                 <div className="flex items-start justify-between">
-                  <div className="flex items-start space-x-3">
-                    <div className="flex-shrink-0 mt-1">
-                      <Pill className="w-5 h-5 text-primary-600" />
+                  <div className="flex items-start space-x-3 flex-1">
+                    <div className={`p-2 rounded-full ${
+                      medication.scheduleStatus === 'scheduled' ? 'bg-green-100' :
+                      medication.scheduleStatus === 'paused' ? 'bg-yellow-100' :
+                      'bg-orange-100'
+                    }`}>
+                      <Pill className={`w-4 h-4 ${
+                        medication.scheduleStatus === 'scheduled' ? 'text-green-600' :
+                        medication.scheduleStatus === 'paused' ? 'text-yellow-600' :
+                        'text-orange-600'
+                      }`} />
                     </div>
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-2">
+                    
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center space-x-2 mb-1 flex-wrap">
                         <h5 className="font-medium text-gray-900">{medication.name}</h5>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(medication)}`}>
+                          {getStatusIcon(medication)}
+                          <span className="ml-1">{getStatusText(medication)}</span>
+                        </span>
                         {medication.isPRN && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
-                            As needed
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                            PRN
                           </span>
                         )}
                       </div>
-                      <p className="text-sm text-gray-600 mt-1">
+                      
+                      <p className="text-sm text-gray-600 mb-2">
                         {medication.dosage} • {medication.frequency}
                       </p>
+
+                      {/* Schedule Status Details */}
+                      {medication.scheduleStatus === 'scheduled' && medication.nextDose && (
+                        <div className="flex items-center space-x-4 text-sm mb-2">
+                          <span className="flex items-center space-x-1 text-blue-600">
+                            <Clock className="w-3 h-3" />
+                            <span>Next: {formatTime(new Date(medication.nextDose.scheduledDateTime))}</span>
+                          </span>
+                          <span className="text-gray-500">
+                            {getTimeUntil(new Date(medication.nextDose.scheduledDateTime))}
+                          </span>
+                        </div>
+                      )}
+
+                      {medication.scheduleStatus === 'unscheduled' && (
+                        <div className="flex items-center space-x-1 text-sm text-orange-600 mb-2">
+                          <Info className="w-3 h-3" />
+                          <span>No reminders set - medication won't appear in daily schedule</span>
+                        </div>
+                      )}
+
+                      {medication.scheduleStatus === 'paused' && (
+                        <div className="flex items-center space-x-1 text-sm text-yellow-600 mb-2">
+                          <BellOff className="w-3 h-3" />
+                          <span>Reminders paused</span>
+                        </div>
+                      )}
+
                       {medication.instructions && (
                         <p className="text-sm text-gray-500 mt-1">{medication.instructions}</p>
                       )}
-                      {medication.prescribedBy && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          Prescribed by: {medication.prescribedBy}
-                        </p>
+                      
+                      <div className="flex items-center space-x-4 mt-2 text-xs text-gray-500">
+                        <span className="flex items-center space-x-1">
+                          <Calendar className="w-3 h-3" />
+                          <span>Prescribed: {
+                            medication.prescribedDate instanceof Date
+                              ? medication.prescribedDate.toLocaleDateString()
+                              : new Date(medication.prescribedDate).toLocaleDateString()
+                          }</span>
+                        </span>
+                        {medication.prescribedBy && (
+                          <span>By: {medication.prescribedBy}</span>
+                        )}
+                      </div>
+
+                      {/* Today's Doses Summary */}
+                      {medication.scheduleStatus === 'scheduled' && medication.todaysEvents.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-gray-200">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-gray-600">Today's doses:</span>
+                            <div className="flex items-center space-x-2">
+                              <span className="text-green-600">
+                                {medication.todaysEvents.filter(e => e.status === 'taken').length} taken
+                              </span>
+                              <span className="text-gray-400">•</span>
+                              <span className="text-blue-600">
+                                {medication.todaysEvents.filter(e => e.status === 'scheduled').length} pending
+                              </span>
+                              {medication.todaysEvents.filter(e => e.status === 'missed').length > 0 && (
+                                <>
+                                  <span className="text-gray-400">•</span>
+                                  <span className="text-red-600">
+                                    {medication.todaysEvents.filter(e => e.status === 'missed').length} missed
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
                   </div>
+                  
+                  {/* Action Buttons */}
                   <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => handleToggleReminder(medication)}
-                      className={`p-2 transition-colors ${
-                        medication.hasReminders
-                          ? 'text-primary-600 bg-primary-50'
-                          : 'text-gray-400 hover:text-primary-600 hover:bg-primary-50'
-                      }`}
-                      title={medication.hasReminders ? 'Reminders enabled' : 'Enable reminders'}
-                    >
-                      <Bell className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleEdit(medication)}
-                      className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
-                      title="Edit medication"
-                    >
-                      <Edit className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(medication.id)}
-                      className="p-2 text-gray-400 hover:text-red-600 transition-colors"
-                      title="Delete medication"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {(() => {
+                      const canEdit = hasPermission('canEdit');
+                      
+                      if (!canEdit) {
+                        return (
+                          <div className="flex items-center space-x-2 text-xs text-gray-500">
+                            <Lock className="w-3 h-3" />
+                            <span>View only</span>
+                          </div>
+                        );
+                      }
+                      
+                      return (
+                        <>
+                          {medication.scheduleStatus === 'scheduled' && medication.nextDose && (
+                            <button
+                              onClick={() => handleMarkMedicationTaken(medication.nextDose!.id)}
+                              disabled={takingMedication === medication.nextDose!.id}
+                              className="p-2 text-green-600 hover:text-green-800 hover:bg-green-100 rounded-md disabled:opacity-50 transition-colors"
+                              title="Mark as taken"
+                            >
+                              {takingMedication === medication.nextDose!.id ? (
+                                <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                <CheckCircle className="w-4 h-4" />
+                              )}
+                            </button>
+                          )}
+
+                          {medication.scheduleStatus === 'unscheduled' && (
+                            <button
+                              onClick={() => handleCreateSchedule(medication)}
+                              disabled={creatingSchedule === medication.id}
+                              className="flex items-center space-x-1 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
+                              title="Create medication schedule"
+                            >
+                              {creatingSchedule === medication.id ? (
+                                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                <Plus className="w-3 h-3" />
+                              )}
+                              <span>Schedule</span>
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => handleEdit(medication)}
+                            className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                            title="Edit medication"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(medication.id)}
+                            className="p-2 text-gray-400 hover:text-red-600 transition-colors"
+                            title="Delete medication"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
@@ -572,49 +939,106 @@ export default function MedicationManager({
       )}
 
       {/* Empty state */}
-      {activeMedications.length === 0 && !isAddingMedication && (
+      {medicationsWithStatus.length === 0 && !isAddingMedication && (
         <div className="text-center py-8">
           <Pill className="w-12 h-12 text-gray-300 mx-auto mb-4" />
           <h4 className="text-lg font-medium text-gray-900 mb-2">No medications added</h4>
           <p className="text-gray-500 mb-4">Add medications to track prescriptions and dosages.</p>
-          <button
-            onClick={() => setIsAddingMedication(true)}
-            className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors flex items-center space-x-2 mx-auto"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add First Medication</span>
-          </button>
+          {hasPermission('canEdit') && (
+            <button
+              onClick={() => setIsAddingMedication(true)}
+              className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors flex items-center space-x-2 mx-auto"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add First Medication</span>
+            </button>
+          )}
         </div>
       )}
 
-      {/* Simplified Inactive Medications */}
+      {/* Expandable Past Medications Section */}
       {inactiveMedications.length > 0 && (
-        <div>
-          <h4 className="text-md font-medium text-gray-900 mb-3">Past Medications</h4>
-          <div className="space-y-3">
-            {inactiveMedications.map((medication) => (
-              <div
-                key={medication.id}
-                className="bg-gray-50 border border-gray-200 rounded-lg p-4 opacity-75"
-              >
-                <div className="flex items-start space-x-3">
-                  <div className="flex-shrink-0 mt-1">
-                    <Pill className="w-5 h-5 text-gray-400" />
-                  </div>
-                  <div className="flex-1">
-                    <h5 className="font-medium text-gray-700">{medication.name}</h5>
-                    <p className="text-sm text-gray-500 mt-1">
-                      {medication.dosage} • {medication.frequency}
-                    </p>
-                    {medication.prescribedBy && (
-                      <p className="text-xs text-gray-400 mt-1">
-                        Prescribed by: {medication.prescribedBy}
+        <div className="bg-gray-50 rounded-lg border border-gray-200">
+          <button
+            onClick={() => setShowPastMedications(!showPastMedications)}
+            className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-100 transition-colors rounded-lg"
+          >
+            <div className="flex items-center space-x-2">
+              <h4 className="text-md font-medium text-gray-700">
+                Past Medications ({inactiveMedications.length})
+              </h4>
+            </div>
+            {showPastMedications ? (
+              <ChevronUp className="w-5 h-5 text-gray-500" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-gray-500" />
+            )}
+          </button>
+          
+          {showPastMedications && (
+            <div className="px-4 pb-4 space-y-3">
+              {inactiveMedications.map((medication) => (
+                <div
+                  key={medication.id}
+                  className="bg-white border border-gray-200 rounded-lg p-4"
+                >
+                  <div className="flex items-start space-x-3">
+                    <div className="flex-shrink-0 mt-1">
+                      <Pill className="w-5 h-5 text-gray-400" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2 mb-1">
+                        <h5 className="font-medium text-gray-700">{medication.name}</h5>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
+                          Inactive
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-500 mt-1">
+                        {medication.dosage} • {medication.frequency}
                       </p>
-                    )}
+                      {medication.instructions && (
+                        <p className="text-sm text-gray-400 mt-1">{medication.instructions}</p>
+                      )}
+                      <div className="flex items-center space-x-4 mt-2 text-xs text-gray-400">
+                        <span className="flex items-center space-x-1">
+                          <Calendar className="w-3 h-3" />
+                          <span>Prescribed: {
+                            medication.prescribedDate instanceof Date
+                              ? medication.prescribedDate.toLocaleDateString()
+                              : new Date(medication.prescribedDate).toLocaleDateString()
+                          }</span>
+                        </span>
+                        {medication.prescribedBy && (
+                          <span>By: {medication.prescribedBy}</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Info Footer */}
+      {medicationsWithStatus.length > 0 && (
+        <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+          <div className="flex items-start space-x-2">
+            <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-blue-800">
+              <p className="font-medium mb-1">Medication Schedule Status:</p>
+              <ul className="space-y-1 text-xs">
+                <li>• <strong>Scheduled:</strong> Medication has active reminders and will appear in daily schedule</li>
+                <li>• <strong>No Schedule:</strong> Medication is in your list but has no reminders set</li>
+                <li>• <strong>Paused:</strong> Reminders are temporarily disabled</li>
+              </ul>
+              {medicationsWithStatus.some(m => m.scheduleStatus === 'unscheduled') && (
+                <p className="mt-2 text-blue-700">
+                  <strong>Tip:</strong> Click "Schedule" to set up reminders for unscheduled medications.
+                </p>
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -60,17 +60,69 @@ export default function UnscheduledMedicationsAlert({
               continue;
             }
 
-            // Check if any schedule is valid and active
-            const hasValidSchedule = schedules.some(schedule => {
-              const validation = medicationCalendarApi.validateScheduleData(schedule);
-              const isActive = schedule.isActive && !schedule.isPaused;
+            // Check if medication has actual calendar events (functionality check)
+            // Instead of strict validation, we check if events exist for the next 7 days
+            let hasValidSchedule = false;
+            
+            try {
+              const today = new Date();
+              const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
               
-              if (!validation.isValid) {
-                console.warn('Invalid schedule found for medication:', medication.name, 'errors:', validation.errors);
+              console.log('🔍 DEBUG: Checking calendar events for medication:', {
+                medicationId: medication.id,
+                medicationName: medication.name,
+                startDate: today.toISOString(),
+                endDate: nextWeek.toISOString()
+              });
+              
+              const eventsResponse = await medicationCalendarApi.getMedicationCalendarEvents({
+                medicationId: medication.id,
+                startDate: today,
+                endDate: nextWeek,
+                forceFresh: true
+              });
+              
+              console.log('🔍 DEBUG: Events response for', medication.name, ':', {
+                success: eventsResponse.success,
+                dataLength: eventsResponse.data?.length || 0,
+                error: eventsResponse.error,
+                events: eventsResponse.data?.map(e => ({
+                  id: e.id,
+                  scheduledDateTime: e.scheduledDateTime,
+                  status: e.status,
+                  medicationName: e.medicationName
+                }))
+              });
+              
+              if (eventsResponse.success && eventsResponse.data && eventsResponse.data.length > 0) {
+                // Medication has calendar events - it IS scheduled
+                hasValidSchedule = true;
+                console.log('✅ Medication has calendar events:', medication.name, 'events:', eventsResponse.data.length);
+              } else {
+                // No calendar events found - check if schedule is at least active
+                const activeSchedule = schedules.find(s => s.isActive && !s.isPaused);
+                if (activeSchedule) {
+                  console.warn('⚠️ Medication has active schedule but no calendar events:', medication.name);
+                  console.warn('⚠️ Active schedule details:', {
+                    scheduleId: activeSchedule.id,
+                    frequency: activeSchedule.frequency,
+                    times: activeSchedule.times,
+                    isActive: activeSchedule.isActive,
+                    isPaused: activeSchedule.isPaused,
+                    generateCalendarEvents: activeSchedule.generateCalendarEvents
+                  });
+                  // Still consider it unscheduled since no events exist
+                  hasValidSchedule = false;
+                } else {
+                  console.log('❌ No active schedules or events for medication:', medication.name);
+                  hasValidSchedule = false;
+                }
               }
-              
-              return validation.isValid && isActive;
-            });
+            } catch (error) {
+              console.warn('Error checking calendar events for medication:', medication.name, error);
+              // Fallback to basic schedule check
+              hasValidSchedule = schedules.some(s => s.isActive && !s.isPaused);
+            }
 
             if (!hasValidSchedule) {
               console.log('No valid active schedules for medication:', medication.name);
