@@ -201,6 +201,15 @@ export interface MedicationEvent {
   // Event Classification
   eventType: MedicationEventType;
   
+  // Archive Status (for daily reset system)
+  archiveStatus?: {
+    isArchived: boolean;
+    archivedAt?: Date;
+    archivedReason?: 'daily_reset' | 'manual_archive' | 'retention_policy';
+    belongsToDate?: string; // ISO date string (YYYY-MM-DD) for the day this event belongs to
+    dailySummaryId?: string; // Reference to the daily summary document
+  };
+  
   // Event Data (varies by event type)
   eventData: {
     // For dose events
@@ -882,7 +891,7 @@ export interface PatientTimePreferences {
       lunch?: string; // HH:MM format
       dinner?: string; // HH:MM format
     };
-    timezone: string; // IANA timezone (e.g., "America/Chicago")
+    timezone: string; // IANA timezone (e.g., "America/Chicago") - REQUIRED for daily reset
   };
   
   // Metadata
@@ -1503,6 +1512,69 @@ export const ADHERENCE_MILESTONES = {
     requirement: { type: 'timing_accuracy', value: 95 }
   }
 } as const;
+
+// ===== DAILY RESET AND ARCHIVING SYSTEM =====
+
+/**
+ * Daily Summary Document
+ * Created at midnight (patient's timezone) to summarize the previous day's medication events
+ */
+export interface MedicationDailySummary {
+  id: string;
+  patientId: string;
+  
+  // Date information
+  summaryDate: string; // ISO date string (YYYY-MM-DD) for the day being summarized
+  timezone: string; // IANA timezone (e.g., "America/Chicago")
+  
+  // Summary statistics
+  statistics: {
+    totalScheduledDoses: number;
+    totalTakenDoses: number;
+    totalMissedDoses: number;
+    totalSkippedDoses: number;
+    totalSnoozedDoses: number;
+    adherenceRate: number; // Percentage (0-100)
+    onTimeRate: number; // Percentage of taken doses that were on time
+    averageDelayMinutes: number;
+  };
+  
+  // Medication breakdown
+  medicationBreakdown: Array<{
+    commandId: string;
+    medicationName: string;
+    scheduledDoses: number;
+    takenDoses: number;
+    missedDoses: number;
+    skippedDoses: number;
+    adherenceRate: number;
+  }>;
+  
+  // Events archived
+  archivedEvents: {
+    totalArchived: number;
+    eventIds: string[]; // References to archived events
+    archivedAt: Date;
+  };
+  
+  // Metadata
+  metadata: {
+    createdAt: Date;
+    createdBy: string; // 'system' for automated creation
+    version: number;
+  };
+}
+
+/**
+ * Archive Status for filtering queries
+ */
+export interface ArchiveStatusFilter {
+  includeArchived?: boolean; // Default: false
+  onlyArchived?: boolean; // Default: false
+  archivedAfter?: Date;
+  archivedBefore?: Date;
+  belongsToDate?: string; // ISO date string
+}
 
 /**
  * Adherence risk levels and thresholds

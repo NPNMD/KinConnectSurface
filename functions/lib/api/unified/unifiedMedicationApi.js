@@ -49,12 +49,15 @@ const medicationCommandsApi_1 = __importDefault(require("./medicationCommandsApi
 const medicationEventsApi_1 = __importDefault(require("./medicationEventsApi"));
 const medicationViewsApi_1 = __importDefault(require("./medicationViewsApi"));
 const timeBucketApi_1 = __importDefault(require("./timeBucketApi"));
+const medicationArchiveApi_1 = __importDefault(require("./medicationArchiveApi"));
 const router = express_1.default.Router();
 // ===== UNIFIED API ROUTES =====
 // Medication Commands API - State management operations
 router.use('/medication-commands', medicationCommandsApi_1.default);
-// Medication Events API - Event processing operations  
+// Medication Events API - Event processing operations
 router.use('/medication-events', medicationEventsApi_1.default);
+// Medication Archive API - Archived events and daily summaries
+router.use('/medication-events', medicationArchiveApi_1.default);
 // Medication Views API - Read-only view operations
 router.use('/medication-views', medicationViewsApi_1.default);
 // Time Bucket API - Flexible scheduling and time preference management

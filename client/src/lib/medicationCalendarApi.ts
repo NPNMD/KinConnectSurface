@@ -150,7 +150,7 @@ class MedicationCalendarApi {
   async createMedicationSchedule(scheduleData: NewMedicationSchedule): Promise<ApiResponse<MedicationSchedule>> {
     try {
       console.log('🔧 MedicationCalendarApi: Creating medication schedule');
-      console.log('🔧 MedicationCalendarApi: Schedule data:', scheduleData);
+      console.log('🔧 MedicationCalendarApi: Schedule data:', JSON.stringify(scheduleData, null, 2));
       
       // Enhanced validation and debugging
       const validation = this.validateScheduleData(scheduleData);
@@ -158,10 +158,20 @@ class MedicationCalendarApi {
         console.error('❌ MedicationCalendarApi: Schedule validation failed:', validation.errors);
         console.warn('⚠️ MedicationCalendarApi: Validation warnings:', validation.warnings);
         console.info('💡 MedicationCalendarApi: Repair suggestions:', validation.repairSuggestions);
+        console.error('❌ MedicationCalendarApi: Full schedule data that failed validation:', JSON.stringify(scheduleData, null, 2));
+        
+        // Return user-friendly error message with repair suggestions
+        const errorMessage = validation.errors.length > 0
+          ? `Schedule validation failed: ${validation.errors.join(', ')}`
+          : 'Schedule validation failed';
+        
+        const suggestions = validation.repairSuggestions.length > 0
+          ? ` Suggestions: ${validation.repairSuggestions.join('; ')}`
+          : '';
         
         return {
           success: false,
-          error: `Validation failed: ${validation.errors.join(', ')}. Suggestions: ${validation.repairSuggestions.join('; ')}`
+          error: errorMessage + suggestions
         };
       }
       
@@ -182,7 +192,8 @@ class MedicationCalendarApi {
         generateCalendarEvents: scheduleData.generateCalendarEvents,
         isIndefinite: scheduleData.isIndefinite,
         startDate: scheduleData.startDate?.toISOString(),
-        endDate: scheduleData.endDate?.toISOString()
+        endDate: scheduleData.endDate?.toISOString(),
+        hasInstructions: !!scheduleData.instructions
       });
       
       const headers = await getAuthHeaders();
@@ -201,9 +212,23 @@ class MedicationCalendarApi {
       if (!response.ok) {
         const errorText = await response.text();
         console.error('❌ MedicationCalendarApi: HTTP error:', response.status, errorText);
+        
+        // Provide user-friendly error messages based on status code
+        let userFriendlyError = 'Failed to create medication schedule';
+        
+        if (response.status === 400) {
+          userFriendlyError = 'Invalid schedule data. Please check your medication details and try again.';
+        } else if (response.status === 401) {
+          userFriendlyError = 'Authentication expired. Please sign in again.';
+        } else if (response.status === 403) {
+          userFriendlyError = 'You do not have permission to create schedules.';
+        } else if (response.status === 500) {
+          userFriendlyError = 'Server error. Please try again in a few moments.';
+        }
+        
         return {
           success: false,
-          error: `HTTP ${response.status}: ${errorText}`
+          error: `${userFriendlyError} (Error ${response.status})`
         };
       }
 
@@ -222,9 +247,21 @@ class MedicationCalendarApi {
       return result;
     } catch (error) {
       console.error('❌ MedicationCalendarApi: Error creating medication schedule:', error);
+      
+      // Provide detailed error information for debugging
+      if (error instanceof Error) {
+        console.error('❌ MedicationCalendarApi: Error details:', {
+          message: error.message,
+          stack: error.stack,
+          name: error.name
+        });
+      }
+      
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to create medication schedule'
+        error: error instanceof Error
+          ? `Failed to create medication schedule: ${error.message}`
+          : 'Failed to create medication schedule. Please try again.'
       };
     }
   }
@@ -1056,6 +1093,13 @@ class MedicationCalendarApi {
     } else if (typeof scheduleData.dosageAmount !== 'string' || scheduleData.dosageAmount.trim().length === 0) {
       errors.push('Dosage amount must be a non-empty string');
       repairSuggestions.push('Provide a valid dosage description');
+    }
+    
+    // Instructions field is now truly optional - no validation needed
+    if (scheduleData.instructions !== undefined && scheduleData.instructions !== null) {
+      if (typeof scheduleData.instructions !== 'string') {
+        warnings.push('Instructions should be a string if provided');
+      }
     }
 
     if (!scheduleData.startDate) {
@@ -1936,6 +1980,136 @@ class MedicationCalendarApi {
       
     } catch (error) {
       return handleApiError(error, 'Perform schedule health check');
+    }
+  }
+  // ===== ARCHIVE MANAGEMENT API =====
+
+  // Get archived medication events
+  async getArchivedEvents(
+    patientId: string,
+    startDate: Date,
+    endDate: Date,
+    medicationId?: string
+  ): Promise<ApiResponse<MedicationCalendarEvent[]>> {
+    try {
+      const params = new URLSearchParams();
+      params.append('patientId', patientId);
+      params.append('startDate', startDate.toISOString());
+      params.append('endDate', endDate.toISOString());
+      
+      if (medicationId) {
+        params.append('medicationId', medicationId);
+      }
+
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/medication-calendar/archived-events?${params}`, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+      });
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching archived events:', error);
+      return {
+        success: false,
+        error: 'Failed to fetch archived medication events'
+      };
+    }
+  }
+
+  // Get daily summaries for a date range
+  async getDailySummaries(
+    patientId: string,
+    startDate?: Date,
+    endDate?: Date,
+    limit?: number
+  ): Promise<ApiResponse<Array<{
+    date: string;
+    totalScheduled: number;
+    totalTaken: number;
+    totalMissed: number;
+    totalSkipped: number;
+    adherenceRate: number;
+    medications: Array<{
+      medicationId: string;
+      medicationName: string;
+      scheduled: number;
+      taken: number;
+      missed: number;
+      skipped: number;
+    }>;
+  }>>> {
+    try {
+      const params = new URLSearchParams();
+      params.append('patientId', patientId);
+      
+      if (startDate) {
+        params.append('startDate', startDate.toISOString());
+      }
+      if (endDate) {
+        params.append('endDate', endDate.toISOString());
+      }
+      if (limit) {
+        params.append('limit', limit.toString());
+      }
+
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_BASE}/medication-calendar/daily-summaries?${params}`, {
+        method: 'GET',
+        headers,
+        credentials: 'include',
+      });
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching daily summaries:', error);
+      return {
+        success: false,
+        error: 'Failed to fetch daily summaries'
+      };
+    }
+  }
+
+  // Get daily summary for a specific date
+  async getDailySummary(
+    patientId: string,
+    date: Date
+  ): Promise<ApiResponse<{
+    date: string;
+    totalScheduled: number;
+    totalTaken: number;
+    totalMissed: number;
+    totalSkipped: number;
+    adherenceRate: number;
+    medications: Array<{
+      medicationId: string;
+      medicationName: string;
+      scheduled: number;
+      taken: number;
+      missed: number;
+      skipped: number;
+    }>;
+  }>> {
+    try {
+      const dateStr = date.toISOString().split('T')[0];
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `${API_BASE}/medication-calendar/daily-summary/${patientId}/${dateStr}`,
+        {
+          method: 'GET',
+          headers,
+          credentials: 'include',
+        }
+      );
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching daily summary:', error);
+      return {
+        success: false,
+        error: 'Failed to fetch daily summary'
+      };
     }
   }
 }

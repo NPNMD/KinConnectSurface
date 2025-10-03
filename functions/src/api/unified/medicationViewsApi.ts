@@ -113,7 +113,11 @@ router.get('/today-buckets', async (req, res) => {
       orderDirection: 'asc'
     });
 
-    const events = eventsResult.data || [];
+    // Filter out archived events (only show today's active events)
+    const allEvents = eventsResult.data || [];
+    const events = allEvents.filter(event => !event.archiveStatus?.isArchived);
+    
+    console.log(`📊 Filtered events: ${allEvents.length} total, ${events.length} non-archived`);
 
     // Organize into time buckets
     const now = new Date();
@@ -425,7 +429,11 @@ router.get('/calendar', async (req, res) => {
       orderDirection: 'asc'
     });
 
-    const events = eventsResult.data || [];
+    // Filter out archived events for calendar view
+    const allEvents = eventsResult.data || [];
+    const events = allEvents.filter(event => !event.archiveStatus?.isArchived);
+    
+    console.log(`📊 Calendar events filtered: ${allEvents.length} total, ${events.length} non-archived`);
 
     // Get active commands for medication details
     const commandsResult = await getCommandService().getActiveCommands(targetPatientId);

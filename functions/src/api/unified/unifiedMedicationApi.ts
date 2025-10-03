@@ -45,6 +45,7 @@ import medicationCommandsApi from './medicationCommandsApi';
 import medicationEventsApi from './medicationEventsApi';
 import medicationViewsApi from './medicationViewsApi';
 import timeBucketApi from './timeBucketApi';
+import medicationArchiveApi from './medicationArchiveApi';
 
 const router = express.Router();
 
@@ -53,8 +54,11 @@ const router = express.Router();
 // Medication Commands API - State management operations
 router.use('/medication-commands', medicationCommandsApi);
 
-// Medication Events API - Event processing operations  
+// Medication Events API - Event processing operations
 router.use('/medication-events', medicationEventsApi);
+
+// Medication Archive API - Archived events and daily summaries
+router.use('/medication-events', medicationArchiveApi);
 
 // Medication Views API - Read-only view operations
 router.use('/medication-views', medicationViewsApi);

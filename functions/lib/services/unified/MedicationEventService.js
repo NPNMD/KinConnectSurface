@@ -262,8 +262,20 @@ class MedicationEventService {
                 query = query.limit(options.limit);
             }
             const snapshot = await query.get();
-            const events = snapshot.docs.map(doc => this.deserializeEvent(doc.id, doc.data()));
-            console.log(`✅ MedicationEventService: Found ${events.length} events`);
+            let events = snapshot.docs.map(doc => this.deserializeEvent(doc.id, doc.data()));
+            // Apply archive filtering (post-query since archiveStatus is optional)
+            const excludeArchived = options.excludeArchived !== false; // Default to true
+            const onlyArchived = options.onlyArchived === true; // Default to false
+            if (onlyArchived) {
+                events = events.filter(event => event.archiveStatus?.isArchived === true);
+                if (options.belongsToDate) {
+                    events = events.filter(event => event.archiveStatus?.belongsToDate === options.belongsToDate);
+                }
+            }
+            else if (excludeArchived) {
+                events = events.filter(event => !event.archiveStatus?.isArchived);
+            }
+            console.log(`✅ MedicationEventService: Found ${events.length} events (after archive filtering)`);
             return {
                 success: true,
                 data: events,

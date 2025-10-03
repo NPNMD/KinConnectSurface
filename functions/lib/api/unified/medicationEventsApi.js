@@ -60,7 +60,7 @@ router.get('/', async (req, res) => {
                 error: 'Authentication required'
             });
         }
-        const { patientId, commandId, eventType, startDate, endDate, correlationId, triggerSource, limit, orderBy, orderDirection } = req.query;
+        const { patientId, commandId, eventType, startDate, endDate, correlationId, triggerSource, limit, orderBy, orderDirection, excludeArchived, onlyArchived, belongsToDate } = req.query;
         // Determine target patient
         const targetPatientId = patientId || userId;
         // Check access permissions
@@ -91,7 +91,10 @@ router.get('/', async (req, res) => {
             triggerSource: triggerSource,
             limit: limit ? parseInt(limit, 10) : undefined,
             orderBy: orderBy || 'eventTimestamp',
-            orderDirection: orderDirection || 'desc'
+            orderDirection: orderDirection || 'desc',
+            excludeArchived: excludeArchived !== 'false', // Default to true
+            onlyArchived: onlyArchived === 'true', // Default to false
+            belongsToDate: belongsToDate
         };
         const result = await getEventService().queryEvents(queryOptions);
         if (!result.success) {

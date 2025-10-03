@@ -444,6 +444,9 @@ export default function TimeBucketView({
         <p className="text-gray-500">
           No medications are scheduled for today.
         </p>
+        <p className="text-sm text-gray-400 mt-2">
+          Medications from previous days have been archived.
+        </p>
       </div>
     );
   }
@@ -582,8 +585,11 @@ export default function TimeBucketView({
         <div className="text-center py-8 bg-green-50 rounded-lg border border-green-200">
           <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
           <h4 className="text-lg font-medium text-gray-900 mb-2">All caught up!</h4>
-          <p className="text-gray-500">
+          <p className="text-gray-500 mb-2">
             No pending medications for today. Great job staying on track!
+          </p>
+          <p className="text-sm text-gray-400">
+            View your medication history to see past doses.
           </p>
         </div>
       ) : (

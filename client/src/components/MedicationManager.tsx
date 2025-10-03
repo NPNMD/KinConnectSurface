@@ -643,22 +643,30 @@ export default function MedicationManager({
 
               {!formData.isPRN && (
                 <div className="space-y-3">
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-start space-x-2">
                     <input
                       type="checkbox"
                       id="hasReminders"
                       checked={formData.hasReminders}
                       onChange={(e) => handleInputChange('hasReminders', e.target.checked)}
-                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500 mt-0.5"
                     />
-                    <label htmlFor="hasReminders" className="text-sm text-gray-700 font-medium">
-                      Enable medication reminders
-                    </label>
+                    <div className="flex-1">
+                      <label htmlFor="hasReminders" className="text-sm text-gray-700 font-medium flex items-center space-x-1">
+                        <span>✅ Create medication reminders</span>
+                      </label>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Schedules will be set up automatically when you save this medication
+                      </p>
+                    </div>
                   </div>
 
                   {formData.hasReminders && (
                     <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-                      <h5 className="text-sm font-medium text-blue-900 mb-3">Reminder Times</h5>
+                      <div className="flex items-center justify-between mb-3">
+                        <h5 className="text-sm font-medium text-blue-900">Reminder Times (Optional)</h5>
+                        <span className="text-xs text-blue-700">Default times will be used if none selected</span>
+                      </div>
                       
                       <div className="grid grid-cols-2 gap-2 mb-4">
                         {REMINDER_PRESETS.map((preset) => (

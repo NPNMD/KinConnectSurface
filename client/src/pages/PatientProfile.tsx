@@ -26,6 +26,7 @@ import AddressAutocomplete from '@/components/AddressAutocomplete';
 import MedicalConditionSelect from '@/components/MedicalConditionSelect';
 import AllergySelect from '@/components/AllergySelect';
 import HealthcareProvidersManager from '@/components/HealthcareProvidersManager';
+import MedicationHistory from '@/components/MedicationHistory';
 
 export default function PatientProfile() {
   const { user } = useAuth();
@@ -525,6 +526,11 @@ export default function PatientProfile() {
             onDeleteFacility={handleDeleteFacility}
             isLoading={isLoadingProviders}
           />
+        </div>
+
+        {/* Medication History Section */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+          <MedicationHistory patientId={user?.id} />
         </div>
 
       </main>

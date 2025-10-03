@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.summarizeVisit = exports.transcribeAudio = exports.processVisitUpload = exports.detectMissedMedications = exports.api = void 0;
+exports.scheduledMedicationDailyReset = exports.summarizeVisit = exports.transcribeAudio = exports.processVisitUpload = exports.detectMissedMedications = exports.api = void 0;
 const functions = __importStar(require("firebase-functions/v1"));
 const params_1 = require("firebase-functions/params");
 const express_1 = __importDefault(require("express"));
@@ -2928,14 +2928,38 @@ app.get('/medication-calendar/events/today-buckets', authenticate, async (req, r
         startOfDay.setHours(0, 0, 0, 0);
         const endOfDay = new Date(targetDate);
         endOfDay.setHours(23, 59, 59, 999);
-        // Get today's medication events
+        // Get today's medication events (scheduled today)
         const eventsQuery = await firestore.collection('medication_calendar_events')
             .where('patientId', '==', targetPatientId)
             .where('scheduledDateTime', '>=', admin.firestore.Timestamp.fromDate(startOfDay))
             .where('scheduledDateTime', '<=', admin.firestore.Timestamp.fromDate(endOfDay))
             .orderBy('scheduledDateTime')
             .get();
-        const events = eventsQuery.docs.map(doc => {
+        // Query for events completed today (regardless of when scheduled)
+        const completedTodayQuery = await firestore.collection('medication_calendar_events')
+            .where('patientId', '==', targetPatientId)
+            .where('status', 'in', ['taken', 'late', 'skipped', 'missed'])
+            .where('actualTakenDateTime', '>=', admin.firestore.Timestamp.fromDate(startOfDay))
+            .where('actualTakenDateTime', '<=', admin.firestore.Timestamp.fromDate(endOfDay))
+            .get();
+        console.log('📊 Query results:', {
+            scheduledToday: eventsQuery.docs.length,
+            completedToday: completedTodayQuery.docs.length
+        });
+        // Merge and deduplicate events from both queries
+        const eventMap = new Map();
+        // Add events scheduled today
+        eventsQuery.docs.forEach(doc => {
+            eventMap.set(doc.id, doc);
+        });
+        // Add events completed today (may overlap with scheduled today)
+        completedTodayQuery.docs.forEach(doc => {
+            if (!eventMap.has(doc.id)) {
+                eventMap.set(doc.id, doc);
+            }
+        });
+        console.log('📊 Total unique events after merge:', eventMap.size);
+        const events = Array.from(eventMap.values()).map(doc => {
             const data = doc.data();
             return {
                 id: doc.id,
@@ -3035,16 +3059,23 @@ app.get('/medication-calendar/events/today-buckets', authenticate, async (req, r
         events.forEach(event => {
             const eventTime = new Date(event.scheduledDateTime);
             const minutesUntilDue = Math.floor((eventTime.getTime() - now.getTime()) / (1000 * 60));
-            // Handle completed medications separately
+            // Handle completed medications - only include if actually taken today
             if (['taken', 'late', 'skipped', 'missed'].includes(event.status)) {
-                const enhancedEvent = {
-                    ...event,
-                    minutesUntilDue,
-                    isOverdue: minutesUntilDue < 0,
-                    minutesOverdue: minutesUntilDue < 0 ? Math.abs(minutesUntilDue) : 0,
-                    timeBucket: 'completed'
-                };
-                buckets.completed.push(enhancedEvent);
+                // Verify the event was actually completed today
+                const actualTakenTime = event.actualTakenDateTime ? new Date(event.actualTakenDateTime) : null;
+                const wasCompletedToday = actualTakenTime &&
+                    actualTakenTime >= startOfDay &&
+                    actualTakenTime <= endOfDay;
+                if (wasCompletedToday) {
+                    const enhancedEvent = {
+                        ...event,
+                        minutesUntilDue,
+                        isOverdue: minutesUntilDue < 0,
+                        minutesOverdue: minutesUntilDue < 0 ? Math.abs(minutesUntilDue) : 0,
+                        timeBucket: 'completed'
+                    };
+                    buckets.completed.push(enhancedEvent);
+                }
                 return;
             }
             // Skip truly non-actionable medications (cancelled, paused, completed)
@@ -4714,6 +4745,76 @@ app.get('/medications', authenticate, async (req, res) => {
         });
     }
 });
+// Delete medication
+app.delete('/medications/:medicationId', authenticate, async (req, res) => {
+    try {
+        const { medicationId } = req.params;
+        const userId = req.user.uid;
+        console.log('🗑️ Deleting medication:', { medicationId, userId });
+        // Get the medication document
+        const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+        if (!medicationDoc.exists) {
+            return res.status(404).json({
+                success: false,
+                error: 'Medication not found'
+            });
+        }
+        const medicationData = medicationDoc.data();
+        // Check if user owns this medication
+        if (medicationData?.patientId !== userId) {
+            // Check family access with delete permissions
+            const familyAccess = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', userId)
+                .where('patientId', '==', medicationData?.patientId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccess.empty) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+            // Check if user has delete permissions
+            const accessData = familyAccess.docs[0].data();
+            if (!accessData.permissions?.canDelete) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Insufficient permissions to delete medications'
+                });
+            }
+        }
+        // Delete associated schedules
+        const schedulesQuery = await firestore.collection('medication_schedules')
+            .where('medicationId', '==', medicationId)
+            .get();
+        const batch = firestore.batch();
+        schedulesQuery.docs.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+        // Delete associated calendar events
+        const eventsQuery = await firestore.collection('medication_calendar_events')
+            .where('medicationId', '==', medicationId)
+            .get();
+        eventsQuery.docs.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+        // Delete the medication
+        batch.delete(medicationDoc.ref);
+        await batch.commit();
+        console.log('✅ Medication and associated data deleted successfully:', medicationId);
+        res.json({
+            success: true,
+            message: 'Medication deleted successfully'
+        });
+    }
+    catch (error) {
+        console.error('Error deleting medication:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
 // Add medication
 app.post('/medications', authenticate, async (req, res) => {
     try {
@@ -5386,60 +5487,6 @@ app.put('/medications/:medicationId', authenticate, async (req, res) => {
             success: false,
             error: 'Internal server error',
             details: error instanceof Error ? error.message : 'Unknown error'
-        });
-    }
-});
-// Delete medication
-app.delete('/medications/:medicationId', authenticate, async (req, res) => {
-    try {
-        const { medicationId } = req.params;
-        const userId = req.user.uid;
-        console.log('🗑️ Deleting medication:', { medicationId, userId });
-        // Get the medication document
-        const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
-        if (!medicationDoc.exists) {
-            return res.status(404).json({
-                success: false,
-                error: 'Medication not found'
-            });
-        }
-        const medicationData = medicationDoc.data();
-        // Check if user owns this medication
-        if (medicationData?.patientId !== userId) {
-            // Check family access with delete permissions
-            const familyAccess = await firestore.collection('family_calendar_access')
-                .where('familyMemberId', '==', userId)
-                .where('patientId', '==', medicationData?.patientId)
-                .where('status', '==', 'active')
-                .get();
-            if (familyAccess.empty) {
-                return res.status(403).json({
-                    success: false,
-                    error: 'Access denied'
-                });
-            }
-            // Check if user has delete permissions
-            const accessData = familyAccess.docs[0].data();
-            if (!accessData.permissions?.canDelete) {
-                return res.status(403).json({
-                    success: false,
-                    error: 'Insufficient permissions to delete medications'
-                });
-            }
-        }
-        // Delete the medication
-        await medicationDoc.ref.delete();
-        console.log('✅ Medication deleted successfully:', medicationId);
-        res.json({
-            success: true,
-            message: 'Medication deleted successfully'
-        });
-    }
-    catch (error) {
-        console.error('Error deleting medication:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Internal server error'
         });
     }
 });
@@ -8374,3 +8421,6 @@ var speechToTextWorker_1 = require("./workers/speechToTextWorker");
 Object.defineProperty(exports, "transcribeAudio", { enumerable: true, get: function () { return speechToTextWorker_1.transcribeAudio; } });
 var aiSummarizationWorker_1 = require("./workers/aiSummarizationWorker");
 Object.defineProperty(exports, "summarizeVisit", { enumerable: true, get: function () { return aiSummarizationWorker_1.summarizeVisit; } });
+// Export daily medication reset scheduled function
+var scheduledMedicationDailyReset_1 = require("./scheduledMedicationDailyReset");
+Object.defineProperty(exports, "scheduledMedicationDailyReset", { enumerable: true, get: function () { return scheduledMedicationDailyReset_1.scheduledMedicationDailyReset; } });

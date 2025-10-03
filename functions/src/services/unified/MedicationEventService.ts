@@ -99,6 +99,10 @@ export interface EventQueryOptions {
   limit?: number;
   orderBy?: 'eventTimestamp' | 'createdAt';
   orderDirection?: 'asc' | 'desc';
+  // Archive filtering options
+  excludeArchived?: boolean; // Default: true (exclude archived events)
+  onlyArchived?: boolean; // Default: false (only show archived events)
+  belongsToDate?: string; // ISO date string (YYYY-MM-DD) to filter by archive date
 }
 
 export interface EventAggregationOptions {
@@ -374,9 +378,22 @@ export class MedicationEventService {
       }
 
       const snapshot = await query.get();
-      const events = snapshot.docs.map(doc => this.deserializeEvent(doc.id, doc.data()));
+      let events = snapshot.docs.map(doc => this.deserializeEvent(doc.id, doc.data()));
 
-      console.log(`✅ MedicationEventService: Found ${events.length} events`);
+      // Apply archive filtering (post-query since archiveStatus is optional)
+      const excludeArchived = options.excludeArchived !== false; // Default to true
+      const onlyArchived = options.onlyArchived === true; // Default to false
+      
+      if (onlyArchived) {
+        events = events.filter(event => event.archiveStatus?.isArchived === true);
+        if (options.belongsToDate) {
+          events = events.filter(event => event.archiveStatus?.belongsToDate === options.belongsToDate);
+        }
+      } else if (excludeArchived) {
+        events = events.filter(event => !event.archiveStatus?.isArchived);
+      }
+
+      console.log(`✅ MedicationEventService: Found ${events.length} events (after archive filtering)`);
 
       return {
         success: true,

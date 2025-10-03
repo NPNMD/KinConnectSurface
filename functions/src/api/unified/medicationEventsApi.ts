@@ -76,7 +76,10 @@ router.get('/', async (req, res) => {
       triggerSource,
       limit,
       orderBy,
-      orderDirection
+      orderDirection,
+      excludeArchived,
+      onlyArchived,
+      belongsToDate
     } = req.query;
 
     // Determine target patient
@@ -111,7 +114,10 @@ router.get('/', async (req, res) => {
       triggerSource: triggerSource as any,
       limit: limit ? parseInt(limit as string, 10) : undefined,
       orderBy: (orderBy as 'eventTimestamp' | 'createdAt') || 'eventTimestamp',
-      orderDirection: (orderDirection as 'asc' | 'desc') || 'desc'
+      orderDirection: (orderDirection as 'asc' | 'desc') || 'desc',
+      excludeArchived: excludeArchived !== 'false', // Default to true
+      onlyArchived: onlyArchived === 'true', // Default to false
+      belongsToDate: belongsToDate as string
     };
 
     const result = await getEventService().queryEvents(queryOptions);

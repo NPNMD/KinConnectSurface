@@ -3253,7 +3253,7 @@ app.get('/medication-calendar/events/today-buckets', authenticate, async (req, r
 		const endOfDay = new Date(targetDate);
 		endOfDay.setHours(23, 59, 59, 999);
 		
-		// Get today's medication events
+		// Get today's medication events (scheduled today)
 		const eventsQuery = await firestore.collection('medication_calendar_events')
 			.where('patientId', '==', targetPatientId)
 			.where('scheduledDateTime', '>=', admin.firestore.Timestamp.fromDate(startOfDay))
@@ -3261,7 +3261,37 @@ app.get('/medication-calendar/events/today-buckets', authenticate, async (req, r
 			.orderBy('scheduledDateTime')
 			.get();
 		
-		const events = eventsQuery.docs.map(doc => {
+		// Query for events completed today (regardless of when scheduled)
+		const completedTodayQuery = await firestore.collection('medication_calendar_events')
+			.where('patientId', '==', targetPatientId)
+			.where('status', 'in', ['taken', 'late', 'skipped', 'missed'])
+			.where('actualTakenDateTime', '>=', admin.firestore.Timestamp.fromDate(startOfDay))
+			.where('actualTakenDateTime', '<=', admin.firestore.Timestamp.fromDate(endOfDay))
+			.get();
+		
+		console.log('📊 Query results:', {
+			scheduledToday: eventsQuery.docs.length,
+			completedToday: completedTodayQuery.docs.length
+		});
+		
+		// Merge and deduplicate events from both queries
+		const eventMap = new Map();
+		
+		// Add events scheduled today
+		eventsQuery.docs.forEach(doc => {
+			eventMap.set(doc.id, doc);
+		});
+		
+		// Add events completed today (may overlap with scheduled today)
+		completedTodayQuery.docs.forEach(doc => {
+			if (!eventMap.has(doc.id)) {
+				eventMap.set(doc.id, doc);
+			}
+		});
+		
+		console.log('📊 Total unique events after merge:', eventMap.size);
+		
+		const events = Array.from(eventMap.values()).map(doc => {
 			const data = doc.data();
 			return {
 				id: doc.id,
@@ -3365,16 +3395,24 @@ app.get('/medication-calendar/events/today-buckets', authenticate, async (req, r
 			const eventTime = new Date(event.scheduledDateTime);
 			const minutesUntilDue = Math.floor((eventTime.getTime() - now.getTime()) / (1000 * 60));
 			
-			// Handle completed medications separately
+			// Handle completed medications - only include if actually taken today
 			if (['taken', 'late', 'skipped', 'missed'].includes(event.status)) {
-				const enhancedEvent: any = {
-					...event,
-					minutesUntilDue,
-					isOverdue: minutesUntilDue < 0,
-					minutesOverdue: minutesUntilDue < 0 ? Math.abs(minutesUntilDue) : 0,
-					timeBucket: 'completed'
-				};
-				buckets.completed.push(enhancedEvent);
+				// Verify the event was actually completed today
+				const actualTakenTime = event.actualTakenDateTime ? new Date(event.actualTakenDateTime) : null;
+				const wasCompletedToday = actualTakenTime &&
+					actualTakenTime >= startOfDay &&
+					actualTakenTime <= endOfDay;
+				
+				if (wasCompletedToday) {
+					const enhancedEvent: any = {
+						...event,
+						minutesUntilDue,
+						isOverdue: minutesUntilDue < 0,
+						minutesOverdue: minutesUntilDue < 0 ? Math.abs(minutesUntilDue) : 0,
+						timeBucket: 'completed'
+					};
+					buckets.completed.push(enhancedEvent);
+				}
 				return;
 			}
 			
@@ -9427,3 +9465,6 @@ export const detectMissedMedications = functions
 export { processVisitUpload } from './visitUploadTrigger';
 export { transcribeAudio } from './workers/speechToTextWorker';
 export { summarizeVisit } from './workers/aiSummarizationWorker';
+
+// Export daily medication reset scheduled function
+export { scheduledMedicationDailyReset } from './scheduledMedicationDailyReset';
