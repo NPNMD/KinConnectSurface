@@ -303,6 +303,13 @@ export default function HealthcareProvidersManager({
         isActive: true
       };
 
+      console.log('🏥 Submitting provider data:', {
+        name: providerData.name,
+        isPrimary: providerData.isPrimary,
+        isEditing: !!editingProviderId,
+        providerId: editingProviderId || 'new'
+      });
+
       if (editingProviderId) {
         await onUpdateProvider(editingProviderId, providerData);
         setEditingProviderId(null);
@@ -447,6 +454,21 @@ export default function HealthcareProvidersManager({
   const activeProviders = providers.filter(p => p.isActive);
   const activeFacilities = facilities.filter(f => f.isActive);
   const primaryProvider = activeProviders.find(p => p.isPrimary);
+  
+  console.log('🔍 Primary provider search:', {
+    totalProviders: providers.length,
+    activeProviders: activeProviders.length,
+    primaryProvider: primaryProvider ? {
+      id: primaryProvider.id,
+      name: primaryProvider.name,
+      isPrimary: primaryProvider.isPrimary
+    } : null,
+    allProvidersPrimaryStatus: activeProviders.map(p => ({
+      id: p.id,
+      name: p.name,
+      isPrimary: p.isPrimary
+    }))
+  });
 
   return (
     <div className="space-y-6">

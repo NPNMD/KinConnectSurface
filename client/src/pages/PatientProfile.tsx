@@ -185,6 +185,23 @@ export default function PatientProfile() {
     }
   }, [user?.id]);
 
+  // Extract loadHealthcareProviders as a standalone function for reuse
+  const loadHealthcareProviders = async () => {
+    try {
+      setIsLoadingProviders(true);
+      const response = await apiClient.get<{ success: boolean; data: HealthcareProvider[] }>(
+        API_ENDPOINTS.HEALTHCARE_PROVIDERS(user?.id || '')
+      );
+      
+      if (response.success && response.data) {
+        setHealthcareProviders(response.data);
+      }
+    } catch (error) {
+      console.error('Error loading healthcare providers:', error);
+    } finally {
+      setIsLoadingProviders(false);
+    }
+  };
 
   // Healthcare Provider management functions
   const handleAddProvider = async (provider: NewHealthcareProvider) => {
@@ -214,12 +231,25 @@ export default function PatientProfile() {
         updates
       );
       
+      console.log('🏥 Provider update response:', {
+        providerId: id,
+        updates,
+        responseData: response.data,
+        isPrimaryUpdate: updates.isPrimary !== undefined
+      });
+      
       if (response.success && response.data) {
-        setHealthcareProviders(prev =>
-          prev.map(provider =>
-            provider.id === id ? response.data : provider
-          )
-        );
+        // If updating isPrimary, force a complete refresh to ensure UI consistency
+        if (updates.isPrimary !== undefined) {
+          console.log('🔄 PCP designation changed, forcing complete provider list refresh');
+          await loadHealthcareProviders(); // Force complete refresh
+        } else {
+          setHealthcareProviders(prev =>
+            prev.map(provider =>
+              provider.id === id ? response.data : provider
+            )
+          );
+        }
       }
     } catch (error) {
       console.error('Error updating healthcare provider:', error);

@@ -5011,6 +5011,11 @@ app.put('/healthcare/providers/:providerId', authenticate, async (req, res) => {
 		};
 		
 		console.log('📤 Sending response for provider:', providerId);
+		console.log('🔍 Response includes isPrimary:', {
+			isPrimary: (responseData as any).isPrimary,
+			name: (responseData as any).name,
+			providerId
+		});
 		console.log('🏥 === PROVIDER UPDATE DEBUG END ===');
 		
 		res.json({
