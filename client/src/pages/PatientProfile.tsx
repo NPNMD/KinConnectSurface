@@ -39,7 +39,9 @@ export default function PatientProfile() {
     gender: '',
     address: '',
     phoneNumber: '',
-    emergencyContact: '',
+    emergencyContactName: '',
+    emergencyContactRelationship: '',
+    emergencyContactPhone: '',
     medicalConditions: [''],
     allergies: [''],
   });
@@ -74,13 +76,18 @@ export default function PatientProfile() {
 
   const handleSave = async () => {
     try {
+      // Combine emergency contact fields into a single string for backend
+      const emergencyContactString = formData.emergencyContactName && formData.emergencyContactPhone
+        ? `${formData.emergencyContactName} (${formData.emergencyContactRelationship || 'Not specified'}) - ${formData.emergencyContactPhone}`
+        : '';
+
       // Prepare the data for the API
       const profileData = {
         dateOfBirth: formData.dateOfBirth || undefined,
         gender: formData.gender || undefined,
         address: formData.address || undefined,
         phoneNumber: formData.phoneNumber || undefined,
-        emergencyContact: formData.emergencyContact || undefined,
+        emergencyContact: emergencyContactString || undefined,
         medicalConditions: formData.medicalConditions.filter(condition => condition.trim() !== ''),
         allergies: formData.allergies.filter(allergy => allergy.trim() !== ''),
       };
@@ -97,12 +104,29 @@ export default function PatientProfile() {
         // Update form data with the saved data to ensure consistency
         if (response.data) {
           const savedData = response.data;
+          
+          // Parse emergency contact back into separate fields
+          let emergencyContactName = '';
+          let emergencyContactRelationship = '';
+          let emergencyContactPhone = '';
+          
+          if (savedData.emergencyContact) {
+            const match = savedData.emergencyContact.match(/^(.+?)\s*\((.+?)\)\s*-\s*(.+)$/);
+            if (match) {
+              emergencyContactName = match[1].trim();
+              emergencyContactRelationship = match[2].trim();
+              emergencyContactPhone = match[3].trim();
+            }
+          }
+          
           setFormData({
             dateOfBirth: savedData.dateOfBirth || '',
             gender: savedData.gender || '',
             address: savedData.address || '',
             phoneNumber: savedData.phoneNumber || '',
-            emergencyContact: savedData.emergencyContact || '',
+            emergencyContactName,
+            emergencyContactRelationship,
+            emergencyContactPhone,
             medicalConditions: savedData.medicalConditions && savedData.medicalConditions.length > 0 ? savedData.medicalConditions : [''],
             allergies: savedData.allergies && savedData.allergies.length > 0 ? savedData.allergies : [''],
           });
@@ -131,12 +155,29 @@ export default function PatientProfile() {
         
         if (response.success && response.data) {
           const profileData = response.data;
+          
+          // Parse emergency contact into separate fields
+          let emergencyContactName = '';
+          let emergencyContactRelationship = '';
+          let emergencyContactPhone = '';
+          
+          if (profileData.emergencyContact) {
+            const match = profileData.emergencyContact.match(/^(.+?)\s*\((.+?)\)\s*-\s*(.+)$/);
+            if (match) {
+              emergencyContactName = match[1].trim();
+              emergencyContactRelationship = match[2].trim();
+              emergencyContactPhone = match[3].trim();
+            }
+          }
+          
           setFormData({
             dateOfBirth: profileData.dateOfBirth || '',
             gender: profileData.gender || '',
             address: profileData.address || '',
             phoneNumber: profileData.phoneNumber || '',
-            emergencyContact: profileData.emergencyContact || '',
+            emergencyContactName,
+            emergencyContactRelationship,
+            emergencyContactPhone,
             medicalConditions: profileData.medicalConditions?.length > 0 ? profileData.medicalConditions : [''],
             allergies: profileData.allergies?.length > 0 ? profileData.allergies : [''],
           });
@@ -346,32 +387,6 @@ export default function PatientProfile() {
                 <span className="text-lg font-bold text-gray-900">Profile</span>
               </div>
             </div>
-            
-            <div className="flex items-center space-x-2">
-              {isEditing ? (
-                <>
-                  <button
-                    onClick={handleCancel}
-                    className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={handleSave}
-                    className="p-2 text-primary-600 hover:text-primary-700 transition-colors"
-                  >
-                    <Save className="w-4 h-4" />
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={() => setIsEditing(true)}
-                  className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <Edit className="w-4 h-4" />
-                </button>
-              )}
-            </div>
           </div>
         </div>
       </header>
@@ -398,7 +413,36 @@ export default function PatientProfile() {
 
         {/* Profile Form */}
         <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Personal Information</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Personal Information</h2>
+            
+            {isEditing ? (
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={handleCancel}
+                  className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center space-x-1"
+                >
+                  <X className="w-4 h-4" />
+                  <span>Cancel</span>
+                </button>
+                <button
+                  onClick={handleSave}
+                  className="px-3 py-1.5 text-sm text-white bg-primary-600 hover:bg-primary-700 rounded-md transition-colors flex items-center space-x-1"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Save</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsEditing(true)}
+                className="px-3 py-1.5 text-sm text-primary-600 hover:text-primary-700 border border-primary-600 rounded-md hover:bg-primary-50 transition-colors flex items-center space-x-1"
+              >
+                <Edit className="w-4 h-4" />
+                <span>Edit</span>
+              </button>
+            )}
+          </div>
           
           <div className="space-y-4">
             {/* Date of Birth */}
@@ -455,17 +499,51 @@ export default function PatientProfile() {
               />
             </div>
 
-            {/* Emergency Contact */}
-            <div>
-              <label className="label">Emergency Contact</label>
-              <input
-                type="text"
-                value={formData.emergencyContact}
-                onChange={(e) => handleInputChange('emergencyContact', e.target.value)}
-                disabled={!isEditing}
-                className="input disabled:bg-gray-50 disabled:text-gray-500"
-                placeholder="Name and phone number"
-              />
+            {/* Emergency Contact - Split into three fields */}
+            <div className="space-y-4 pt-2">
+              <h3 className="text-sm font-medium text-gray-700">Emergency Contact</h3>
+              
+              <div>
+                <label className="label">Name</label>
+                <input
+                  type="text"
+                  value={formData.emergencyContactName}
+                  onChange={(e) => handleInputChange('emergencyContactName', e.target.value)}
+                  disabled={!isEditing}
+                  className="input disabled:bg-gray-50 disabled:text-gray-500"
+                  placeholder="Contact name"
+                />
+              </div>
+
+              <div>
+                <label className="label">Relationship</label>
+                <select
+                  value={formData.emergencyContactRelationship}
+                  onChange={(e) => handleInputChange('emergencyContactRelationship', e.target.value)}
+                  disabled={!isEditing}
+                  className="input disabled:bg-gray-50 disabled:text-gray-500"
+                >
+                  <option value="">Select relationship</option>
+                  <option value="Spouse">Spouse</option>
+                  <option value="Parent">Parent</option>
+                  <option value="Child">Child</option>
+                  <option value="Sibling">Sibling</option>
+                  <option value="Friend">Friend</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="label">Phone Number</label>
+                <input
+                  type="tel"
+                  value={formData.emergencyContactPhone}
+                  onChange={(e) => handleInputChange('emergencyContactPhone', e.target.value)}
+                  disabled={!isEditing}
+                  className="input disabled:bg-gray-50 disabled:text-gray-500"
+                  placeholder="+1 (555) 123-4567"
+                />
+              </div>
             </div>
           </div>
 
