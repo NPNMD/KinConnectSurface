@@ -273,6 +273,10 @@ export default function Dashboard() {
       
       if (response.success) {
         alert('Event added to calendar successfully!');
+        
+        // Remove the event from actionable events list
+        setActionableEvents(prevEvents => prevEvents.filter(e => e.id !== event.id));
+        
         await fetchUpcomingAppointments(); // Refresh appointments
       } else {
         throw new Error(response.error || 'Failed to add event to calendar');

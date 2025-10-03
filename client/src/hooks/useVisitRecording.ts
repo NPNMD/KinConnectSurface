@@ -20,11 +20,21 @@ export interface RecordingState {
 
 export interface UseVisitRecordingOptions {
   patientId: string;
+  providerId?: string;
+  providerName?: string;
+  providerSpecialty?: string;
   onComplete?: (visitId: string, results: any) => void;
   onError?: (error: string) => void;
 }
 
-export const useVisitRecording = ({ patientId, onComplete, onError }: UseVisitRecordingOptions) => {
+export const useVisitRecording = ({
+  patientId,
+  providerId,
+  providerName,
+  providerSpecialty,
+  onComplete,
+  onError
+}: UseVisitRecordingOptions) => {
   const [state, setState] = useState<RecordingState>({
     status: 'idle',
     duration: 0
@@ -189,6 +199,9 @@ export const useVisitRecording = ({ patientId, onComplete, onError }: UseVisitRe
           uploadedAt: serverTimestamp(),
           mimeType: 'audio/webm'
         },
+        ...(providerId && { providerId }),
+        ...(providerName && { providerName }),
+        ...(providerSpecialty && { providerSpecialty }),
         processing: {},
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()

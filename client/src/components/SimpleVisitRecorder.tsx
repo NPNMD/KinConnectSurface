@@ -1,16 +1,19 @@
-import React from 'react';
-import { 
-  Mic, 
-  MicOff, 
-  Square, 
-  Upload, 
-  CheckCircle, 
-  AlertCircle, 
+import React, { useState, useEffect } from 'react';
+import {
+  Mic,
+  MicOff,
+  Square,
+  Upload,
+  CheckCircle,
+  AlertCircle,
   Loader2,
   Clock,
-  FileAudio
+  FileAudio,
+  User
 } from 'lucide-react';
 import { useVisitRecording } from '@/hooks/useVisitRecording';
+import { apiClient, API_ENDPOINTS } from '@/lib/api';
+import type { HealthcareProvider } from '@shared/types';
 
 interface SimpleVisitRecorderProps {
   patientId: string;
@@ -19,14 +22,60 @@ interface SimpleVisitRecorderProps {
   className?: string;
 }
 
-export default function SimpleVisitRecorder({ 
-  patientId, 
-  onComplete, 
+export default function SimpleVisitRecorder({
+  patientId,
+  onComplete,
   onError,
   className = ''
 }: SimpleVisitRecorderProps) {
+  const [providers, setProviders] = useState<HealthcareProvider[]>([]);
+  const [loadingProviders, setLoadingProviders] = useState(false);
+  const [selectedProviderId, setSelectedProviderId] = useState<string>('');
+  const [selectedProviderName, setSelectedProviderName] = useState<string>('');
+  const [selectedProviderSpecialty, setSelectedProviderSpecialty] = useState<string>('');
+
+  // Load healthcare providers
+  useEffect(() => {
+    const loadProviders = async () => {
+      try {
+        setLoadingProviders(true);
+        const response = await apiClient.get<{ success: boolean; data: HealthcareProvider[] }>(
+          API_ENDPOINTS.HEALTHCARE_PROVIDERS(patientId)
+        );
+        
+        if (response.success && response.data) {
+          setProviders(response.data);
+        }
+      } catch (error) {
+        console.error('Error loading providers:', error);
+      } finally {
+        setLoadingProviders(false);
+      }
+    };
+
+    loadProviders();
+  }, [patientId]);
+
+  // Handle provider selection
+  const handleProviderSelect = (providerId: string) => {
+    setSelectedProviderId(providerId);
+    if (providerId) {
+      const provider = providers.find(p => p.id === providerId);
+      if (provider) {
+        setSelectedProviderName(provider.name);
+        setSelectedProviderSpecialty(provider.specialty || '');
+      }
+    } else {
+      setSelectedProviderName('');
+      setSelectedProviderSpecialty('');
+    }
+  };
+
   const { state, startRecording, stopRecording, reset, requestMicrophonePermission, isSupported } = useVisitRecording({
     patientId,
+    providerId: selectedProviderId || undefined,
+    providerName: selectedProviderName || undefined,
+    providerSpecialty: selectedProviderSpecialty || undefined,
     onComplete,
     onError
   });
@@ -140,6 +189,40 @@ export default function SimpleVisitRecorder({
 
   return (
     <div className={`space-y-4 ${className}`}>
+      {/* Provider Selection */}
+      <div className="bg-white p-4 rounded-lg border border-gray-200">
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          <div className="flex items-center space-x-2">
+            <User className="w-4 h-4" />
+            <span>Healthcare Provider (Optional)</span>
+          </div>
+        </label>
+        {loadingProviders ? (
+          <div className="flex items-center space-x-2 text-gray-500">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span className="text-sm">Loading providers...</span>
+          </div>
+        ) : providers.length > 0 ? (
+          <select
+            value={selectedProviderId}
+            onChange={(e) => handleProviderSelect(e.target.value)}
+            disabled={state.status === 'recording' || isProcessing}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+          >
+            <option value="">Select a provider or leave blank for new provider</option>
+            {providers.map(provider => (
+              <option key={provider.id} value={provider.id}>
+                {provider.name} - {provider.specialty}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <div className="text-sm text-gray-500">
+            No providers found. You can add providers in your profile settings.
+          </div>
+        )}
+      </div>
+
       {/* Main Recording Interface */}
       <div className={`p-6 rounded-lg border-2 transition-all duration-200 ${statusDisplay.bgColor} border-gray-200`}>
         <div className="flex items-center justify-between">

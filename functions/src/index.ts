@@ -6075,6 +6075,113 @@ app.put('/medications/:medicationId', authenticate, async (req, res) => {
 			});
 		}
 		
+		// 🔥 CRITICAL FIX: Auto-create schedule if reminders are being enabled
+		// Check if this update is enabling reminders on a medication that didn't have them before
+		const isEnablingReminders =
+			updateData.hasReminders === true &&
+			medicationData?.hasReminders !== true &&
+			!updateData.isPRN &&
+			updateData.frequency;
+		
+		console.log('🔍 Checking if schedule auto-creation needed:', {
+			isEnablingReminders,
+			updateHasReminders: updateData.hasReminders,
+			previousHasReminders: medicationData?.hasReminders,
+			isPRN: updateData.isPRN,
+			hasFrequency: !!updateData.frequency
+		});
+		
+		if (isEnablingReminders) {
+			console.log('📅 Auto-creating schedule for medication with newly enabled reminders:', medicationId);
+			
+			try {
+				// Check if schedule already exists
+				const existingScheduleQuery = await firestore.collection('medication_schedules')
+					.where('medicationId', '==', medicationId)
+					.where('isActive', '==', true)
+					.limit(1)
+					.get();
+				
+				if (existingScheduleQuery.empty) {
+					// Generate default times based on frequency
+					let defaultTimes = ['07:00'];
+					const frequency = (updateData.frequency || medicationData?.frequency || '').toLowerCase().trim();
+					
+					console.log('🔍 Backend PUT: Parsing medication frequency:', frequency);
+					
+					// Parse frequency to determine default times
+					if (frequency.includes('once daily') || frequency.includes('once a day') || frequency === 'daily' || frequency.includes('once')) {
+						defaultTimes = ['07:00'];
+					} else if (frequency.includes('twice daily') || frequency.includes('twice a day') || frequency.includes('bid') || frequency.includes('twice')) {
+						defaultTimes = ['07:00', '19:00'];
+					} else if (frequency.includes('three times daily') || frequency.includes('three times a day') || frequency.includes('tid') || frequency.includes('three')) {
+						defaultTimes = ['07:00', '13:00', '19:00'];
+					} else if (frequency.includes('four times daily') || frequency.includes('four times a day') || frequency.includes('qid') || frequency.includes('four')) {
+						defaultTimes = ['07:00', '12:00', '17:00', '22:00'];
+					}
+					
+					// Use provided reminderTimes or defaults
+					const scheduleTimes = updateData.reminderTimes && updateData.reminderTimes.length > 0
+						? updateData.reminderTimes
+						: defaultTimes;
+					
+					// Map frequency to schedule frequency format
+					let scheduleFrequency = 'daily';
+					if (frequency.includes('twice daily') || frequency.includes('twice a day') || frequency.includes('bid') || frequency.includes('twice')) {
+						scheduleFrequency = 'twice_daily';
+					} else if (frequency.includes('three times daily') || frequency.includes('three times a day') || frequency.includes('tid') || frequency.includes('three')) {
+						scheduleFrequency = 'three_times_daily';
+					} else if (frequency.includes('four times daily') || frequency.includes('four times a day') || frequency.includes('qid') || frequency.includes('four')) {
+						scheduleFrequency = 'four_times_daily';
+					}
+					
+					const scheduleData = {
+						medicationId: medicationId,
+						medicationName: updatedMedication?.name || medicationData?.name || 'Unknown Medication',
+						medicationDosage: updatedMedication?.dosage || medicationData?.dosage || '',
+						medicationForm: updatedMedication?.dosageForm || medicationData?.dosageForm || '',
+						medicationRoute: updatedMedication?.route || medicationData?.route || 'oral',
+						medicationInstructions: updatedMedication?.instructions || medicationData?.instructions || '',
+						patientId: medicationData?.patientId || userId,
+						frequency: scheduleFrequency,
+						times: scheduleTimes,
+						daysOfWeek: [],
+						dayOfMonth: 1,
+						startDate: admin.firestore.Timestamp.fromDate(new Date()),
+						endDate: null,
+						isIndefinite: true,
+						dosageAmount: updatedMedication?.dosage || medicationData?.dosage || '1 tablet',
+						instructions: updatedMedication?.instructions || medicationData?.instructions || '',
+						generateCalendarEvents: true,
+						reminderMinutesBefore: updateData.reminderMinutesBefore || [15, 5],
+						isActive: true,
+						isPaused: false,
+						pausedUntil: null,
+						createdAt: admin.firestore.Timestamp.now(),
+						updatedAt: admin.firestore.Timestamp.now(),
+						autoCreated: true,
+						autoCreatedReason: 'reminders_enabled_via_update'
+					};
+					
+					const scheduleRef = await firestore.collection('medication_schedules').add(scheduleData);
+					console.log('✅ Auto-created medication schedule via PUT:', scheduleRef.id);
+					
+					// Generate calendar events for the new schedule
+					try {
+						await generateCalendarEventsForSchedule(scheduleRef.id, scheduleData);
+						console.log('✅ Auto-generated calendar events for schedule:', scheduleRef.id);
+					} catch (eventError) {
+						console.error('❌ Error auto-generating calendar events:', eventError);
+					}
+				} else {
+					console.log('ℹ️ Schedule already exists for medication, skipping auto-creation');
+				}
+			} catch (scheduleError) {
+				console.error('❌ Error auto-creating schedule during medication update:', scheduleError);
+				// Don't fail the medication update if schedule creation fails
+			}
+		}
+		
 		// Get updated medication
 		const updatedDoc = await medicationDoc.ref.get();
 		const updatedData = updatedDoc.data();
