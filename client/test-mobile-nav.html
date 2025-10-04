@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mobile Navigation Test</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Mobile navigation container with hardware acceleration */
+    .mobile-nav-container {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: white;
+      border-top: 1px solid #e5e7eb;
+      z-index: 9999;
+      padding: 8px 16px;
+      padding-bottom: max(env(safe-area-inset-bottom), 20px);
+      box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+      /* Prevent scrolling and ensure it stays in place */
+      transform: translateZ(0);
+      -webkit-transform: translateZ(0);
+      will-change: transform;
+      backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
+    }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <!-- Header -->
+  <header class="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
+    <div class="px-4 py-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <svg class="w-6 h-6 text-blue-600" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+          </svg>
+          <span class="text-lg font-bold text-gray-900">KinConnect</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="px-4 py-4 pb-24">
+    <h1 class="text-2xl font-bold text-gray-900 mb-4">Mobile Navigation Test</h1>
+    
+    <div class="space-y-4">
+      <div class="bg-white rounded-lg p-4 border border-gray-200">
+        <h2 class="font-semibold text-gray-900 mb-2">Test Instructions:</h2>
+        <ul class="list-disc list-inside text-sm text-gray-600 space-y-1">
+          <li>Scroll down to see if navigation stays fixed at bottom</li>
+          <li>Check that all 5 tabs are visible and color-coded</li>
+          <li>Verify navigation doesn't overlap content</li>
+          <li>Test on mobile viewport (375x667)</li>
+        </ul>
+      </div>
+
+      <!-- Filler content to enable scrolling -->
+      <div class="space-y-4">
+        <div class="bg-white rounded-lg p-4 border border-gray-200">
+          <h3 class="font-medium text-gray-900 mb-2">Section 1</h3>
+          <p class="text-gray-600 text-sm">This is test content to demonstrate scrolling behavior.</p>
+        </div>
+        
+        <div class="bg-white rounded-lg p-4 border border-gray-200">
+          <h3 class="font-medium text-gray-900 mb-2">Section 2</h3>
+          <p class="text-gray-600 text-sm">The navigation should remain fixed at the bottom while you scroll.</p>
+        </div>
+        
+        <div class="bg-white rounded-lg p-4 border border-gray-200">
+          <h3 class="font-medium text-gray-900 mb-2">Section 3</h3>
+          <p class="text-gray-600 text-sm">Each tab has a distinct color: Rose (Home), Blue (Medications), Purple (Calendar), Green (Profile), Amber (Family).</p>
+        </div>
+        
+        <div class="bg-white rounded-lg p-4 border border-gray-200">
+          <h3 class="font-medium text-gray-900 mb-2">Section 4</h3>
+          <p class="text-gray-600 text-sm">More content to test scrolling...</p>
+        </div>
+        
+        <div class="bg-white rounded-lg p-4 border border-gray-200">
+          <h3 class="font-medium text-gray-900 mb-2">Section 5</h3>
+          <p class="text-gray-600 text-sm">Keep scrolling to test the fixed navigation...</p>
+        </div>
+        
+        <div class="bg-white rounded-lg p-4 border border-gray-200">
+          <h3 class="font-medium text-gray-900 mb-2">Section 6</h3>
+          <p class="text-gray-600 text-sm">The navigation uses hardware acceleration for smooth performance.</p>
+        </div>
+        
+        <div class="bg-white rounded-lg p-4 border border-gray-200">
+          <h3 class="font-medium text-gray-900 mb-2">Section 7</h3>
+          <p class="text-gray-600 text-sm">Final section - scroll back up to verify navigation stays fixed.</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Mobile Bottom Navigation - Color Coded -->
+  <nav class="mobile-nav-container">
+    <div class="flex items-center justify-between gap-1">
+      <!-- Home - Rose -->
+      <button class="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-rose-600 hover:text-rose-700 transition-colors">
+        <div class="bg-rose-100 p-1.5 rounded-lg">
+          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+          </svg>
+        </div>
+        <span class="text-xs font-medium">Home</span>
+      </button>
+      
+      <!-- Medications - Blue -->
+      <button class="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-blue-600 hover:text-blue-700 transition-colors">
+        <div class="bg-blue-100 p-1.5 rounded-lg">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
+          </svg>
+        </div>
+        <span class="text-xs">Medications</span>
+      </button>
+      
+      <!-- Calendar - Purple -->
+      <button class="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-purple-600 hover:text-purple-700 transition-colors">
+        <div class="bg-purple-100 p-1.5 rounded-lg">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+          </svg>
+        </div>
+        <span class="text-xs">Calendar</span>
+      </button>
+      
+      <!-- Profile - Green -->
+      <button class="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-green-600 hover:text-green-700 transition-colors">
+        <div class="bg-green-100 p-1.5 rounded-lg">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+          </svg>
+        </div>
+        <span class="text-xs">Profile</span>
+      </button>
+      
+      <!-- Family - Amber -->
+      <button class="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-amber-600 hover:text-amber-700 transition-colors">
+        <div class="bg-amber-100 p-1.5 rounded-lg">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+          </svg>
+        </div>
+        <span class="text-xs">Family</span>
+      </button>
+    </div>
+  </nav>
+</body>
+</html>

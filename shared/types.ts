@@ -45,6 +45,14 @@ export interface Patient {
   emergencyContact?: string;
   medicalConditions?: string[];
   allergies?: string[];
+  
+  // Insurance Information
+  primaryInsuranceId?: string; // Reference to primary insurance
+  hasInsurance?: boolean; // Quick flag
+  
+  // Preferred Pharmacy
+  preferredPharmacyId?: string; // Reference to MedicalFacility with facilityType: 'pharmacy'
+  
   createdAt: Date;
   updatedAt: Date;
 }
@@ -58,6 +66,92 @@ export interface NewPatient {
   emergencyContact?: string;
   medicalConditions?: string[];
   allergies?: string[];
+}
+
+// Insurance Information Types
+export interface InsuranceInformation {
+  id: string;
+  patientId: string;
+  
+  // Insurance Details
+  insuranceType: 'primary' | 'secondary' | 'tertiary';
+  providerName: string;
+  policyNumber: string;
+  groupNumber?: string;
+  subscriberName?: string;
+  subscriberRelationship?: 'self' | 'spouse' | 'parent' | 'child' | 'other';
+  subscriberId?: string;
+  
+  // Coverage Dates
+  effectiveDate?: Date;
+  expirationDate?: Date;
+  
+  // Card Images
+  cardFrontUrl?: string;
+  cardBackUrl?: string;
+  cardFrontStoragePath?: string;
+  cardBackStoragePath?: string;
+  
+  // Additional Information
+  customerServicePhone?: string;
+  claimsAddress?: string;
+  rxBin?: string; // Prescription Bin Number
+  rxPcn?: string; // Prescription Processor Control Number
+  rxGroup?: string; // Prescription Group Number
+  
+  // Status
+  isActive: boolean;
+  isPrimary: boolean; // Quick flag for primary insurance
+  
+  // Metadata
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy: string;
+  updatedBy?: string;
+}
+
+export interface NewInsuranceInformation {
+  patientId: string;
+  insuranceType: 'primary' | 'secondary' | 'tertiary';
+  providerName: string;
+  policyNumber: string;
+  groupNumber?: string;
+  subscriberName?: string;
+  subscriberRelationship?: 'self' | 'spouse' | 'parent' | 'child' | 'other';
+  subscriberId?: string;
+  effectiveDate?: Date;
+  expirationDate?: Date;
+  customerServicePhone?: string;
+  claimsAddress?: string;
+  rxBin?: string;
+  rxPcn?: string;
+  rxGroup?: string;
+  isActive: boolean;
+  isPrimary: boolean;
+  notes?: string;
+  createdBy: string;
+}
+
+// Insurance Card Upload Types
+export interface InsuranceCardUploadState {
+  status: 'idle' | 'uploading' | 'processing' | 'completed' | 'error';
+  progress?: number;
+  error?: string;
+  frontImageUrl?: string;
+  backImageUrl?: string;
+  frontStoragePath?: string;
+  backStoragePath?: string;
+}
+
+export interface InsuranceCardUploadOptions {
+  patientId: string;
+  insuranceId: string;
+  side: 'front' | 'back';
+  file: File;
+  onProgress?: (progress: number) => void;
+  onComplete?: (url: string, storagePath: string) => void;
+  onError?: (error: string) => void;
 }
 
 // Family Group types

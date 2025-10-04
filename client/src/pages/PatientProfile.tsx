@@ -13,27 +13,43 @@ import {
   Users,
   Calendar,
   Pill,
-  Settings
+  Settings,
+  CreditCard,
+  Building2,
+  MapPin,
+  Phone
 } from 'lucide-react';
 import {
   HealthcareProvider,
   NewHealthcareProvider,
   MedicalFacility,
-  NewMedicalFacility
+  NewMedicalFacility,
+  InsuranceInformation,
+  NewInsuranceInformation,
+  GooglePlaceResult
 } from '@shared/types';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
+import { googlePlacesApi } from '@/lib/googlePlacesApi';
 import AddressAutocomplete from '@/components/AddressAutocomplete';
 import MedicalConditionSelect from '@/components/MedicalConditionSelect';
 import AllergySelect from '@/components/AllergySelect';
 import HealthcareProvidersManager from '@/components/HealthcareProvidersManager';
-import MedicationHistory from '@/components/MedicationHistory';
+import InsuranceCardViewer from '@/components/insurance/InsuranceCardViewer';
+import InsuranceFormModal from '@/components/insurance/InsuranceFormModal';
+import PharmacyAutocomplete from '@/components/PharmacyAutocomplete';
 
 export default function PatientProfile() {
   const { user } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [healthcareProviders, setHealthcareProviders] = useState<HealthcareProvider[]>([]);
   const [medicalFacilities, setMedicalFacilities] = useState<MedicalFacility[]>([]);
+  const [insuranceCards, setInsuranceCards] = useState<InsuranceInformation[]>([]);
   const [isLoadingProviders, setIsLoadingProviders] = useState(false);
+  const [isLoadingInsurance, setIsLoadingInsurance] = useState(false);
+  const [isAddingInsurance, setIsAddingInsurance] = useState(false);
+  const [editingInsurance, setEditingInsurance] = useState<InsuranceInformation | null>(null);
+  const [preferredPharmacy, setPreferredPharmacy] = useState<MedicalFacility | null>(null);
+  const [isChangingPharmacy, setIsChangingPharmacy] = useState(false);
   const [formData, setFormData] = useState({
     dateOfBirth: '',
     gender: '',
@@ -219,10 +235,51 @@ export default function PatientProfile() {
       }
     };
 
+    const loadInsuranceCards = async () => {
+      try {
+        setIsLoadingInsurance(true);
+        const response = await apiClient.get<{ success: boolean; data: InsuranceInformation[] }>(
+          API_ENDPOINTS.INSURANCE_LIST(user?.id || '')
+        );
+        
+        if (response.success && response.data) {
+          setInsuranceCards(response.data);
+        }
+      } catch (error) {
+        console.error('Error loading insurance cards:', error);
+      } finally {
+        setIsLoadingInsurance(false);
+      }
+    };
+
+    const loadPreferredPharmacy = async () => {
+      try {
+        // Get patient profile to find preferredPharmacyId
+        const profileResponse = await apiClient.get<{ success: boolean; data: any }>(
+          API_ENDPOINTS.PATIENT_PROFILE
+        );
+        
+        if (profileResponse.success && profileResponse.data?.preferredPharmacyId) {
+          // Load the pharmacy facility
+          const pharmacyResponse = await apiClient.get<{ success: boolean; data: MedicalFacility }>(
+            API_ENDPOINTS.MEDICAL_FACILITY_BY_ID(profileResponse.data.preferredPharmacyId)
+          );
+          
+          if (pharmacyResponse.success && pharmacyResponse.data) {
+            setPreferredPharmacy(pharmacyResponse.data);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading preferred pharmacy:', error);
+      }
+    };
+
     if (user?.id) {
       loadProfileData();
       loadHealthcareProviders();
       loadMedicalFacilities();
+      loadInsuranceCards();
+      loadPreferredPharmacy();
     }
   }, [user?.id]);
 
@@ -366,6 +423,146 @@ export default function PatientProfile() {
     } catch (error) {
       console.error('Error deleting medical facility:', error);
       throw error;
+    }
+  };
+
+  // Insurance management functions
+  const handleSaveInsurance = async (insuranceData: NewInsuranceInformation | Partial<InsuranceInformation>) => {
+    try {
+      setIsLoadingInsurance(true);
+      
+      if (editingInsurance) {
+        // Update existing insurance
+        const response = await apiClient.put<{ success: boolean; data: InsuranceInformation }>(
+          API_ENDPOINTS.INSURANCE_UPDATE(editingInsurance.id),
+          insuranceData
+        );
+        
+        if (response.success && response.data) {
+          setInsuranceCards(prev =>
+            prev.map(insurance =>
+              insurance.id === editingInsurance.id ? response.data : insurance
+            )
+          );
+          setEditingInsurance(null);
+          setIsAddingInsurance(false);
+        }
+      } else {
+        // Create new insurance
+        const response = await apiClient.post<{ success: boolean; data: InsuranceInformation }>(
+          API_ENDPOINTS.INSURANCE_CREATE,
+          insuranceData
+        );
+        
+        if (response.success && response.data) {
+          setInsuranceCards(prev => [...prev, response.data]);
+          setIsAddingInsurance(false);
+        }
+      }
+    } catch (error) {
+      console.error('Error saving insurance:', error);
+      throw error;
+    } finally {
+      setIsLoadingInsurance(false);
+    }
+  };
+
+  const handleDeleteInsurance = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this insurance information?')) {
+      return;
+    }
+    
+    try {
+      setIsLoadingInsurance(true);
+      const response = await apiClient.delete<{ success: boolean }>(
+        API_ENDPOINTS.INSURANCE_DELETE(id)
+      );
+      
+      if (response.success) {
+        setInsuranceCards(prev => prev.filter(insurance => insurance.id !== id));
+      }
+    } catch (error) {
+      console.error('Error deleting insurance:', error);
+      throw error;
+    } finally {
+      setIsLoadingInsurance(false);
+    }
+  };
+
+  const handleEditInsurance = (insurance: InsuranceInformation) => {
+    setEditingInsurance(insurance);
+    setIsAddingInsurance(true);
+  };
+
+  // Pharmacy selection handler
+  const handlePharmacySelect = async (place: GooglePlaceResult) => {
+    try {
+      const addressComponents = googlePlacesApi.extractAddressComponents(place.address_components);
+      
+      // Create or update pharmacy as MedicalFacility
+      const pharmacyData: NewMedicalFacility = {
+        patientId: user?.id || '',
+        name: place.name,
+        facilityType: 'pharmacy',
+        phoneNumber: place.formatted_phone_number || undefined,
+        website: place.website || undefined,
+        address: place.formatted_address,
+        city: addressComponents.city || undefined,
+        state: addressComponents.state || undefined,
+        zipCode: addressComponents.zipCode || undefined,
+        country: addressComponents.country || undefined,
+        placeId: place.place_id,
+        googleRating: place.rating || undefined,
+        googleReviews: place.user_ratings_total || undefined,
+        businessStatus: place.business_status || undefined,
+        isPreferred: true,
+        isActive: true
+      };
+
+      // Check if pharmacy already exists
+      const existingPharmacy = medicalFacilities.find(
+        f => f.placeId === place.place_id && f.facilityType === 'pharmacy'
+      );
+
+      let pharmacyId: string;
+
+      if (existingPharmacy) {
+        // Update existing pharmacy to mark as preferred
+        await handleUpdateFacility(existingPharmacy.id, { isPreferred: true });
+        pharmacyId = existingPharmacy.id;
+      } else {
+        // Create new pharmacy facility
+        const response = await apiClient.post<{ success: boolean; data: MedicalFacility }>(
+          API_ENDPOINTS.MEDICAL_FACILITY_CREATE,
+          pharmacyData
+        );
+        
+        if (response.success && response.data) {
+          setMedicalFacilities(prev => [...prev, response.data]);
+          pharmacyId = response.data.id;
+        } else {
+          throw new Error('Failed to create pharmacy');
+        }
+      }
+
+      // Update patient profile with preferredPharmacyId
+      await apiClient.put(API_ENDPOINTS.PATIENT_PROFILE, {
+        preferredPharmacyId: pharmacyId
+      });
+
+      // Reload preferred pharmacy
+      const pharmacyResponse = await apiClient.get<{ success: boolean; data: MedicalFacility }>(
+        API_ENDPOINTS.MEDICAL_FACILITY_BY_ID(pharmacyId)
+      );
+      
+      if (pharmacyResponse.success && pharmacyResponse.data) {
+        setPreferredPharmacy(pharmacyResponse.data);
+      }
+
+      setIsChangingPharmacy(false);
+    } catch (error) {
+      console.error('Error selecting pharmacy:', error);
+      alert('Failed to set preferred pharmacy. Please try again.');
     }
   };
 
@@ -636,53 +833,169 @@ export default function PatientProfile() {
           />
         </div>
 
-        {/* Medication History Section */}
+        {/* Insurance Information Section */}
         <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
-          <MedicationHistory patientId={user?.id} />
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Insurance Information</h2>
+            <button
+              onClick={() => setIsAddingInsurance(true)}
+              className="btn-primary flex items-center space-x-2"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Insurance</span>
+            </button>
+          </div>
+
+          {isLoadingInsurance ? (
+            <div className="text-center py-8">
+              <div className="w-8 h-8 border-4 border-primary-600 border-t-transparent rounded-full animate-spin mx-auto" />
+              <p className="text-gray-500 mt-2">Loading insurance information...</p>
+            </div>
+          ) : insuranceCards.length > 0 ? (
+            <div className="space-y-4">
+              {insuranceCards.map((insurance) => (
+                <InsuranceCardViewer
+                  key={insurance.id}
+                  insurance={insurance}
+                  onEdit={() => handleEditInsurance(insurance)}
+                  onDelete={() => handleDeleteInsurance(insurance.id)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <CreditCard className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500">No insurance information added</p>
+              <p className="text-sm text-gray-400 mt-1">Add your insurance cards to keep them handy</p>
+            </div>
+          )}
+        </div>
+
+        {/* Insurance Form Modal */}
+        {isAddingInsurance && (
+          <InsuranceFormModal
+            patientId={user?.id || ''}
+            insurance={editingInsurance}
+            onSave={handleSaveInsurance}
+            onClose={() => {
+              setIsAddingInsurance(false);
+              setEditingInsurance(null);
+            }}
+          />
+        )}
+
+        {/* Preferred Pharmacy Section */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Preferred Pharmacy</h2>
+          
+          {preferredPharmacy && !isChangingPharmacy ? (
+            <div className="bg-gray-50 rounded-lg p-4">
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center space-x-2 mb-2">
+                    <Building2 className="w-5 h-5 text-primary-600" />
+                    <h3 className="font-medium text-gray-900">{preferredPharmacy.name}</h3>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                      Preferred
+                    </span>
+                  </div>
+                  
+                  <div className="space-y-1 text-sm text-gray-600">
+                    <div className="flex items-start space-x-2">
+                      <MapPin className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      <span>{preferredPharmacy.address}</span>
+                    </div>
+                    
+                    {preferredPharmacy.phoneNumber && (
+                      <div className="flex items-center space-x-2">
+                        <Phone className="w-4 h-4 flex-shrink-0" />
+                        <span>{preferredPharmacy.phoneNumber}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <button
+                  onClick={() => setIsChangingPharmacy(true)}
+                  className="text-primary-600 hover:text-primary-700 text-sm font-medium"
+                >
+                  Change
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <PharmacyAutocomplete
+                onSelect={handlePharmacySelect}
+                placeholder="Search for your preferred pharmacy..."
+              />
+              <p className="text-sm text-gray-500 mt-2">
+                Select a pharmacy for easier prescription management
+              </p>
+              {preferredPharmacy && isChangingPharmacy && (
+                <button
+                  onClick={() => setIsChangingPharmacy(false)}
+                  className="mt-2 text-sm text-gray-600 hover:text-gray-800"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
       </main>
 
       {/* Mobile Bottom Navigation */}
       <nav className="mobile-nav-container">
-        <div className="flex items-center justify-around">
+        <div className="flex items-center justify-between">
           <Link
             to="/dashboard"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-rose-600 hover:text-rose-700 transition-colors"
           >
-            <Heart className="w-5 h-5" />
+            <div className="bg-rose-100 p-1.5 rounded-lg">
+              <Heart className="w-5 h-5" />
+            </div>
             <span className="text-xs">Home</span>
           </Link>
           
           <Link
             to="/medications"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-blue-600 hover:text-blue-700 transition-colors"
           >
-            <Pill className="w-5 h-5" />
+            <div className="bg-blue-100 p-1.5 rounded-lg">
+              <Pill className="w-5 h-5" />
+            </div>
             <span className="text-xs">Medications</span>
           </Link>
           
           <Link
             to="/calendar"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-purple-600 hover:text-purple-700 transition-colors"
           >
-            <Calendar className="w-5 h-5" />
+            <div className="bg-purple-100 p-1.5 rounded-lg">
+              <Calendar className="w-5 h-5" />
+            </div>
             <span className="text-xs">Calendar</span>
           </Link>
           
           <Link
             to="/profile"
-            className="flex flex-col items-center space-y-1 p-2 text-primary-600"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-green-600 hover:text-green-700 transition-colors"
           >
-            <User className="w-5 h-5" />
+            <div className="bg-green-100 p-1.5 rounded-lg">
+              <User className="w-5 h-5" />
+            </div>
             <span className="text-xs font-medium">Profile</span>
           </Link>
           
           <Link
             to="/family/invite"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-amber-600 hover:text-amber-700 transition-colors"
           >
-            <Users className="w-5 h-5" />
+            <div className="bg-amber-100 p-1.5 rounded-lg">
+              <Users className="w-5 h-5" />
+            </div>
             <span className="text-xs">Family</span>
           </Link>
         </div>

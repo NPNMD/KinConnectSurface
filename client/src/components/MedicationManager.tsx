@@ -492,7 +492,7 @@ export default function MedicationManager({
   return (
     <div className="space-y-6">
       {/* Header with summary */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-center space-x-4">
           <h3 className="text-lg font-semibold text-gray-900">Medications</h3>
           <div className="flex items-center space-x-2 text-sm text-gray-600">
@@ -509,7 +509,7 @@ export default function MedicationManager({
         {!isAddingMedication && hasPermission('canEdit') && (
           <button
             onClick={() => setIsAddingMedication(true)}
-            className="btn-primary flex items-center space-x-2"
+            className="btn-primary flex items-center justify-center space-x-2 w-full sm:w-auto"
             disabled={isLoading}
           >
             <Plus className="w-4 h-4" />
@@ -761,16 +761,16 @@ export default function MedicationManager({
             {medicationsWithStatus.map((medication) => (
               <div
                 key={medication.id}
-                className={`bg-white rounded-lg border p-4 ${
-                  medication.scheduleStatus === 'unscheduled' 
-                    ? 'border-orange-200 bg-orange-50' 
+                className={`bg-white rounded-lg border p-4 max-w-full ${
+                  medication.scheduleStatus === 'unscheduled'
+                    ? 'border-orange-200 bg-orange-50'
                     : medication.scheduleStatus === 'paused'
                     ? 'border-yellow-200 bg-yellow-50'
                     : 'border-gray-200'
                 }`}
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start space-x-3 flex-1">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start space-x-3 flex-1 min-w-0">
                     <div className={`p-2 rounded-full ${
                       medication.scheduleStatus === 'scheduled' ? 'bg-green-100' :
                       medication.scheduleStatus === 'paused' ? 'bg-yellow-100' :
@@ -875,7 +875,7 @@ export default function MedicationManager({
                   </div>
                   
                   {/* Action Buttons */}
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-2 flex-shrink-0">
                     {(() => {
                       const canEdit = hasPermission('canEdit');
                       
@@ -909,7 +909,7 @@ export default function MedicationManager({
                             <button
                               onClick={() => handleCreateSchedule(medication)}
                               disabled={creatingSchedule === medication.id}
-                              className="flex items-center space-x-1 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
+                              className="flex items-center space-x-1 px-2 sm:px-3 py-1.5 bg-blue-600 text-white text-xs rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 whitespace-nowrap"
                               title="Create medication schedule"
                             >
                               {creatingSchedule === medication.id ? (
@@ -917,7 +917,8 @@ export default function MedicationManager({
                               ) : (
                                 <Plus className="w-3 h-3" />
                               )}
-                              <span>Schedule</span>
+                              <span className="hidden sm:inline">Schedule</span>
+                              <span className="sm:hidden">+</span>
                             </button>
                           )}
 

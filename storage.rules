@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// Firebase Storage Security Rules for Visit Recordings
+// Firebase Storage Security Rules
 service firebase.storage {
   match /b/{bucket}/o {
     
@@ -10,13 +10,30 @@ service firebase.storage {
       allow read, write: if request.auth != null && request.auth.uid == userId;
       
       // Allow read access for family members with proper access
-      allow read: if request.auth != null && 
+      allow read: if request.auth != null &&
         exists(/databases/(default)/documents/family-access/$(request.auth.uid + '_' + userId));
       
       // Validate file uploads
-      allow write: if request.auth != null && 
+      allow write: if request.auth != null &&
         request.auth.uid == userId &&
         validateVisitFile(file, resource);
+    }
+    
+    // Insurance card images
+    match /patient-insurance-cards/{patientId}/{insuranceId}/{imageFile} {
+      // Allow read if user owns the patient record or has family access
+      allow read: if request.auth != null && (
+        request.auth.uid == patientId ||
+        exists(/databases/(default)/documents/family_calendar_access/$(request.auth.uid + '_' + patientId))
+      );
+      
+      // Allow write only by the patient
+      allow write: if request.auth != null &&
+        request.auth.uid == patientId &&
+        // Validate file type (images only)
+        request.resource.contentType.matches('image/.*') &&
+        // Limit file size to 10MB
+        request.resource.size < 10 * 1024 * 1024;
     }
     
     // Helper function to validate visit file uploads

@@ -70,6 +70,30 @@ service cloud.firestore {
         get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canView == true
       );
     }
+    // Insurance Information - patients can manage their own
+    match /insurance_information/{insuranceId} {
+      allow read: if request.auth != null && (
+        // Patient owns the insurance record
+        resource.data.patientId == request.auth.uid ||
+        // Family member has access to the patient
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canViewMedicalDetails == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active'
+      );
+      
+      allow create: if request.auth != null && (
+        request.resource.data.patientId == request.auth.uid &&
+        request.resource.data.createdBy == request.auth.uid
+      );
+      
+      allow update: if request.auth != null && (
+        resource.data.patientId == request.auth.uid &&
+        request.resource.data.updatedBy == request.auth.uid
+      );
+      
+      allow delete: if request.auth != null && resource.data.patientId == request.auth.uid;
+    }
+    
     
     // Medical Events - complex access control for calendar events
     match /medical_events/{eventId} {

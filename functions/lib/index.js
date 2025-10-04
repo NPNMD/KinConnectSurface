@@ -4484,6 +4484,11 @@ app.put('/healthcare/providers/:providerId', authenticate, async (req, res) => {
             nextAppointment: updatedData?.nextAppointment?.toDate()
         };
         console.log('📤 Sending response for provider:', providerId);
+        console.log('🔍 Response includes isPrimary:', {
+            isPrimary: responseData.isPrimary,
+            name: responseData.name,
+            providerId
+        });
         console.log('🏥 === PROVIDER UPDATE DEBUG END ===');
         res.json({
             success: true,
@@ -4622,6 +4627,367 @@ app.get('/healthcare/facilities/:userId', authenticate, async (req, res) => {
             error: 'Internal server error'
         });
     }
+    // ===== INSURANCE INFORMATION ROUTES =====
+    // Get insurance information for a patient
+    app.get('/insurance/:patientId', authenticate, async (req, res) => {
+        try {
+            const { patientId } = req.params;
+            const currentUserId = req.user.uid;
+            console.log('💳 Getting insurance information for patient:', patientId, 'requested by:', currentUserId);
+            // Check if user has access to this patient's data
+            if (patientId !== currentUserId) {
+                // Check family access
+                const familyAccess = await firestore.collection('family_calendar_access')
+                    .where('familyMemberId', '==', currentUserId)
+                    .where('patientId', '==', patientId)
+                    .where('status', '==', 'active')
+                    .get();
+                if (familyAccess.empty) {
+                    return res.status(403).json({
+                        success: false,
+                        error: 'Access denied'
+                    });
+                }
+                // Check if user has permission to view medical details
+                const accessData = familyAccess.docs[0].data();
+                if (!accessData.permissions?.canViewMedicalDetails) {
+                    return res.status(403).json({
+                        success: false,
+                        error: 'Insufficient permissions to view insurance information'
+                    });
+                }
+            }
+            // Get insurance information for this patient
+            const insuranceQuery = await firestore.collection('insurance_information')
+                .where('patientId', '==', patientId)
+                .where('isActive', '==', true)
+                .orderBy('isPrimary', 'desc')
+                .orderBy('createdAt', 'desc')
+                .get();
+            const insuranceCards = insuranceQuery.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+                effectiveDate: doc.data().effectiveDate?.toDate(),
+                expirationDate: doc.data().expirationDate?.toDate(),
+                createdAt: doc.data().createdAt?.toDate(),
+                updatedAt: doc.data().updatedAt?.toDate()
+            }));
+            console.log('✅ Found', insuranceCards.length, 'insurance cards for patient:', patientId);
+            res.json({
+                success: true,
+                data: insuranceCards
+            });
+        }
+        catch (error) {
+            console.error('❌ Error getting insurance information:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Internal server error'
+            });
+        }
+    });
+    // Create new insurance information
+    app.post('/insurance', authenticate, async (req, res) => {
+        try {
+            const userId = req.user.uid;
+            const insuranceData = req.body;
+            console.log('💳 Creating insurance information for patient:', insuranceData.patientId);
+            // Verify user is creating insurance for themselves
+            if (insuranceData.patientId !== userId) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'You can only create insurance information for yourself'
+                });
+            }
+            // Validate required fields
+            if (!insuranceData.providerName || !insuranceData.policyNumber || !insuranceData.insuranceType) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Provider name, policy number, and insurance type are required'
+                });
+            }
+            // If this is being set as primary, unmark any existing primary insurance
+            if (insuranceData.isPrimary) {
+                const existingPrimaryQuery = await firestore.collection('insurance_information')
+                    .where('patientId', '==', userId)
+                    .where('isPrimary', '==', true)
+                    .get();
+                const batch = firestore.batch();
+                existingPrimaryQuery.docs.forEach(doc => {
+                    batch.update(doc.ref, {
+                        isPrimary: false,
+                        updatedAt: admin.firestore.Timestamp.now()
+                    });
+                });
+                await batch.commit();
+            }
+            // Handle date conversions
+            const convertToTimestamp = (dateValue) => {
+                if (!dateValue)
+                    return undefined;
+                try {
+                    if (dateValue instanceof Date) {
+                        return admin.firestore.Timestamp.fromDate(dateValue);
+                    }
+                    if (typeof dateValue === 'string') {
+                        return admin.firestore.Timestamp.fromDate(new Date(dateValue));
+                    }
+                    return undefined;
+                }
+                catch (error) {
+                    console.warn('⚠️ Invalid date value:', dateValue);
+                    return undefined;
+                }
+            };
+            const newInsurance = {
+                patientId: userId,
+                insuranceType: insuranceData.insuranceType,
+                providerName: insuranceData.providerName.trim(),
+                policyNumber: insuranceData.policyNumber.trim(),
+                groupNumber: insuranceData.groupNumber?.trim() || undefined,
+                subscriberName: insuranceData.subscriberName?.trim() || undefined,
+                subscriberRelationship: insuranceData.subscriberRelationship || undefined,
+                subscriberId: insuranceData.subscriberId?.trim() || undefined,
+                effectiveDate: convertToTimestamp(insuranceData.effectiveDate),
+                expirationDate: convertToTimestamp(insuranceData.expirationDate),
+                cardFrontUrl: insuranceData.cardFrontUrl || undefined,
+                cardBackUrl: insuranceData.cardBackUrl || undefined,
+                cardFrontStoragePath: insuranceData.cardFrontStoragePath || undefined,
+                cardBackStoragePath: insuranceData.cardBackStoragePath || undefined,
+                customerServicePhone: insuranceData.customerServicePhone?.trim() || undefined,
+                claimsAddress: insuranceData.claimsAddress?.trim() || undefined,
+                rxBin: insuranceData.rxBin?.trim() || undefined,
+                rxPcn: insuranceData.rxPcn?.trim() || undefined,
+                rxGroup: insuranceData.rxGroup?.trim() || undefined,
+                isActive: insuranceData.isActive !== false,
+                isPrimary: !!insuranceData.isPrimary,
+                notes: insuranceData.notes?.trim() || undefined,
+                createdBy: userId,
+                createdAt: admin.firestore.Timestamp.now(),
+                updatedAt: admin.firestore.Timestamp.now()
+            };
+            // Remove undefined fields
+            const cleanInsuranceData = Object.fromEntries(Object.entries(newInsurance).filter(([_, value]) => value !== undefined));
+            const insuranceRef = await firestore.collection('insurance_information').add(cleanInsuranceData);
+            // Update patient record with primary insurance reference if applicable
+            if (insuranceData.isPrimary) {
+                await firestore.collection('users').doc(userId).update({
+                    primaryInsuranceId: insuranceRef.id,
+                    hasInsurance: true,
+                    updatedAt: admin.firestore.Timestamp.now()
+                });
+            }
+            console.log('✅ Insurance information created successfully:', insuranceRef.id);
+            res.json({
+                success: true,
+                data: {
+                    id: insuranceRef.id,
+                    ...cleanInsuranceData,
+                    effectiveDate: cleanInsuranceData.effectiveDate?.toDate(),
+                    expirationDate: cleanInsuranceData.expirationDate?.toDate(),
+                    createdAt: cleanInsuranceData.createdAt.toDate(),
+                    updatedAt: cleanInsuranceData.updatedAt.toDate()
+                },
+                message: 'Insurance information added successfully'
+            });
+        }
+        catch (error) {
+            console.error('❌ Error creating insurance information:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Internal server error',
+                details: error instanceof Error ? error.message : 'Unknown error'
+            });
+        }
+    });
+    // Update insurance information
+    app.put('/insurance/:insuranceId', authenticate, async (req, res) => {
+        try {
+            const { insuranceId } = req.params;
+            const userId = req.user.uid;
+            const updateData = req.body;
+            console.log('💳 Updating insurance information:', insuranceId);
+            // Get existing insurance
+            const insuranceDoc = await firestore.collection('insurance_information').doc(insuranceId).get();
+            if (!insuranceDoc.exists) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Insurance information not found'
+                });
+            }
+            const existingData = insuranceDoc.data();
+            // Check if user owns this insurance
+            if (existingData?.patientId !== userId) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+            // If this is being set as primary, unmark any existing primary insurance
+            if (updateData.isPrimary && !existingData?.isPrimary) {
+                const existingPrimaryQuery = await firestore.collection('insurance_information')
+                    .where('patientId', '==', userId)
+                    .where('isPrimary', '==', true)
+                    .get();
+                const batch = firestore.batch();
+                existingPrimaryQuery.docs.forEach(doc => {
+                    if (doc.id !== insuranceId) {
+                        batch.update(doc.ref, {
+                            isPrimary: false,
+                            updatedAt: admin.firestore.Timestamp.now()
+                        });
+                    }
+                });
+                await batch.commit();
+            }
+            // Handle date conversions
+            const convertToTimestamp = (dateValue) => {
+                if (!dateValue)
+                    return undefined;
+                try {
+                    if (dateValue instanceof Date) {
+                        return admin.firestore.Timestamp.fromDate(dateValue);
+                    }
+                    if (typeof dateValue === 'string') {
+                        return admin.firestore.Timestamp.fromDate(new Date(dateValue));
+                    }
+                    return undefined;
+                }
+                catch (error) {
+                    console.warn('⚠️ Invalid date value:', dateValue);
+                    return undefined;
+                }
+            };
+            const updatedInsurance = {
+                updatedBy: userId,
+                updatedAt: admin.firestore.Timestamp.now()
+            };
+            // Only update fields that are provided
+            if (updateData.insuranceType !== undefined)
+                updatedInsurance.insuranceType = updateData.insuranceType;
+            if (updateData.providerName !== undefined)
+                updatedInsurance.providerName = updateData.providerName.trim();
+            if (updateData.policyNumber !== undefined)
+                updatedInsurance.policyNumber = updateData.policyNumber.trim();
+            if (updateData.groupNumber !== undefined)
+                updatedInsurance.groupNumber = updateData.groupNumber?.trim() || undefined;
+            if (updateData.subscriberName !== undefined)
+                updatedInsurance.subscriberName = updateData.subscriberName?.trim() || undefined;
+            if (updateData.subscriberRelationship !== undefined)
+                updatedInsurance.subscriberRelationship = updateData.subscriberRelationship;
+            if (updateData.subscriberId !== undefined)
+                updatedInsurance.subscriberId = updateData.subscriberId?.trim() || undefined;
+            if (updateData.effectiveDate !== undefined)
+                updatedInsurance.effectiveDate = convertToTimestamp(updateData.effectiveDate);
+            if (updateData.expirationDate !== undefined)
+                updatedInsurance.expirationDate = convertToTimestamp(updateData.expirationDate);
+            if (updateData.cardFrontUrl !== undefined)
+                updatedInsurance.cardFrontUrl = updateData.cardFrontUrl || undefined;
+            if (updateData.cardBackUrl !== undefined)
+                updatedInsurance.cardBackUrl = updateData.cardBackUrl || undefined;
+            if (updateData.cardFrontStoragePath !== undefined)
+                updatedInsurance.cardFrontStoragePath = updateData.cardFrontStoragePath || undefined;
+            if (updateData.cardBackStoragePath !== undefined)
+                updatedInsurance.cardBackStoragePath = updateData.cardBackStoragePath || undefined;
+            if (updateData.customerServicePhone !== undefined)
+                updatedInsurance.customerServicePhone = updateData.customerServicePhone?.trim() || undefined;
+            if (updateData.claimsAddress !== undefined)
+                updatedInsurance.claimsAddress = updateData.claimsAddress?.trim() || undefined;
+            if (updateData.rxBin !== undefined)
+                updatedInsurance.rxBin = updateData.rxBin?.trim() || undefined;
+            if (updateData.rxPcn !== undefined)
+                updatedInsurance.rxPcn = updateData.rxPcn?.trim() || undefined;
+            if (updateData.rxGroup !== undefined)
+                updatedInsurance.rxGroup = updateData.rxGroup?.trim() || undefined;
+            if (updateData.isActive !== undefined)
+                updatedInsurance.isActive = !!updateData.isActive;
+            if (updateData.isPrimary !== undefined)
+                updatedInsurance.isPrimary = !!updateData.isPrimary;
+            if (updateData.notes !== undefined)
+                updatedInsurance.notes = updateData.notes?.trim() || undefined;
+            // Remove undefined fields
+            const cleanUpdateData = Object.fromEntries(Object.entries(updatedInsurance).filter(([_, value]) => value !== undefined));
+            await insuranceDoc.ref.update(cleanUpdateData);
+            // Update patient record if primary insurance changed
+            if (updateData.isPrimary) {
+                await firestore.collection('users').doc(userId).update({
+                    primaryInsuranceId: insuranceId,
+                    hasInsurance: true,
+                    updatedAt: admin.firestore.Timestamp.now()
+                });
+            }
+            // Get updated insurance
+            const updatedDoc = await insuranceDoc.ref.get();
+            const updatedData = updatedDoc.data();
+            console.log('✅ Insurance information updated successfully:', insuranceId);
+            res.json({
+                success: true,
+                data: {
+                    id: insuranceId,
+                    ...updatedData,
+                    effectiveDate: updatedData?.effectiveDate?.toDate(),
+                    expirationDate: updatedData?.expirationDate?.toDate(),
+                    createdAt: updatedData?.createdAt?.toDate(),
+                    updatedAt: updatedData?.updatedAt?.toDate()
+                },
+                message: 'Insurance information updated successfully'
+            });
+        }
+        catch (error) {
+            console.error('❌ Error updating insurance information:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Internal server error',
+                details: error instanceof Error ? error.message : 'Unknown error'
+            });
+        }
+    });
+    // Delete insurance information
+    app.delete('/insurance/:insuranceId', authenticate, async (req, res) => {
+        try {
+            const { insuranceId } = req.params;
+            const userId = req.user.uid;
+            console.log('🗑️ Deleting insurance information:', insuranceId);
+            // Get existing insurance
+            const insuranceDoc = await firestore.collection('insurance_information').doc(insuranceId).get();
+            if (!insuranceDoc.exists) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Insurance information not found'
+                });
+            }
+            const insuranceData = insuranceDoc.data();
+            // Check if user owns this insurance
+            if (insuranceData?.patientId !== userId) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Access denied'
+                });
+            }
+            // Delete the insurance document
+            await insuranceDoc.ref.delete();
+            // If this was the primary insurance, update patient record
+            if (insuranceData?.isPrimary) {
+                await firestore.collection('users').doc(userId).update({
+                    primaryInsuranceId: admin.firestore.FieldValue.delete(),
+                    updatedAt: admin.firestore.Timestamp.now()
+                });
+            }
+            console.log('✅ Insurance information deleted successfully:', insuranceId);
+            res.json({
+                success: true,
+                message: 'Insurance information deleted successfully'
+            });
+        }
+        catch (error) {
+            console.error('❌ Error deleting insurance information:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Internal server error',
+                details: error instanceof Error ? error.message : 'Unknown error'
+            });
+        }
+    });
 });
 // ===== PATIENT PROFILE ROUTES =====
 // Get patient profile
@@ -5462,6 +5828,108 @@ app.put('/medications/:medicationId', authenticate, async (req, res) => {
                     originalData: updateData
                 }
             });
+        }
+        // 🔥 CRITICAL FIX: Auto-create schedule if reminders are being enabled
+        // Check if this update is enabling reminders on a medication that didn't have them before
+        const isEnablingReminders = updateData.hasReminders === true &&
+            medicationData?.hasReminders !== true &&
+            !updateData.isPRN &&
+            updateData.frequency;
+        console.log('🔍 Checking if schedule auto-creation needed:', {
+            isEnablingReminders,
+            updateHasReminders: updateData.hasReminders,
+            previousHasReminders: medicationData?.hasReminders,
+            isPRN: updateData.isPRN,
+            hasFrequency: !!updateData.frequency
+        });
+        if (isEnablingReminders) {
+            console.log('📅 Auto-creating schedule for medication with newly enabled reminders:', medicationId);
+            try {
+                // Check if schedule already exists
+                const existingScheduleQuery = await firestore.collection('medication_schedules')
+                    .where('medicationId', '==', medicationId)
+                    .where('isActive', '==', true)
+                    .limit(1)
+                    .get();
+                if (existingScheduleQuery.empty) {
+                    // Generate default times based on frequency
+                    let defaultTimes = ['07:00'];
+                    const frequency = (updateData.frequency || medicationData?.frequency || '').toLowerCase().trim();
+                    console.log('🔍 Backend PUT: Parsing medication frequency:', frequency);
+                    // Parse frequency to determine default times
+                    if (frequency.includes('once daily') || frequency.includes('once a day') || frequency === 'daily' || frequency.includes('once')) {
+                        defaultTimes = ['07:00'];
+                    }
+                    else if (frequency.includes('twice daily') || frequency.includes('twice a day') || frequency.includes('bid') || frequency.includes('twice')) {
+                        defaultTimes = ['07:00', '19:00'];
+                    }
+                    else if (frequency.includes('three times daily') || frequency.includes('three times a day') || frequency.includes('tid') || frequency.includes('three')) {
+                        defaultTimes = ['07:00', '13:00', '19:00'];
+                    }
+                    else if (frequency.includes('four times daily') || frequency.includes('four times a day') || frequency.includes('qid') || frequency.includes('four')) {
+                        defaultTimes = ['07:00', '12:00', '17:00', '22:00'];
+                    }
+                    // Use provided reminderTimes or defaults
+                    const scheduleTimes = updateData.reminderTimes && updateData.reminderTimes.length > 0
+                        ? updateData.reminderTimes
+                        : defaultTimes;
+                    // Map frequency to schedule frequency format
+                    let scheduleFrequency = 'daily';
+                    if (frequency.includes('twice daily') || frequency.includes('twice a day') || frequency.includes('bid') || frequency.includes('twice')) {
+                        scheduleFrequency = 'twice_daily';
+                    }
+                    else if (frequency.includes('three times daily') || frequency.includes('three times a day') || frequency.includes('tid') || frequency.includes('three')) {
+                        scheduleFrequency = 'three_times_daily';
+                    }
+                    else if (frequency.includes('four times daily') || frequency.includes('four times a day') || frequency.includes('qid') || frequency.includes('four')) {
+                        scheduleFrequency = 'four_times_daily';
+                    }
+                    const scheduleData = {
+                        medicationId: medicationId,
+                        medicationName: updatedMedication?.name || medicationData?.name || 'Unknown Medication',
+                        medicationDosage: updatedMedication?.dosage || medicationData?.dosage || '',
+                        medicationForm: updatedMedication?.dosageForm || medicationData?.dosageForm || '',
+                        medicationRoute: updatedMedication?.route || medicationData?.route || 'oral',
+                        medicationInstructions: updatedMedication?.instructions || medicationData?.instructions || '',
+                        patientId: medicationData?.patientId || userId,
+                        frequency: scheduleFrequency,
+                        times: scheduleTimes,
+                        daysOfWeek: [],
+                        dayOfMonth: 1,
+                        startDate: admin.firestore.Timestamp.fromDate(new Date()),
+                        endDate: null,
+                        isIndefinite: true,
+                        dosageAmount: updatedMedication?.dosage || medicationData?.dosage || '1 tablet',
+                        instructions: updatedMedication?.instructions || medicationData?.instructions || '',
+                        generateCalendarEvents: true,
+                        reminderMinutesBefore: updateData.reminderMinutesBefore || [15, 5],
+                        isActive: true,
+                        isPaused: false,
+                        pausedUntil: null,
+                        createdAt: admin.firestore.Timestamp.now(),
+                        updatedAt: admin.firestore.Timestamp.now(),
+                        autoCreated: true,
+                        autoCreatedReason: 'reminders_enabled_via_update'
+                    };
+                    const scheduleRef = await firestore.collection('medication_schedules').add(scheduleData);
+                    console.log('✅ Auto-created medication schedule via PUT:', scheduleRef.id);
+                    // Generate calendar events for the new schedule
+                    try {
+                        await generateCalendarEventsForSchedule(scheduleRef.id, scheduleData);
+                        console.log('✅ Auto-generated calendar events for schedule:', scheduleRef.id);
+                    }
+                    catch (eventError) {
+                        console.error('❌ Error auto-generating calendar events:', eventError);
+                    }
+                }
+                else {
+                    console.log('ℹ️ Schedule already exists for medication, skipping auto-creation');
+                }
+            }
+            catch (scheduleError) {
+                console.error('❌ Error auto-creating schedule during medication update:', scheduleError);
+                // Don't fail the medication update if schedule creation fails
+            }
         }
         // Get updated medication
         const updatedDoc = await medicationDoc.ref.get();

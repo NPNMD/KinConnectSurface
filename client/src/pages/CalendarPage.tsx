@@ -18,10 +18,10 @@ export default function CalendarPage() {
   const { getEffectivePatientId, userRole, activePatientAccess } = useFamily();
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 overflow-x-hidden">
       {/* Mobile-First Header */}
       <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
-        <div className="px-4 py-3">
+        <div className="px-4 py-3 max-w-full">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <Link
@@ -54,52 +54,62 @@ export default function CalendarPage() {
       </header>
 
       {/* Main Content */}
-      <main className="px-4 py-4 pb-20">
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <main className="px-4 py-4 pb-20 max-w-full overflow-x-hidden">
+        <div className="bg-white rounded-lg border border-gray-200 p-4 max-w-full">
           <CalendarIntegration patientId={getEffectivePatientId() || ''} />
         </div>
       </main>
 
       {/* Mobile Bottom Navigation */}
       <nav className="mobile-nav-container">
-        <div className="flex items-center justify-around">
+        <div className="flex items-center justify-between">
           <Link
             to="/dashboard"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-rose-600 hover:text-rose-700 transition-colors"
           >
-            <Heart className="w-5 h-5" />
+            <div className="bg-rose-100 p-1.5 rounded-lg">
+              <Heart className="w-5 h-5" />
+            </div>
             <span className="text-xs">Home</span>
           </Link>
           
           <Link
             to="/medications"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-blue-600 hover:text-blue-700 transition-colors"
           >
-            <Pill className="w-5 h-5" />
+            <div className="bg-blue-100 p-1.5 rounded-lg">
+              <Pill className="w-5 h-5" />
+            </div>
             <span className="text-xs">Medications</span>
           </Link>
           
           <Link
             to="/calendar"
-            className="flex flex-col items-center space-y-1 p-2 text-primary-600"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-purple-600 hover:text-purple-700 transition-colors"
           >
-            <Calendar className="w-5 h-5" />
+            <div className="bg-purple-100 p-1.5 rounded-lg">
+              <Calendar className="w-5 h-5" />
+            </div>
             <span className="text-xs font-medium">Calendar</span>
           </Link>
           
           <Link
             to="/profile"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-green-600 hover:text-green-700 transition-colors"
           >
-            <User className="w-5 h-5" />
+            <div className="bg-green-100 p-1.5 rounded-lg">
+              <User className="w-5 h-5" />
+            </div>
             <span className="text-xs">Profile</span>
           </Link>
           
           <Link
             to="/family/invite"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-amber-600 hover:text-amber-700 transition-colors"
           >
-            <Users className="w-5 h-5" />
+            <div className="bg-amber-100 p-1.5 rounded-lg">
+              <Users className="w-5 h-5" />
+            </div>
             <span className="text-xs">Family</span>
           </Link>
         </div>

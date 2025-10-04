@@ -1009,31 +1009,31 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <h3 className="text-lg font-semibold text-gray-900 flex items-center space-x-2">
           <Calendar className="w-5 h-5" />
           <span>Medical Calendar</span>
         </h3>
         
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
           {/* Notification System */}
           <NotificationSystem events={events} patientId={patientId} />
           
           <button
             onClick={() => setShowResponsibilityDashboard(true)}
-            className="btn-secondary flex items-center space-x-2 relative"
+            className="btn-secondary flex items-center space-x-1 sm:space-x-2 relative flex-shrink-0 text-sm px-2 sm:px-3 py-1.5"
           >
             <Car className="w-4 h-4" />
             <span className="hidden sm:inline">Family Help</span>
             {/* Notification badge for unassigned responsibilities */}
-            <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
               2
             </span>
           </button>
           
           <button
             onClick={() => setShowFamilyControls(true)}
-            className="btn-secondary flex items-center space-x-2"
+            className="btn-secondary flex items-center space-x-1 sm:space-x-2 flex-shrink-0 text-sm px-2 sm:px-3 py-1.5"
           >
             <Users className="w-4 h-4" />
             <span className="hidden sm:inline">Family Access</span>
@@ -1041,7 +1041,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
           
           <button
             onClick={handleGoogleSignIn}
-            className="btn-secondary text-sm mr-2"
+            className="btn-secondary text-sm flex-shrink-0 px-2 sm:px-3 py-1.5"
           >
             <span className="hidden sm:inline">Connect Google Calendar</span>
             <span className="sm:hidden">Connect</span>
@@ -1049,7 +1049,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
           
           <button
             onClick={() => setShowAddEvent(true)}
-            className="btn-primary flex items-center space-x-2"
+            className="btn-primary flex items-center space-x-1 sm:space-x-2 flex-shrink-0 text-sm px-3 py-1.5"
           >
             <Plus className="w-4 h-4" />
             <span className="hidden sm:inline">Add Medical Event</span>

@@ -6,9 +6,12 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
-  "storage": {
-    "rules": "storage.rules"
-  },
+  "storage": [
+    {
+      "bucket": "claritystream-uldp9.appspot.com",
+      "rules": "storage.rules"
+    }
+  ],
   "hosting": {
     "public": "dist/client",
     "ignore": [

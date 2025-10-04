@@ -992,7 +992,7 @@ export default function Dashboard() {
 
       {/* Mobile Bottom Navigation */}
       <nav className="mobile-nav-container">
-        <div className="flex items-center justify-around">
+        <div className="flex items-center justify-between">
           <button
             onClick={() => {
               console.log('🏠 Home button clicked - forcing dashboard refresh');
@@ -1001,41 +1001,51 @@ export default function Dashboard() {
               setTimeout(() => smartFetchTodaysMedications(true), 200);
               setTimeout(() => smartFetchUpcomingAppointments(true), 400);
             }}
-            className="flex flex-col items-center space-y-1 p-2 text-primary-600"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-rose-600 hover:text-rose-700 transition-colors"
           >
-            <Heart className="w-5 h-5" />
+            <div className="bg-rose-100 p-1.5 rounded-lg">
+              <Heart className="w-5 h-5" />
+            </div>
             <span className="text-xs font-medium">Home</span>
           </button>
           
           <Link
             to="/medications"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-blue-600 hover:text-blue-700 transition-colors"
           >
-            <Pill className="w-5 h-5" />
+            <div className="bg-blue-100 p-1.5 rounded-lg">
+              <Pill className="w-5 h-5" />
+            </div>
             <span className="text-xs">Medications</span>
           </Link>
           
           <Link
             to="/calendar"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-purple-600 hover:text-purple-700 transition-colors"
           >
-            <Calendar className="w-5 h-5" />
+            <div className="bg-purple-100 p-1.5 rounded-lg">
+              <Calendar className="w-5 h-5" />
+            </div>
             <span className="text-xs">Calendar</span>
           </Link>
           
           <Link
             to="/profile"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-green-600 hover:text-green-700 transition-colors"
           >
-            <User className="w-5 h-5" />
+            <div className="bg-green-100 p-1.5 rounded-lg">
+              <User className="w-5 h-5" />
+            </div>
             <span className="text-xs">Profile</span>
           </Link>
           
           <Link
             to="/family/invite"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-amber-600 hover:text-amber-700 transition-colors"
           >
-            <Users className="w-5 h-5" />
+            <div className="bg-amber-100 p-1.5 rounded-lg">
+              <Users className="w-5 h-5" />
+            </div>
             <span className="text-xs">Family</span>
           </Link>
         </div>

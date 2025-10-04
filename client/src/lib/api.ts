@@ -483,6 +483,13 @@ export const API_ENDPOINTS = {
   
   // Audio transcription
   AUDIO_TRANSCRIBE: '/audio/transcribe',
+  
+  // Insurance
+  INSURANCE_LIST: (patientId: string) => `/insurance/${patientId}`,
+  INSURANCE_CREATE: '/insurance',
+  INSURANCE_BY_ID: (insuranceId: string) => `/insurance/${insuranceId}`,
+  INSURANCE_UPDATE: (insuranceId: string) => `/insurance/${insuranceId}`,
+  INSURANCE_DELETE: (insuranceId: string) => `/insurance/${insuranceId}`,
 } as const;
 
 // Type-safe API response

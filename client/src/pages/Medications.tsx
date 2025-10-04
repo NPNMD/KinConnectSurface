@@ -9,8 +9,7 @@ import {
   AlertTriangle,
   User,
   Users,
-  TrendingUp,
-  History
+  TrendingUp
 } from 'lucide-react';
 import { Medication, NewMedication } from '@shared/types';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
@@ -22,7 +21,6 @@ import TimeBucketView from '@/components/TimeBucketView';
 import MissedMedicationsModal from '@/components/MissedMedicationsModal';
 import UnscheduledMedicationsAlert from '@/components/UnscheduledMedicationsAlert';
 import AdherenceDashboard from '@/components/AdherenceDashboard';
-import MedicationHistory from '@/components/MedicationHistory';
 
 export default function Medications() {
   const {
@@ -37,7 +35,6 @@ export default function Medications() {
   const [showMissedModal, setShowMissedModal] = useState(false);
   const [missedMedicationsCount, setMissedMedicationsCount] = useState(0);
   const [showAdherenceDashboard, setShowAdherenceDashboard] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
   const [adherenceStats, setAdherenceStats] = useState<{
     totalMedications: number;
     overallAdherenceRate: number;
@@ -412,10 +409,10 @@ export default function Medications() {
   const activeMedications = medications.filter(med => med.isActive);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 overflow-x-hidden">
       {/* Simplified Header */}
       <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
-        <div className="px-4 py-3">
+        <div className="px-4 py-3 max-w-full">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <Link
@@ -438,15 +435,15 @@ export default function Medications() {
       </header>
 
       {/* Main Content */}
-      <main className="px-4 py-4 pb-20">
+      <main className="px-4 py-4 pb-20 max-w-full overflow-x-hidden">
         {/* Simplified Alert Section */}
         {missedMedicationsCount > 0 && (
           <div className="mb-6">
             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center space-x-3">
-                  <AlertTriangle className="w-6 h-6 text-red-600" />
-                  <div>
+                  <AlertTriangle className="w-6 h-6 text-red-600 flex-shrink-0" />
+                  <div className="min-w-0">
                     <h3 className="font-medium text-red-900">
                       {missedMedicationsCount} Missed Medication{missedMedicationsCount !== 1 ? 's' : ''}
                     </h3>
@@ -457,7 +454,7 @@ export default function Medications() {
                 </div>
                 <button
                   onClick={() => setShowMissedModal(true)}
-                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors w-full sm:w-auto flex-shrink-0"
                 >
                   View
                 </button>
@@ -470,14 +467,14 @@ export default function Medications() {
         {adherenceStats && (
           <div className="mb-6">
             <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
                 <h3 className="text-lg font-semibold text-gray-900 flex items-center space-x-2">
                   <TrendingUp className="w-5 h-5 text-blue-600" />
                   <span>Your Progress</span>
                 </h3>
                 <button
                   onClick={() => setShowAdherenceDashboard(!showAdherenceDashboard)}
-                  className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                  className="text-sm text-blue-600 hover:text-blue-800 font-medium w-full sm:w-auto text-left sm:text-right"
                 >
                   {showAdherenceDashboard ? 'Show Summary' : 'View Details'}
                 </button>
@@ -542,47 +539,32 @@ export default function Medications() {
 
         {/* Today's Medications Section */}
         <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between gap-2 mb-3">
             <h2 className="text-lg font-semibold text-gray-900">Today's Med List</h2>
-            <div className="flex items-center space-x-2">
+            {missedMedicationsCount > 0 && (
               <button
-                onClick={() => setShowHistory(!showHistory)}
-                className="flex items-center space-x-1 text-xs px-3 py-1.5 bg-blue-100 text-blue-800 rounded-md hover:bg-blue-200 transition-colors"
+                onClick={() => setShowMissedModal(true)}
+                className="text-xs px-3 py-1.5 bg-red-100 text-red-800 rounded-md hover:bg-red-200 transition-colors flex-shrink-0"
               >
-                <History className="w-3 h-3" />
-                <span>History</span>
+                {missedMedicationsCount} Missed
               </button>
-              {missedMedicationsCount > 0 && (
-                <button
-                  onClick={() => setShowMissedModal(true)}
-                  className="text-xs px-3 py-1.5 bg-red-100 text-red-800 rounded-md hover:bg-red-200 transition-colors"
-                >
-                  {missedMedicationsCount} Missed
-                </button>
-              )}
-            </div>
+            )}
           </div>
-          {showHistory ? (
-            <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <MedicationHistory patientId={getEffectivePatientId() || undefined} />
-            </div>
-          ) : (
-            <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <TimeBucketView
-                patientId={getEffectivePatientId() || ''}
-                date={new Date()}
-                onMedicationAction={(eventId, action) => {
-                  console.log('Medication action performed:', { eventId, action });
-                  setTimeout(() => {
-                    loadMedications();
-                    setRefreshTrigger(prev => prev + 1);
-                  }, 1000);
-                }}
-                compactMode={false}
-                refreshTrigger={refreshTrigger}
-              />
-            </div>
-          )}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <TimeBucketView
+              patientId={getEffectivePatientId() || ''}
+              date={new Date()}
+              onMedicationAction={(eventId, action) => {
+                console.log('Medication action performed:', { eventId, action });
+                setTimeout(() => {
+                  loadMedications();
+                  setRefreshTrigger(prev => prev + 1);
+                }, 1000);
+              }}
+              compactMode={false}
+              refreshTrigger={refreshTrigger}
+            />
+          </div>
         </div>
 
         {/* Enhanced Medication Management Section */}
@@ -611,44 +593,54 @@ export default function Medications() {
 
       {/* Mobile Bottom Navigation */}
       <nav className="mobile-nav-container">
-        <div className="flex items-center justify-around">
+        <div className="flex items-center justify-between">
           <Link
             to="/dashboard"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-rose-600 hover:text-rose-700 transition-colors"
           >
-            <Heart className="w-5 h-5" />
+            <div className="bg-rose-100 p-1.5 rounded-lg">
+              <Heart className="w-5 h-5" />
+            </div>
             <span className="text-xs">Home</span>
           </Link>
           
           <Link
             to="/medications"
-            className="flex flex-col items-center space-y-1 p-2 text-primary-600"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-blue-600 hover:text-blue-700 transition-colors"
           >
-            <Pill className="w-5 h-5" />
+            <div className="bg-blue-100 p-1.5 rounded-lg">
+              <Pill className="w-5 h-5" />
+            </div>
             <span className="text-xs font-medium">Medications</span>
           </Link>
           
           <Link
             to="/calendar"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-purple-600 hover:text-purple-700 transition-colors"
           >
-            <Calendar className="w-5 h-5" />
+            <div className="bg-purple-100 p-1.5 rounded-lg">
+              <Calendar className="w-5 h-5" />
+            </div>
             <span className="text-xs">Calendar</span>
           </Link>
           
           <Link
             to="/profile"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-green-600 hover:text-green-700 transition-colors"
           >
-            <User className="w-5 h-5" />
+            <div className="bg-green-100 p-1.5 rounded-lg">
+              <User className="w-5 h-5" />
+            </div>
             <span className="text-xs">Profile</span>
           </Link>
           
           <Link
             to="/family/invite"
-            className="flex flex-col items-center space-y-1 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-amber-600 hover:text-amber-700 transition-colors"
           >
-            <Users className="w-5 h-5" />
+            <div className="bg-amber-100 p-1.5 rounded-lg">
+              <Users className="w-5 h-5" />
+            </div>
             <span className="text-xs">Family</span>
           </Link>
         </div>
