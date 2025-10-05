@@ -21,6 +21,8 @@ import TimeBucketView from '@/components/TimeBucketView';
 import MissedMedicationsModal from '@/components/MissedMedicationsModal';
 import UnscheduledMedicationsAlert from '@/components/UnscheduledMedicationsAlert';
 import AdherenceDashboard from '@/components/AdherenceDashboard';
+import { ViewOnlyBanner } from '@/components/ViewOnlyBanner';
+import { PermissionGate } from '@/components/PermissionGate';
 
 export default function Medications() {
   const {
@@ -410,6 +412,9 @@ export default function Medications() {
 
   return (
     <div className="min-h-screen bg-gray-50 overflow-x-hidden">
+      {/* View-Only Banner */}
+      <ViewOnlyBanner />
+      
       {/* Simplified Header */}
       <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
         <div className="px-4 py-3 max-w-full">
@@ -448,7 +453,10 @@ export default function Medications() {
                       {missedMedicationsCount} Missed Medication{missedMedicationsCount !== 1 ? 's' : ''}
                     </h3>
                     <p className="text-sm text-red-700">
-                      You have missed medications that need attention.
+                      {userRole === 'family_member' && activePatientAccess
+                        ? `${activePatientAccess.patientName} has missed medications that need attention.`
+                        : 'You have missed medications that need attention.'
+                      }
                     </p>
                   </div>
                 </div>

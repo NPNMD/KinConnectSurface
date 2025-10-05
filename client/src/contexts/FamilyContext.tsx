@@ -43,6 +43,12 @@ interface FamilyContextType {
   canEditPatientData: () => boolean;
   canViewPatientData: () => boolean;
   getEffectivePatientId: () => string | null; // Returns activePatientId for family members, user.id for patients
+  
+  // Phase 3: Additional permission helpers
+  isViewOnly: () => boolean;
+  isFullAccess: () => boolean;
+  canPerformAction: (action: 'create' | 'edit' | 'delete' | 'manageFamily') => boolean;
+  canManageFamily: () => boolean;
 }
 
 const FamilyContext = createContext<FamilyContextType | undefined>(undefined);
@@ -126,6 +132,13 @@ export function FamilyProvider({ children }: FamilyProviderProps) {
             
             // Update user preferences for future sessions
             localStorage.setItem('lastActivePatientId', activePatient.patientId);
+            
+            // Clear sessionStorage backup once patient context is properly loaded
+            const pendingPatientId = sessionStorage.getItem('pendingPatientId');
+            if (pendingPatientId) {
+              console.log('🧹 FamilyContext: Clearing sessionStorage backup, patient context now loaded');
+              sessionStorage.removeItem('pendingPatientId');
+            }
           }
         } else {
           // No family access found - user is a patient
@@ -223,6 +236,16 @@ export function FamilyProvider({ children }: FamilyProviderProps) {
   // Smart active patient selection
   const selectActivePatient = (patientAccess: PatientAccess[]): PatientAccess | null => {
     if (patientAccess.length === 0) return null;
+    
+    // Strategy 0: Check sessionStorage for pending patient ID (from recent invitation acceptance)
+    const pendingPatientId = sessionStorage.getItem('pendingPatientId');
+    if (pendingPatientId) {
+      const pending = patientAccess.find(p => p.patientId === pendingPatientId);
+      if (pending && pending.status === 'active') {
+        console.log('🎯 FamilyContext: Using pending patient ID from sessionStorage:', pendingPatientId);
+        return pending;
+      }
+    }
     
     // Strategy 1: User's stored preference
     const cachedPatientId = localStorage.getItem('lastActivePatientId');
@@ -327,14 +350,99 @@ export function FamilyProvider({ children }: FamilyProviderProps) {
 
   const getEffectivePatientId = (): string | null => {
     if (userRole === 'patient') {
-      return firebaseUser?.uid || null;
+      const patientId = firebaseUser?.uid || null;
+      console.log('🔍 FamilyContext.getEffectivePatientId: Patient mode, returning:', patientId);
+      return patientId;
     }
     
     if (userRole === 'family_member') {
-      return activePatientId;
+      // CRITICAL: Never return the family member's own ID
+      if (activePatientId && activePatientId !== firebaseUser?.uid) {
+        console.log('🔍 FamilyContext.getEffectivePatientId: Family member mode, returning patient ID:', activePatientId);
+        return activePatientId;
+      }
+      
+      // Check sessionStorage as backup
+      const pendingPatientId = sessionStorage.getItem('pendingPatientId');
+      if (pendingPatientId && pendingPatientId !== firebaseUser?.uid) {
+        console.log('🔍 FamilyContext.getEffectivePatientId: Using sessionStorage backup:', pendingPatientId);
+        return pendingPatientId;
+      }
+      
+      // If activePatientId is null or equals family member's ID, return null
+      console.warn('⚠️ FamilyContext.getEffectivePatientId: Family member but no valid patient ID set!', {
+        activePatientId,
+        familyMemberId: firebaseUser?.uid,
+        pendingPatientId
+      });
+      return null;
     }
     
+    console.log('🔍 FamilyContext.getEffectivePatientId: Unknown role, returning null');
     return null;
+  };
+
+  // Phase 3: Additional permission helper methods
+  const isViewOnly = (): boolean => {
+    if (userRole === 'patient') {
+      return false; // Patients are never view-only
+    }
+    
+    if (userRole === 'family_member' && activePatientAccess) {
+      // View-only means can view but cannot create, edit, or delete
+      return (
+        activePatientAccess.permissions.canView &&
+        !activePatientAccess.permissions.canCreate &&
+        !activePatientAccess.permissions.canEdit &&
+        !activePatientAccess.permissions.canDelete
+      );
+    }
+    
+    return false;
+  };
+
+  const isFullAccess = (): boolean => {
+    if (userRole === 'patient') {
+      return true; // Patients always have full access to their own data
+    }
+    
+    if (userRole === 'family_member' && activePatientAccess) {
+      // Full access means can create, edit, and delete
+      return (
+        activePatientAccess.permissions.canCreate &&
+        activePatientAccess.permissions.canEdit &&
+        activePatientAccess.permissions.canDelete
+      );
+    }
+    
+    return false;
+  };
+
+  const canPerformAction = (action: 'create' | 'edit' | 'delete' | 'manageFamily'): boolean => {
+    if (userRole === 'patient') {
+      return true; // Patients can perform all actions
+    }
+    
+    if (userRole === 'family_member' && activePatientAccess) {
+      switch (action) {
+        case 'create':
+          return activePatientAccess.permissions.canCreate;
+        case 'edit':
+          return activePatientAccess.permissions.canEdit;
+        case 'delete':
+          return activePatientAccess.permissions.canDelete;
+        case 'manageFamily':
+          return activePatientAccess.permissions.canManageFamily;
+        default:
+          return false;
+      }
+    }
+    
+    return false;
+  };
+
+  const canManageFamily = (): boolean => {
+    return hasPermission('canManageFamily');
   };
 
   // Initialize family access when user changes
@@ -361,6 +469,10 @@ export function FamilyProvider({ children }: FamilyProviderProps) {
     canEditPatientData,
     canViewPatientData,
     getEffectivePatientId,
+    isViewOnly,
+    isFullAccess,
+    canPerformAction,
+    canManageFamily,
   };
 
   console.log('🔍 FamilyContext state:', {

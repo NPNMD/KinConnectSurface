@@ -38,7 +38,8 @@ import VisitSummaryCard from '@/components/VisitSummaryCard';
 import VisitSummaryForm from '@/components/VisitSummaryForm';
 import TimeBucketView from '@/components/TimeBucketView';
 import PatientSwitcher from '@/components/PatientSwitcher';
-import { CreatePermissionWrapper, EditPermissionWrapper } from '@/components/PermissionWrapper';
+import { PermissionGate } from '@/components/PermissionGate';
+import { ViewOnlyBanner } from '@/components/ViewOnlyBanner';
 import type { VisitSummary, MedicationCalendarEvent, MedicalEvent, Medication, TodayMedicationBuckets } from '@shared/types';
 
 export default function Dashboard() {
@@ -415,6 +416,12 @@ export default function Dashboard() {
       isInitialMount: isInitialMount.current
     });
 
+    // CRITICAL: For family members, ensure activePatientId is set before fetching data
+    if (userRole === 'family_member' && !effectivePatientId) {
+      console.warn('⚠️ Dashboard: Family member detected but no patient ID set yet, waiting...');
+      return;
+    }
+
     if (firebaseUser && !familyLoading && effectivePatientId) {
       console.log('✅ Dashboard: All conditions met, fetching data with staggered timing...');
       
@@ -588,8 +595,28 @@ export default function Dashboard() {
     }
   };
 
+  // Show loading state for family members waiting for patient context
+  if (userRole === 'family_member' && !getEffectivePatientId() && !familyLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="max-w-md mx-auto bg-white rounded-lg shadow-md p-8 text-center">
+          <LoadingSpinner size="lg" />
+          <h2 className="text-xl font-semibold text-gray-900 mt-4 mb-2">
+            Loading patient information...
+          </h2>
+          <p className="text-gray-600 text-sm">
+            Setting up your access to the patient's dashboard
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* View-Only Banner */}
+      <ViewOnlyBanner />
+      
       {/* Mobile-First Header */}
       <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
         <div className="px-4 py-3">
@@ -654,7 +681,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-gray-900">Recent Events</h2>
             <div className="flex items-center space-x-2">
-              <CreatePermissionWrapper>
+              <PermissionGate requiredPermission="canCreate">
                 <button
                   onClick={() => setShowVisitRecording(true)}
                   className="flex items-center space-x-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors"
@@ -662,7 +689,7 @@ export default function Dashboard() {
                   <Mic className="w-4 h-4" />
                   <span>Record Visit</span>
                 </button>
-              </CreatePermissionWrapper>
+              </PermissionGate>
               {recentVisitSummaries.length > 0 && (
                 <Link
                   to="/visit-summaries"
@@ -830,7 +857,7 @@ export default function Dashboard() {
             <div className="bg-white rounded-lg p-6 border border-gray-200 text-center">
               <FileText className="w-8 h-8 text-gray-300 mx-auto mb-2" />
               <p className="text-gray-500 text-sm mb-3">Nothing new in the last 30 days</p>
-              <CreatePermissionWrapper>
+              <PermissionGate requiredPermission="canCreate">
                 <button
                   onClick={() => setShowVisitRecording(true)}
                   className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors mx-auto"
@@ -843,7 +870,7 @@ export default function Dashboard() {
                     }
                   </span>
                 </button>
-              </CreatePermissionWrapper>
+              </PermissionGate>
             </div>
           )}
         </div>
@@ -1040,7 +1067,7 @@ export default function Dashboard() {
           </Link>
           
           <Link
-            to="/family/invite"
+            to={userRole === 'patient' ? "/family-management" : "/family/invite"}
             className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-amber-600 hover:text-amber-700 transition-colors"
           >
             <div className="bg-amber-100 p-1.5 rounded-lg">

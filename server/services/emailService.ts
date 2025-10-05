@@ -145,6 +145,66 @@ export class EmailService {
     );
   }
 
+  // Send invitation declined notification to patient
+  async sendInvitationDeclined(
+    notification: {
+      patientName: string;
+      patientEmail: string;
+      familyMemberName: string;
+      familyMemberEmail: string;
+      reason?: string;
+    }
+  ): Promise<{ success: boolean; error?: string }> {
+    const template = this.getInvitationDeclinedTemplate(notification);
+    
+    return await this.sendEmail(
+      notification.patientEmail,
+      template.subject,
+      template.html,
+      template.text
+    );
+  }
+
+  // Send access level changed notification to family member
+  async sendAccessLevelChanged(
+    notification: {
+      familyMemberName: string;
+      familyMemberEmail: string;
+      patientName: string;
+      oldAccessLevel: string;
+      newAccessLevel: string;
+      newPermissions: string[];
+    }
+  ): Promise<{ success: boolean; error?: string }> {
+    const template = this.getAccessLevelChangedTemplate(notification);
+    
+    return await this.sendEmail(
+      notification.familyMemberEmail,
+      template.subject,
+      template.html,
+      template.text
+    );
+  }
+
+  // Send access removed notification to family member
+  async sendAccessRemoved(
+    notification: {
+      familyMemberName: string;
+      familyMemberEmail: string;
+      patientName: string;
+      patientEmail: string;
+    }
+  ): Promise<{ success: boolean; error?: string }> {
+    const template = this.getAccessRemovedTemplate(notification);
+    
+    return await this.sendEmail(
+      notification.familyMemberEmail,
+      template.subject,
+      template.html,
+      template.text
+    );
+  }
+
   // Send test email
   async sendTestEmail(to: string): Promise<{ success: boolean; error?: string }> {
     const subject = 'KinConnect Email Service Test';
@@ -438,6 +498,220 @@ Appointment Details:
 - Date: ${eventDate}
 - Time: ${eventTime}
 ${event.location ? `- Location: ${event.location}` : ''}
+
+This notification was sent from KinConnect Medical Calendar.
+    `;
+    
+    return { subject, html, text };
+  }
+
+  private getInvitationDeclinedTemplate(notification: {
+    patientName: string;
+    patientEmail: string;
+    familyMemberName: string;
+    familyMemberEmail: string;
+    reason?: string;
+  }): EmailTemplate {
+    const subject = `${notification.familyMemberName} declined your invitation`;
+    
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <h1 style="color: #2563eb; margin: 0;">KinConnect</h1>
+          <p style="color: #666; margin: 5px 0;">Medical Calendar</p>
+        </div>
+        
+        <div style="background: #fef3c7; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          <h2 style="color: #1e293b; margin-top: 0;">Invitation Declined</h2>
+          <p>Hi ${notification.patientName},</p>
+          <p><strong>${notification.familyMemberName}</strong> (${notification.familyMemberEmail}) has declined your invitation to access your medical calendar.</p>
+          ${notification.reason ? `
+          <div style="background: white; padding: 15px; border-radius: 6px; margin-top: 15px;">
+            <p style="margin: 0; color: #475569;"><strong>Reason provided:</strong></p>
+            <p style="margin: 10px 0 0 0; color: #1e293b;">"${notification.reason}"</p>
+          </div>
+          ` : ''}
+        </div>
+        
+        <div style="background: #f0f9ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          <h3 style="color: #1e293b; margin-top: 0;">What's Next?</h3>
+          <p style="color: #475569;">If you'd like to invite them again or discuss their concerns, you can:</p>
+          <ul style="color: #475569;">
+            <li>Contact them directly to understand their concerns</li>
+            <li>Send a new invitation with different access permissions</li>
+            <li>Invite another family member to help coordinate care</li>
+          </ul>
+        </div>
+        
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${process.env.VITE_API_URL || 'https://claritystream-uldp9.web.app'}/family-management"
+             style="background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">
+            Manage Family Access
+          </a>
+        </div>
+        
+        <div style="border-top: 1px solid #e2e8f0; padding-top: 20px; color: #64748b; font-size: 14px;">
+          <p>This notification was sent from KinConnect Medical Calendar.</p>
+        </div>
+      </div>
+    `;
+    
+    const text = `
+KinConnect Medical Calendar - Invitation Declined
+
+Hi ${notification.patientName},
+
+${notification.familyMemberName} (${notification.familyMemberEmail}) has declined your invitation to access your medical calendar.
+
+${notification.reason ? `Reason provided: "${notification.reason}"` : ''}
+
+What's Next?
+If you'd like to invite them again or discuss their concerns, you can:
+- Contact them directly to understand their concerns
+- Send a new invitation with different access permissions
+- Invite another family member to help coordinate care
+
+To manage family access, visit: ${process.env.VITE_API_URL || 'https://claritystream-uldp9.web.app'}/family-management
+
+This notification was sent from KinConnect Medical Calendar.
+    `;
+    
+    return { subject, html, text };
+  }
+
+  private getAccessLevelChangedTemplate(notification: {
+    familyMemberName: string;
+    familyMemberEmail: string;
+    patientName: string;
+    oldAccessLevel: string;
+    newAccessLevel: string;
+    newPermissions: string[];
+  }): EmailTemplate {
+    const subject = `Your access level has been updated`;
+    
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <h1 style="color: #2563eb; margin: 0;">KinConnect</h1>
+          <p style="color: #666; margin: 5px 0;">Medical Calendar</p>
+        </div>
+        
+        <div style="background: #f0f9ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          <h2 style="color: #1e293b; margin-top: 0;">Access Level Updated</h2>
+          <p>Hi ${notification.familyMemberName},</p>
+          <p><strong>${notification.patientName}</strong> has updated your access level to their medical calendar.</p>
+        </div>
+        
+        <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          <h3 style="color: #1e293b; margin-top: 0;">Access Level Change</h3>
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
+            <span style="background: #e2e8f0; padding: 8px 16px; border-radius: 6px; color: #475569;">
+              ${notification.oldAccessLevel === 'full' ? 'Full Access' : 'View Only'}
+            </span>
+            <span style="color: #64748b;">→</span>
+            <span style="background: #2563eb; padding: 8px 16px; border-radius: 6px; color: white; font-weight: bold;">
+              ${notification.newAccessLevel === 'full' ? 'Full Access' : 'View Only'}
+            </span>
+          </div>
+          
+          <h4 style="color: #1e293b; margin-top: 20px; margin-bottom: 10px;">Your New Permissions:</h4>
+          <ul style="color: #475569;">
+            ${notification.newPermissions.map(permission => `<li>${this.formatPermission(permission)}</li>`).join('')}
+          </ul>
+        </div>
+        
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${process.env.VITE_API_URL || 'https://claritystream-uldp9.web.app'}/dashboard"
+             style="background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">
+            View ${notification.patientName}'s Dashboard
+          </a>
+        </div>
+        
+        <div style="border-top: 1px solid #e2e8f0; padding-top: 20px; color: #64748b; font-size: 14px;">
+          <p>This notification was sent from KinConnect Medical Calendar.</p>
+        </div>
+      </div>
+    `;
+    
+    const text = `
+KinConnect Medical Calendar - Access Level Updated
+
+Hi ${notification.familyMemberName},
+
+${notification.patientName} has updated your access level to their medical calendar.
+
+Access Level Change:
+${notification.oldAccessLevel === 'full' ? 'Full Access' : 'View Only'} → ${notification.newAccessLevel === 'full' ? 'Full Access' : 'View Only'}
+
+Your New Permissions:
+${notification.newPermissions.map(permission => `- ${this.formatPermission(permission)}`).join('\n')}
+
+To view ${notification.patientName}'s dashboard, visit: ${process.env.VITE_API_URL || 'https://claritystream-uldp9.web.app'}/dashboard
+
+This notification was sent from KinConnect Medical Calendar.
+    `;
+    
+    return { subject, html, text };
+  }
+
+  private getAccessRemovedTemplate(notification: {
+    familyMemberName: string;
+    familyMemberEmail: string;
+    patientName: string;
+    patientEmail: string;
+  }): EmailTemplate {
+    const subject = `Your access has been removed`;
+    
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <h1 style="color: #2563eb; margin: 0;">KinConnect</h1>
+          <p style="color: #666; margin: 5px 0;">Medical Calendar</p>
+        </div>
+        
+        <div style="background: #fef3c7; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          <h2 style="color: #1e293b; margin-top: 0;">Access Removed</h2>
+          <p>Hi ${notification.familyMemberName},</p>
+          <p><strong>${notification.patientName}</strong> has removed your access to their medical calendar.</p>
+        </div>
+        
+        <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          <h3 style="color: #1e293b; margin-top: 0;">What This Means</h3>
+          <p style="color: #475569;">You no longer have access to:</p>
+          <ul style="color: #475569;">
+            <li>View ${notification.patientName}'s medical appointments</li>
+            <li>Manage their calendar events</li>
+            <li>Receive notifications about their care</li>
+          </ul>
+        </div>
+        
+        <div style="background: #f0f9ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          <h3 style="color: #1e293b; margin-top: 0;">Questions?</h3>
+          <p style="color: #475569;">If you have questions about this change or believe this was done in error, please contact ${notification.patientName} directly at:</p>
+          <p style="color: #2563eb; font-weight: bold; margin: 10px 0;">${notification.patientEmail}</p>
+        </div>
+        
+        <div style="border-top: 1px solid #e2e8f0; padding-top: 20px; color: #64748b; font-size: 14px;">
+          <p>This notification was sent from KinConnect Medical Calendar.</p>
+        </div>
+      </div>
+    `;
+    
+    const text = `
+KinConnect Medical Calendar - Access Removed
+
+Hi ${notification.familyMemberName},
+
+${notification.patientName} has removed your access to their medical calendar.
+
+What This Means:
+You no longer have access to:
+- View ${notification.patientName}'s medical appointments
+- Manage their calendar events
+- Receive notifications about their care
+
+Questions?
+If you have questions about this change or believe this was done in error, please contact ${notification.patientName} directly at: ${notification.patientEmail}
 
 This notification was sent from KinConnect Medical Calendar.
     `;

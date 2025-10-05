@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Users, Shield, Mail, Phone, Settings, Plus, X, AlertCircle, Check } from 'lucide-react';
 import LoadingSpinner from './LoadingSpinner';
+import AccessLevelSelector from './AccessLevelSelector';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiClient, type ApiResponse, API_ENDPOINTS } from '@/lib/api';
 import type { FamilyAccessLevel, FamilyPermission } from '@shared/types';
@@ -59,7 +60,7 @@ export const UnifiedFamilyInvitation: React.FC<UnifiedFamilyInvitationProps> = (
     message: '',
     phone: '',
     relationship: 'spouse' as string,
-    accessLevel: 'limited' as FamilyAccessLevel,
+    accessLevel: 'view_only' as 'full' | 'view_only', // Phase 1: Only full and view_only
     permissions: ['view_appointments', 'receive_notifications'] as FamilyPermission[],
     isEmergencyContact: false,
     preferredContactMethod: 'email' as 'email' | 'phone' | 'sms'
@@ -73,9 +74,14 @@ export const UnifiedFamilyInvitation: React.FC<UnifiedFamilyInvitationProps> = (
 
   // Update permissions when access level changes
   const handleAccessLevelChange = (newAccessLevel: FamilyAccessLevel) => {
+    // For Phase 1, only allow 'full' and 'view_only'
+    const allowedLevel = (newAccessLevel === 'full' || newAccessLevel === 'view_only')
+      ? newAccessLevel
+      : 'view_only';
+    
     setFormData(prev => ({
       ...prev,
-      accessLevel: newAccessLevel,
+      accessLevel: allowedLevel,
       permissions: DEFAULT_PERMISSIONS[newAccessLevel]
     }));
   };
@@ -105,12 +111,13 @@ export const UnifiedFamilyInvitation: React.FC<UnifiedFamilyInvitationProps> = (
       console.log('🚀 Sending unified invitation request:', formData);
 
       // Prepare invitation data based on mode
-      const invitationData = currentMode === 'simple' 
+      const invitationData = currentMode === 'simple'
         ? {
-            // Simple mode - just email, name, and message
+            // Simple mode - email, name, message, and access level
             email: formData.email,
             patientName: formData.name,
-            message: formData.message
+            message: formData.message,
+            accessLevel: formData.accessLevel // Phase 1: Include access level
           }
         : {
             // Advanced mode - full permission data
@@ -144,7 +151,7 @@ export const UnifiedFamilyInvitation: React.FC<UnifiedFamilyInvitationProps> = (
         message: '',
         phone: '',
         relationship: 'spouse',
-        accessLevel: 'limited',
+        accessLevel: 'view_only', // Phase 1: Default to view_only
         permissions: ['view_appointments', 'receive_notifications'],
         isEmergencyContact: false,
         preferredContactMethod: 'email'
@@ -300,6 +307,15 @@ export const UnifiedFamilyInvitation: React.FC<UnifiedFamilyInvitationProps> = (
             />
           </div>
         </div>
+
+        {/* Access Level Selector - Always shown in simple mode, part of advanced mode */}
+        {currentMode === 'simple' && (
+          <AccessLevelSelector
+            selectedLevel={formData.accessLevel}
+            onChange={(level) => setFormData(prev => ({ ...prev, accessLevel: level }))}
+            disabled={isLoading}
+          />
+        )}
 
         {/* Advanced Fields - Only shown in advanced mode */}
         {currentMode === 'advanced' && (

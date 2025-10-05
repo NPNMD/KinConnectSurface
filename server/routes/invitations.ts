@@ -3,15 +3,17 @@ import { authenticateToken } from '../middleware/auth';
 import { familyAccessService } from '../services/familyAccessService';
 import { patientService } from '../services/patientService';
 import { userService } from '../services/userService';
+import { emailService } from '../services/emailService';
 import { adminDb } from '../firebase-admin';
 import type { FamilyCalendarAccess } from '@shared/types';
+import { derivePermissionsFromAccessLevel, isValidAccessLevel } from '../utils/accessLevelPermissions';
 
 const router = Router();
 
 // Send family invitation
 router.post('/send', authenticateToken, async (req, res) => {
   try {
-    const { email, patientName } = req.body;
+    const { email, patientName, accessLevel } = req.body;
     const senderUserId = req.user!.uid;
 
     // Validate required fields
@@ -28,6 +30,15 @@ router.post('/send', authenticateToken, async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'Invalid email format'
+      });
+    }
+
+    // Validate and default access level
+    const selectedAccessLevel = accessLevel || 'view_only'; // Default to view_only for backward compatibility
+    if (!isValidAccessLevel(selectedAccessLevel)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid access level. Must be either "full" or "view_only"'
       });
     }
 
@@ -49,17 +60,8 @@ router.post('/send', authenticateToken, async (req, res) => {
       });
     }
 
-    // Define permissions for the invitation
-    const permissions: FamilyCalendarAccess['permissions'] = {
-      canView: true,
-      canCreate: false,
-      canEdit: false,
-      canDelete: false,
-      canClaimResponsibility: true,
-      canManageFamily: false,
-      canViewMedicalDetails: false,
-      canReceiveNotifications: true
-    };
+    // Derive permissions from access level
+    const permissions = derivePermissionsFromAccessLevel(selectedAccessLevel);
 
     // Create family invitation using the existing service
     const invitation = await familyAccessService.createFamilyInvitation(
@@ -67,7 +69,7 @@ router.post('/send', authenticateToken, async (req, res) => {
       email,
       patientName,
       permissions,
-      'limited',
+      selectedAccessLevel,
       senderUserId
     );
 
@@ -131,6 +133,51 @@ router.get('/pending', authenticateToken, async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Internal server error'
+    });
+  }
+});
+
+// Get all family members for a patient (pending + accepted)
+// IMPORTANT: This specific route must come BEFORE the generic /:token route
+router.get('/family-access/patient/:patientId', authenticateToken, async (req, res) => {
+  try {
+    const { patientId } = req.params;
+    const userId = req.user!.uid;
+
+    // Verify the requesting user is the patient
+    if (userId !== patientId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Unauthorized: You can only view your own family members'
+      });
+    }
+
+    // Get all family access records for this patient
+    const familyMembersResponse = await familyAccessService.getFamilyAccessByPatientId(patientId);
+    
+    if (!familyMembersResponse.success || !familyMembersResponse.data) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch family members'
+      });
+    }
+
+    // Sort: pending first, then by date
+    const sorted = familyMembersResponse.data.sort((a, b) => {
+      if (a.status === 'pending' && b.status !== 'pending') return -1;
+      if (a.status !== 'pending' && b.status === 'pending') return 1;
+      return new Date(b.invitedAt).getTime() - new Date(a.invitedAt).getTime();
+    });
+
+    res.json({
+      success: true,
+      data: sorted
+    });
+  } catch (error) {
+    console.error('Error fetching family members:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch family members'
     });
   }
 });
@@ -203,36 +250,34 @@ router.post('/accept/:token', authenticateToken, async (req, res) => {
   }
 });
 
-// Decline invitation (revoke it)
-router.post('/decline/:token', authenticateToken, async (req, res) => {
+// Decline invitation
+router.post('/invitations/:invitationId/decline', authenticateToken, async (req, res) => {
   try {
-    const { token } = req.params;
-    const userId = req.user!.uid;
+    const { invitationId } = req.params;
+    const { reason } = req.body;
 
-    // Find the invitation by token first
-    const familyAccess = await familyAccessService.getFamilyAccessByMemberId(userId);
-    if (!familyAccess.success) {
-      return res.status(500).json(familyAccess);
-    }
-
-    // Find the invitation with the matching token
-    const invitation = familyAccess.data?.find(access =>
-      access.invitationToken === token && access.status === 'pending'
-    );
-
-    if (!invitation) {
+    // Get the invitation
+    const invitationDoc = await adminDb.collection('family_calendar_access').doc(invitationId).get();
+    
+    if (!invitationDoc.exists) {
       return res.status(404).json({
         success: false,
-        error: 'Invitation not found or already processed'
+        error: 'Invitation not found'
       });
     }
 
-    // Revoke the invitation
-    const result = await familyAccessService.revokeFamilyAccess(
-      invitation.id,
-      userId,
-      'Invitation declined by recipient'
-    );
+    const invitation = invitationDoc.data() as FamilyCalendarAccess;
+
+    // Verify invitation is pending
+    if (invitation.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        error: 'Can only decline pending invitations'
+      });
+    }
+
+    // Decline the invitation using the service
+    const result = await familyAccessService.declineInvitation(invitationId, reason);
     
     if (!result.success) {
       return res.status(400).json(result);
@@ -458,5 +503,230 @@ async function getFamilyMembersWithAccessToMe(userId: string): Promise<any[]> {
     return [];
   }
 }
+
+// ===== PHASE 2: FAMILY MANAGEMENT ENDPOINTS =====
+
+// Remove a family member (soft delete)
+router.delete('/family-access/:accessId', authenticateToken, async (req, res) => {
+  try {
+    const { accessId } = req.params;
+    const userId = req.user!.uid;
+
+    // Get the access record
+    const accessDoc = await adminDb.collection('family_calendar_access').doc(accessId).get();
+    
+    if (!accessDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Family access record not found'
+      });
+    }
+
+    const access = accessDoc.data() as FamilyCalendarAccess;
+
+    // Verify user owns this patient record
+    const patient = await patientService.getPatientByUserId(userId);
+    if (!patient.success || !patient.data || patient.data.id !== access.patientId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied - you can only remove your own family members'
+      });
+    }
+
+    // Revoke the access
+    const result = await familyAccessService.revokeFamilyAccess(
+      accessId,
+      userId,
+      'Removed by patient'
+    );
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    // Send notification email to removed family member
+    if (access.familyMemberEmail && access.familyMemberName) {
+      const patientUser = await userService.getUserById(userId);
+      if (patientUser.success && patientUser.data) {
+        await emailService.sendAccessRemoved({
+          familyMemberName: access.familyMemberName,
+          familyMemberEmail: access.familyMemberEmail,
+          patientName: patientUser.data.name,
+          patientEmail: patientUser.data.email
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Family member removed successfully'
+    });
+  } catch (error) {
+    console.error('Error removing family member:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Change family member's access level
+router.patch('/family-access/:accessId/access-level', authenticateToken, async (req, res) => {
+  try {
+    const { accessId } = req.params;
+    const { accessLevel } = req.body;
+    const userId = req.user!.uid;
+
+    // Validate access level
+    if (!isValidAccessLevel(accessLevel)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid access level. Must be either "full" or "view_only"'
+      });
+    }
+
+    // Get the access record
+    const accessDoc = await adminDb.collection('family_calendar_access').doc(accessId).get();
+    
+    if (!accessDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Family access record not found'
+      });
+    }
+
+    const access = accessDoc.data() as FamilyCalendarAccess;
+
+    // Verify user owns this patient record
+    const patient = await patientService.getPatientByUserId(userId);
+    if (!patient.success || !patient.data || patient.data.id !== access.patientId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied - you can only modify your own family members'
+      });
+    }
+
+    // Derive new permissions from access level
+    const newPermissions = derivePermissionsFromAccessLevel(accessLevel);
+
+    // Update the access record
+    const result = await familyAccessService.updateFamilyAccess(
+      accessId,
+      {
+        accessLevel,
+        permissions: newPermissions
+      },
+      userId
+    );
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    // Send notification email to family member
+    if (access.familyMemberEmail && access.familyMemberName) {
+      const patientUser = await userService.getUserById(userId);
+      if (patientUser.success && patientUser.data) {
+        await emailService.sendAccessLevelChanged({
+          familyMemberName: access.familyMemberName,
+          familyMemberEmail: access.familyMemberEmail,
+          patientName: patientUser.data.name,
+          oldAccessLevel: access.accessLevel,
+          newAccessLevel: accessLevel,
+          newPermissions: Object.entries(newPermissions)
+            .filter(([_, value]) => value === true)
+            .map(([key, _]) => key)
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Access level updated successfully',
+      data: result.data
+    });
+  } catch (error) {
+    console.error('Error updating access level:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Resend pending invitation
+router.post('/invitations/:invitationId/resend', authenticateToken, async (req, res) => {
+  try {
+    const { invitationId } = req.params;
+    const userId = req.user!.uid;
+
+    // Get the invitation
+    const invitationDoc = await adminDb.collection('family_calendar_access').doc(invitationId).get();
+    
+    if (!invitationDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Invitation not found'
+      });
+    }
+
+    const invitation = invitationDoc.data() as FamilyCalendarAccess;
+
+    // Verify user owns this patient record
+    const patient = await patientService.getPatientByUserId(userId);
+    if (!patient.success || !patient.data || patient.data.id !== invitation.patientId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied - you can only resend your own invitations'
+      });
+    }
+
+    // Verify invitation is still pending
+    if (invitation.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        error: 'Can only resend pending invitations'
+      });
+    }
+
+    // Generate new token and extend expiration
+    const newToken = `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    await invitationDoc.ref.update({
+      invitationToken: newToken,
+      invitationExpiresAt: newExpiresAt,
+      updatedAt: new Date()
+    });
+
+    // Send new invitation email
+    const patientUser = await userService.getUserById(userId);
+    if (patientUser.success && patientUser.data) {
+      await emailService.sendFamilyInvitation({
+        patientName: patientUser.data.name,
+        patientEmail: patientUser.data.email,
+        familyMemberName: invitation.familyMemberName,
+        familyMemberEmail: invitation.familyMemberEmail,
+        invitationToken: newToken,
+        permissions: [] // Will be formatted in email service
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Invitation resent successfully',
+      data: {
+        invitationId,
+        expiresAt: newExpiresAt
+      }
+    });
+  } catch (error) {
+    console.error('Error resending invitation:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
 
 export default router;

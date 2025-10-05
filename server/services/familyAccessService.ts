@@ -20,7 +20,7 @@ export class FamilyAccessService {
     familyMemberEmail: string,
     familyMemberName: string,
     permissions: FamilyCalendarAccess['permissions'],
-    accessLevel: 'full' | 'limited' | 'emergency_only',
+    accessLevel: 'full' | 'view_only' | 'limited' | 'emergency_only',
     invitedBy: string,
     eventTypesAllowed?: import('@shared/types').MedicalEventType[]
   ): Promise<ApiResponse<{ invitation: FamilyCalendarAccess; invitationToken: string }>> {
@@ -388,7 +388,7 @@ export class FamilyAccessService {
   // Rollback failed invitation acceptance
   async rollbackFailedInvitationAcceptance(
     invitationToken: string,
-    familyMemberId: string
+    _familyMemberId: string
   ): Promise<void> {
     try {
       console.log('🔄 Attempting rollback of failed invitation acceptance');
@@ -871,6 +871,67 @@ export class FamilyAccessService {
       return {
         success: false,
         error: 'Failed to revoke family access'
+      };
+    }
+  }
+
+  // Decline family invitation
+  async declineInvitation(
+    invitationId: string,
+    reason?: string
+  ): Promise<ApiResponse<void>> {
+    try {
+      const invitationDoc = await this.familyAccessCollection.doc(invitationId).get();
+      
+      if (!invitationDoc.exists) {
+        return {
+          success: false,
+          error: 'Invitation not found'
+        };
+      }
+
+      const invitation = invitationDoc.data() as FamilyCalendarAccess;
+
+      // Verify invitation is still pending
+      if (invitation.status !== 'pending') {
+        return {
+          success: false,
+          error: 'Can only decline pending invitations'
+        };
+      }
+
+      // Update status to declined (keep for audit trail)
+      await invitationDoc.ref.update({
+        status: 'declined',
+        declinedAt: new Date(),
+        declineReason: reason,
+        updatedAt: new Date()
+      });
+
+      // Log the decline action
+      await this.logFamilyAccessAction(invitation.patientId, invitation.createdBy, 'invitation_declined', {
+        familyMemberEmail: invitation.familyMemberEmail,
+        reason
+      });
+
+      // Send notification email to patient
+      const patientUser = await this.getUserById(invitation.createdBy);
+      if (patientUser.success && patientUser.data) {
+        await emailService.sendInvitationDeclined({
+          patientName: patientUser.data.name,
+          patientEmail: patientUser.data.email,
+          familyMemberName: invitation.familyMemberName,
+          familyMemberEmail: invitation.familyMemberEmail,
+          reason
+        });
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error declining invitation:', error);
+      return {
+        success: false,
+        error: 'Failed to decline invitation'
       };
     }
   }

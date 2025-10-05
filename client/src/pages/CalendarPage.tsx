@@ -13,12 +13,16 @@ import {
 } from 'lucide-react';
 import CalendarIntegration from '@/components/CalendarIntegration';
 import PatientSwitcher from '@/components/PatientSwitcher';
+import { ViewOnlyBanner } from '@/components/ViewOnlyBanner';
 
 export default function CalendarPage() {
   const { getEffectivePatientId, userRole, activePatientAccess } = useFamily();
 
   return (
     <div className="min-h-screen bg-gray-50 overflow-x-hidden">
+      {/* View-Only Banner */}
+      <ViewOnlyBanner />
+      
       {/* Mobile-First Header */}
       <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
         <div className="px-4 py-3 max-w-full">

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useFamily } from '@/contexts/FamilyContext';
 import {
   Heart,
   ArrowLeft,
@@ -19,6 +20,8 @@ import {
   MapPin,
   Phone
 } from 'lucide-react';
+import { ViewOnlyBanner } from '@/components/ViewOnlyBanner';
+import { PermissionGate } from '@/components/PermissionGate';
 import {
   HealthcareProvider,
   NewHealthcareProvider,
@@ -40,6 +43,7 @@ import PharmacyAutocomplete from '@/components/PharmacyAutocomplete';
 
 export default function PatientProfile() {
   const { user } = useAuth();
+  const { hasPermission } = useFamily();
   const [isEditing, setIsEditing] = useState(false);
   const [healthcareProviders, setHealthcareProviders] = useState<HealthcareProvider[]>([]);
   const [medicalFacilities, setMedicalFacilities] = useState<MedicalFacility[]>([]);
@@ -568,6 +572,9 @@ export default function PatientProfile() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* View-Only Banner */}
+      <ViewOnlyBanner />
+      
       {/* Mobile-First Header */}
       <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
         <div className="px-4 py-3">
@@ -613,32 +620,34 @@ export default function PatientProfile() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Personal Information</h2>
             
-            {isEditing ? (
-              <div className="flex items-center space-x-2">
+            <PermissionGate requiredPermission="canEdit">
+              {isEditing ? (
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={handleCancel}
+                    className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center space-x-1"
+                  >
+                    <X className="w-4 h-4" />
+                    <span>Cancel</span>
+                  </button>
+                  <button
+                    onClick={handleSave}
+                    className="px-3 py-1.5 text-sm text-white bg-primary-600 hover:bg-primary-700 rounded-md transition-colors flex items-center space-x-1"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>Save</span>
+                  </button>
+                </div>
+              ) : (
                 <button
-                  onClick={handleCancel}
-                  className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center space-x-1"
+                  onClick={() => setIsEditing(true)}
+                  className="px-3 py-1.5 text-sm text-primary-600 hover:text-primary-700 border border-primary-600 rounded-md hover:bg-primary-50 transition-colors flex items-center space-x-1"
                 >
-                  <X className="w-4 h-4" />
-                  <span>Cancel</span>
+                  <Edit className="w-4 h-4" />
+                  <span>Edit</span>
                 </button>
-                <button
-                  onClick={handleSave}
-                  className="px-3 py-1.5 text-sm text-white bg-primary-600 hover:bg-primary-700 rounded-md transition-colors flex items-center space-x-1"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>Save</span>
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setIsEditing(true)}
-                className="px-3 py-1.5 text-sm text-primary-600 hover:text-primary-700 border border-primary-600 rounded-md hover:bg-primary-50 transition-colors flex items-center space-x-1"
-              >
-                <Edit className="w-4 h-4" />
-                <span>Edit</span>
-              </button>
-            )}
+              )}
+            </PermissionGate>
           </div>
           
           <div className="space-y-4">
@@ -649,7 +658,7 @@ export default function PatientProfile() {
                 type="date"
                 value={formData.dateOfBirth}
                 onChange={(e) => handleInputChange('dateOfBirth', e.target.value)}
-                disabled={!isEditing}
+                disabled={!isEditing || !hasPermission('canEdit')}
                 className="input disabled:bg-gray-50 disabled:text-gray-500"
               />
             </div>
@@ -837,13 +846,15 @@ export default function PatientProfile() {
         <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Insurance Information</h2>
-            <button
-              onClick={() => setIsAddingInsurance(true)}
-              className="btn-primary flex items-center space-x-2"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add Insurance</span>
-            </button>
+            <PermissionGate requiredPermission="canCreate">
+              <button
+                onClick={() => setIsAddingInsurance(true)}
+                className="btn-primary flex items-center space-x-2"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Insurance</span>
+              </button>
+            </PermissionGate>
           </div>
 
           {isLoadingInsurance ? (

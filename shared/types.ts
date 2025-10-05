@@ -1133,7 +1133,7 @@ export interface FamilyCalendarAccess {
   };
   
   // Access Scope
-  accessLevel: 'full' | 'limited' | 'emergency_only';
+  accessLevel: 'full' | 'view_only' | 'limited' | 'emergency_only';
   eventTypesAllowed?: MedicalEventType[]; // If limited access
   
   // Emergency Access
@@ -1185,7 +1185,7 @@ export interface NewFamilyCalendarAccess {
     canViewMedicalDetails: boolean;
     canReceiveNotifications: boolean;
   };
-  accessLevel: 'full' | 'limited' | 'emergency_only';
+  accessLevel: 'full' | 'view_only' | 'limited' | 'emergency_only';
   eventTypesAllowed?: MedicalEventType[];
   emergencyAccess: boolean;
   emergencyContactPriority?: number;

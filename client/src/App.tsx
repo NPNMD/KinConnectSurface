@@ -9,6 +9,7 @@ import PatientProfile from '@/pages/PatientProfile';
 import Medications from '@/pages/Medications';
 import CalendarPage from '@/pages/CalendarPage';
 import InvitePatient from '@/pages/InvitePatient';
+import FamilyManagement from '@/pages/FamilyManagement';
 import AcceptInvitation from '@/pages/AcceptInvitation';
 import FamilyMemberAuth from '@/pages/FamilyMemberAuth';
 import TestFamilyInviteFlow from '@/pages/TestFamilyInviteFlow';
@@ -132,6 +133,12 @@ function AppRoutes() {
       <Route path="/family/invite" element={
         <ProtectedRoute>
           <InvitePatient />
+        </ProtectedRoute>
+      } />
+      
+      <Route path="/family-management" element={
+        <ProtectedRoute>
+          <FamilyManagement />
         </ProtectedRoute>
       } />
       
