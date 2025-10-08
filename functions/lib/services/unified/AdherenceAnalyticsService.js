@@ -10,10 +10,11 @@
  * - Risk assessment and predictions
  * - Adherence reporting and insights
  * - Milestone tracking and achievements
+ * - Triggering family notifications for concerning patterns
  *
  * This service does NOT:
  * - Modify medication commands or events (read-only analytics)
- * - Send notifications (delegates to NotificationService)
+ * - Send notifications directly (delegates to FamilyAdherenceNotificationService)
  * - Handle transactions (read-only operations)
  * - Manage UI state (pure data service)
  */
@@ -54,6 +55,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AdherenceAnalyticsService = void 0;
 const admin = __importStar(require("firebase-admin"));
 const unifiedMedicationSchema_1 = require("../../schemas/unifiedMedicationSchema");
+// Import FamilyAdherenceNotificationService for pattern notifications
+// Note: Lazy initialization to avoid circular dependencies
+let familyNotificationService = null;
 class AdherenceAnalyticsService {
     firestore;
     eventsCollection;
@@ -120,6 +124,11 @@ class AdherenceAnalyticsService {
                 medicationId: options.medicationId,
                 adherenceRate: coreMetrics.overallAdherenceRate,
                 riskLevel: riskAssessment.currentRiskLevel
+            });
+            // Trigger family notifications for concerning patterns (async, don't wait)
+            this.triggerFamilyNotificationsIfNeeded(analytics).catch(error => {
+                console.error('❌ Error triggering family notifications:', error);
+                // Don't fail the analytics calculation if notification fails
             });
             return {
                 success: true,
@@ -1063,6 +1072,50 @@ class AdherenceAnalyticsService {
                 createdAt: data.metadata.createdAt.toDate()
             }
         };
+    }
+    /**
+     * Trigger family notifications for concerning adherence patterns
+     * This is called asynchronously after adherence calculation
+     */
+    async triggerFamilyNotificationsIfNeeded(analytics) {
+        try {
+            // Lazy load FamilyAdherenceNotificationService to avoid circular dependency
+            if (!familyNotificationService) {
+                const { FamilyAdherenceNotificationService } = await Promise.resolve().then(() => __importStar(require('../FamilyAdherenceNotificationService')));
+                familyNotificationService = new FamilyAdherenceNotificationService();
+            }
+            // Check if any concerning patterns exist
+            const shouldNotify = analytics.patterns.consecutiveMissedDoses >= 2 ||
+                analytics.patterns.improvementTrend === 'declining' ||
+                analytics.adherenceMetrics.overallAdherenceRate < 70 ||
+                analytics.riskAssessment.currentRiskLevel === 'high' ||
+                analytics.riskAssessment.currentRiskLevel === 'critical';
+            if (!shouldNotify) {
+                return;
+            }
+            console.log('🔔 Triggering family notifications for concerning adherence patterns');
+            // Detect patterns
+            const patternsResult = await familyNotificationService.detectAdherencePatterns(analytics.patientId, analytics.medicationId);
+            if (patternsResult.success && patternsResult.data && patternsResult.data.length > 0) {
+                // Send pattern alerts (async, don't wait)
+                familyNotificationService.sendPatternAlerts(analytics.patientId, patternsResult.data)
+                    .then((result) => {
+                    if (result.success) {
+                        console.log(`✅ Family notifications triggered: ${result.data?.alertsSent || 0} alerts sent`);
+                    }
+                    else {
+                        console.error('❌ Failed to send family notifications:', result.error);
+                    }
+                })
+                    .catch((error) => {
+                    console.error('❌ Error sending family notifications:', error);
+                });
+            }
+        }
+        catch (error) {
+            console.error('❌ Error in triggerFamilyNotificationsIfNeeded:', error);
+            // Don't throw - this is a best-effort notification
+        }
     }
 }
 exports.AdherenceAnalyticsService = AdherenceAnalyticsService;

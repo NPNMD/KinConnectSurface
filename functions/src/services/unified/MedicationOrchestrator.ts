@@ -24,6 +24,7 @@ import {
   MedicationEventType,
   MEDICATION_EVENT_TYPES,
   UnifiedFamilyAccess,
+  UndoMedicationRequest,
   generateCorrelationId
 } from '../../schemas/unifiedMedicationSchema';
 
@@ -31,6 +32,7 @@ import { MedicationCommandService, CreateMedicationCommandRequest } from './Medi
 import { MedicationEventService, CreateEventRequest } from './MedicationEventService';
 import { MedicationNotificationService, NotificationRequest } from './MedicationNotificationService';
 import { MedicationTransactionManager } from './MedicationTransactionManager';
+import { MedicationUndoService } from './MedicationUndoService';
 
 export interface CreateMedicationWorkflowRequest {
   patientId: string;
@@ -101,12 +103,14 @@ export class MedicationOrchestrator {
   private eventService: MedicationEventService;
   private notificationService: MedicationNotificationService;
   private transactionManager: MedicationTransactionManager;
+  private undoService: MedicationUndoService;
 
   constructor() {
     this.commandService = new MedicationCommandService();
     this.eventService = new MedicationEventService();
     this.notificationService = new MedicationNotificationService();
     this.transactionManager = new MedicationTransactionManager();
+    this.undoService = new MedicationUndoService();
   }
 
   // ===== MEDICATION LIFECYCLE WORKFLOWS =====
@@ -670,6 +674,121 @@ export class MedicationOrchestrator {
 
     } catch (error) {
       console.error('❌ MedicationOrchestrator: Status change workflow failed:', error);
+      
+      return {
+        success: false,
+        workflowId,
+        correlationId,
+        commandId,
+        eventIds: [],
+        notificationsSent: 0,
+        error: error instanceof Error ? error.message : 'Workflow failed',
+        executionTimeMs: Date.now() - startTime
+      };
+    }
+  }
+
+  /**
+   * Workflow for undoing medication events
+   */
+  async undoMedicationWorkflow(
+    commandId: string,
+    undoRequest: UndoMedicationRequest,
+    notificationOptions?: {
+      notifyFamily: boolean;
+      urgency: 'low' | 'medium' | 'high' | 'critical';
+    }
+  ): Promise<WorkflowResult> {
+    const startTime = Date.now();
+    const workflowId = this.generateWorkflowId();
+    const correlationId = generateCorrelationId();
+
+    console.log('🚀 MedicationOrchestrator: Starting undo medication workflow:', workflowId);
+
+    try {
+      // Phase 1: Get command details
+      const commandResult = await this.commandService.getCommand(commandId);
+      
+      if (!commandResult.success || !commandResult.data) {
+        return {
+          success: false,
+          workflowId,
+          correlationId,
+          commandId,
+          eventIds: [],
+          notificationsSent: 0,
+          error: 'Command not found',
+          executionTimeMs: Date.now() - startTime
+        };
+      }
+
+      const command = commandResult.data;
+
+      // Phase 2: Execute undo through UndoService
+      console.log('📝 Phase 2: Executing undo operation');
+      
+      const undoResult = await this.undoService.undoMedicationEvent(undoRequest);
+
+      if (!undoResult.success) {
+        return {
+          success: false,
+          workflowId,
+          correlationId,
+          commandId,
+          eventIds: [],
+          notificationsSent: 0,
+          error: `Undo operation failed: ${undoResult.error}`,
+          executionTimeMs: Date.now() - startTime
+        };
+      }
+
+      console.log('✅ Phase 2 complete: Undo operation executed');
+
+      // Phase 3: Send notifications if configured
+      let notificationsSent = 0;
+      
+      if (notificationOptions?.notifyFamily) {
+        console.log('📝 Phase 3: Sending undo notifications');
+        
+        const recipients = await this.buildNotificationRecipients(command.patientId, 'status_change');
+        
+        if (recipients.length > 0) {
+          const notificationRequest: NotificationRequest = {
+            patientId: command.patientId,
+            commandId,
+            medicationName: command.medication.name,
+            notificationType: 'status_change',
+            urgency: notificationOptions.urgency,
+            title: 'Medication Action Undone',
+            message: `${command.medication.name} dose marking was undone. Reason: ${undoRequest.undoReason}`,
+            recipients,
+            context: {
+              correlationId,
+              triggerSource: 'user_action'
+            }
+          };
+
+          const notificationResult = await this.notificationService.sendNotification(notificationRequest);
+          notificationsSent = notificationResult.data?.totalSent || 0;
+        }
+      }
+
+      const executionTime = Date.now() - startTime;
+
+      console.log('✅ Undo medication workflow completed:', workflowId, `${executionTime}ms`);
+
+      return {
+        success: true,
+        workflowId,
+        correlationId,
+        commandId,
+        eventIds: [undoResult.undoEventId || ''],
+        notificationsSent,
+        executionTimeMs: executionTime
+      };
+
+    } catch (error) {
+      console.error('❌ MedicationOrchestrator: Undo medication workflow failed:', error);
       
       return {
         success: false,

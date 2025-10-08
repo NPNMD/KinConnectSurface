@@ -21,6 +21,7 @@ import TimeBucketView from '@/components/TimeBucketView';
 import MissedMedicationsModal from '@/components/MissedMedicationsModal';
 import UnscheduledMedicationsAlert from '@/components/UnscheduledMedicationsAlert';
 import AdherenceDashboard from '@/components/AdherenceDashboard';
+import MedicationMigrationTrigger from '@/components/MedicationMigrationTrigger';
 import { ViewOnlyBanner } from '@/components/ViewOnlyBanner';
 import { PermissionGate } from '@/components/PermissionGate';
 
@@ -532,6 +533,17 @@ export default function Medications() {
             </div>
           </div>
         )}
+
+        {/* Migration Trigger */}
+        <MedicationMigrationTrigger
+          patientId={getEffectivePatientId() || undefined}
+          onMigrationComplete={() => {
+            loadMedications();
+            setRefreshTrigger(prev => prev + 1);
+            loadMissedMedicationsCount();
+            loadAdherenceStats();
+          }}
+        />
 
         {/* Unscheduled Medications Alert */}
         <UnscheduledMedicationsAlert

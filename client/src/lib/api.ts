@@ -428,7 +428,7 @@ export const API_ENDPOINTS = {
   PATIENT_SEARCH_ALLERGY: '/patients/search/allergy',
   PATIENT_SEARCH_AGE: '/patients/search/age',
   
-  // Medications
+  // Medications (Legacy)
   MEDICATIONS: '/medications',
   MEDICATIONS_FOR_PATIENT: (patientId: string) => `/medications?patientId=${patientId}`,
   MEDICATION_BY_ID: (id: string) => `/medications/${id}`,
@@ -438,6 +438,17 @@ export const API_ENDPOINTS = {
   PATIENT_MEDICATION_LOGS: (patientId: string) => `/patients/${patientId}/medication-logs`,
   MEDICATION_REMINDERS: '/medication-reminders',
   PATIENT_MEDICATION_REMINDERS: (patientId: string) => `/patients/${patientId}/medication-reminders`,
+  
+  // Unified Medications
+  UNIFIED_MEDICATIONS: '/unified-medication/medication-commands',
+  UNIFIED_MEDICATION_BY_ID: (id: string) => `/unified-medication/medication-commands/${id}`,
+  UNIFIED_MEDICATION_SCHEDULE: (id: string) => `/unified-medication/medication-commands/${id}/schedule`,
+  UNIFIED_MEDICATION_REMINDERS: (id: string) => `/unified-medication/medication-commands/${id}/reminders`,
+  UNIFIED_MEDICATION_STATUS: (id: string) => `/unified-medication/medication-commands/${id}/status`,
+  UNIFIED_MEDICATION_TAKE: (id: string) => `/unified-medication/medication-commands/${id}/take`,
+  UNIFIED_MEDICATION_SKIP: (id: string) => `/unified-medication/medication-commands/${id}/skip`,
+  UNIFIED_MEDICATION_SNOOZE: (id: string) => `/unified-medication/medication-commands/${id}/snooze`,
+  UNIFIED_MIGRATE: '/unified-medication/migrate',
   
   // Drug search (external API integration)
   DRUG_SEARCH: '/drugs/search',
@@ -499,3 +510,77 @@ export type ApiResponse<T> = {
   error?: string;
   message?: string;
 };
+
+// ===== UNIFIED MEDICATION API HELPERS =====
+
+/**
+ * Get medications using unified API
+ */
+export async function getUnifiedMedications(options: {
+  patientId?: string;
+  status?: string;
+  isActive?: boolean;
+} = {}): Promise<ApiResponse<any[]>> {
+  const params = new URLSearchParams();
+  if (options.patientId) params.append('patientId', options.patientId);
+  if (options.status) params.append('status', options.status);
+  if (options.isActive !== undefined) params.append('isActive', options.isActive.toString());
+  
+  const endpoint = `${API_ENDPOINTS.UNIFIED_MEDICATIONS}${params.toString() ? `?${params}` : ''}`;
+  return apiClient.get(endpoint);
+}
+
+/**
+ * Get single medication using unified API
+ */
+export async function getUnifiedMedication(id: string): Promise<ApiResponse<any>> {
+  return apiClient.get(API_ENDPOINTS.UNIFIED_MEDICATION_BY_ID(id));
+}
+
+/**
+ * Create medication using unified API
+ */
+export async function createUnifiedMedication(data: {
+  name: string;
+  dosage: string;
+  frequency: string;
+  instructions?: string;
+  scheduleData?: any;
+  reminderSettings?: any;
+}): Promise<ApiResponse<any>> {
+  return apiClient.post(API_ENDPOINTS.UNIFIED_MEDICATIONS, data);
+}
+
+/**
+ * Update medication schedule
+ */
+export async function updateMedicationSchedule(id: string, scheduleData: any): Promise<ApiResponse<any>> {
+  return apiClient.put(API_ENDPOINTS.UNIFIED_MEDICATION_SCHEDULE(id), scheduleData);
+}
+
+/**
+ * Update medication reminders
+ */
+export async function updateMedicationReminders(id: string, reminderData: any): Promise<ApiResponse<any>> {
+  return apiClient.put(API_ENDPOINTS.UNIFIED_MEDICATION_REMINDERS(id), reminderData);
+}
+
+/**
+ * Update medication status
+ */
+export async function updateMedicationStatus(id: string, status: {
+  current: 'active' | 'paused' | 'discontinued';
+  reason?: string;
+}): Promise<ApiResponse<any>> {
+  return apiClient.put(API_ENDPOINTS.UNIFIED_MEDICATION_STATUS(id), status);
+}
+
+/**
+ * Trigger medication migration
+ */
+export async function migrateMedications(options: {
+  patientId?: string;
+  dryRun?: boolean;
+}): Promise<ApiResponse<any>> {
+  return apiClient.post(API_ENDPOINTS.UNIFIED_MIGRATE, options);
+}

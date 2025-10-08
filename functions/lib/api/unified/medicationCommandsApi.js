@@ -55,14 +55,14 @@ const express_1 = __importDefault(require("express"));
 const admin = __importStar(require("firebase-admin"));
 const MedicationOrchestrator_1 = require("../../services/unified/MedicationOrchestrator");
 const MedicationCommandService_1 = require("../../services/unified/MedicationCommandService");
-const MedicationEventService_1 = require("../../services/unified/MedicationEventService");
 const AdherenceAnalyticsService_1 = require("../../services/unified/AdherenceAnalyticsService");
-const unifiedMedicationSchema_1 = require("../../schemas/unifiedMedicationSchema");
+const MedicationUndoService_1 = require("../../services/unified/MedicationUndoService");
 const router = express_1.default.Router();
 // Lazy initialization to avoid Firebase Admin initialization order issues
 let orchestrator;
 let commandService;
 let adherenceService;
+let undoService;
 function getOrchestrator() {
     if (!orchestrator) {
         orchestrator = new MedicationOrchestrator_1.MedicationOrchestrator();
@@ -80,6 +80,12 @@ function getAdherenceService() {
         adherenceService = new AdherenceAnalyticsService_1.AdherenceAnalyticsService();
     }
     return adherenceService;
+}
+function getUndoService() {
+    if (!undoService) {
+        undoService = new MedicationUndoService_1.MedicationUndoService();
+    }
+    return undoService;
 }
 // ===== MEDICATION COMMANDS CRUD =====
 /**
@@ -553,7 +559,7 @@ router.post('/:commandId/take', async (req, res) => {
 });
 /**
  * POST /medication-commands/:id/undo-take
- * Undo accidental medication marking
+ * Undo accidental medication marking (within 30-second window)
  */
 router.post('/:commandId/undo-take', async (req, res) => {
     try {
@@ -574,96 +580,192 @@ router.post('/:commandId/undo-take', async (req, res) => {
                 error: 'Original event ID and undo reason are required'
             });
         }
-        // Check if undo is still allowed (within 30 seconds)
-        const eventService = new MedicationEventService_1.MedicationEventService();
-        const originalEventResult = await eventService.getEvent(undoRequest.originalEventId);
-        if (!originalEventResult.success || !originalEventResult.data) {
+        // Get command to verify access
+        const commandResult = await getCommandService().getCommand(commandId);
+        if (!commandResult.success || !commandResult.data) {
             return res.status(404).json({
                 success: false,
-                error: 'Original event not found'
-            });
-        }
-        const originalEvent = originalEventResult.data;
-        const timeSinceEvent = Date.now() - originalEvent.timing.eventTimestamp.getTime();
-        const undoTimeoutMs = 30 * 1000; // 30 seconds
-        if (timeSinceEvent > undoTimeoutMs) {
-            return res.status(410).json({
-                success: false,
-                error: 'Undo timeout expired. Cannot undo after 30 seconds.',
-                timeoutExpiredAt: new Date(originalEvent.timing.eventTimestamp.getTime() + undoTimeoutMs)
+                error: 'Medication not found'
             });
         }
         // Check access permissions
-        if (originalEvent.patientId !== userId) {
+        if (commandResult.data.patientId !== userId) {
             return res.status(403).json({
                 success: false,
                 error: 'Access denied'
             });
         }
-        // Execute undo workflow
-        // For now, create an undo event directly since the workflow doesn't exist yet
-        const undoEventResult = await eventService.createEvent({
-            commandId,
-            patientId: originalEvent.patientId,
-            eventType: unifiedMedicationSchema_1.ENHANCED_ADHERENCE_EVENT_TYPES.DOSE_TAKEN_UNDONE,
-            eventData: {
-                additionalData: {
-                    undoData: {
-                        isUndo: true,
-                        originalEventId: undoRequest.originalEventId,
-                        undoReason: undoRequest.undoReason,
-                        undoTimestamp: new Date(),
-                        correctedAction: undoRequest.correctedAction
-                    }
-                }
-            },
-            context: {
-                medicationName: originalEvent.context.medicationName,
-                triggerSource: 'user_action'
-            },
-            createdBy: userId
-        });
-        if (!undoEventResult.success) {
-            return res.status(500).json({
+        // Execute undo using MedicationUndoService
+        const undoResult = await getUndoService().undoMedicationEvent(undoRequest);
+        if (!undoResult.success) {
+            // Check if requires correction workflow
+            const validation = await getUndoService().validateUndo(undoRequest.originalEventId);
+            if (validation.requiresCorrection) {
+                return res.status(410).json({
+                    success: false,
+                    error: undoResult.error,
+                    requiresCorrection: true,
+                    timeoutExpiredAt: validation.timeoutExpiredAt,
+                    message: 'Undo timeout expired. Use the correction endpoint instead.'
+                });
+            }
+            return res.status(400).json({
                 success: false,
-                error: undoEventResult.error
+                error: undoResult.error
             });
         }
-        const undoWorkflowResult = {
-            success: true,
-            workflowId: `undo_${Date.now()}`,
-            correlationId: `corr_${Date.now()}`,
-            eventIds: [undoEventResult.data.id],
-            notificationsSent: 0,
-            executionTimeMs: 100
-        };
-        // Since we're creating the workflow result manually, it should always succeed
-        // In a full implementation, this would be handled by a proper undo workflow
-        // Calculate adherence impact
-        const adherenceImpact = await calculateUndoAdherenceImpact(commandId, originalEvent);
+        // Execute undo workflow through orchestrator if needed
+        const workflowResult = await getOrchestrator().undoMedicationWorkflow(commandId, undoRequest, {
+            notifyFamily: undoRequest.notifyFamily || false,
+            urgency: 'low'
+        });
         res.json({
             success: true,
             data: {
-                undoEventId: undoWorkflowResult.eventIds[0],
+                undoEventId: undoResult.undoEventId,
                 originalEventId: undoRequest.originalEventId,
-                correctedAction: undoRequest.correctedAction,
-                adherenceImpact: {
-                    previousScore: adherenceImpact.previousScore,
-                    newScore: adherenceImpact.newScore,
-                    streakImpact: adherenceImpact.streakImpact
-                }
+                correctedAction: undoResult.correctedAction,
+                adherenceImpact: undoResult.adherenceImpact
             },
             workflow: {
-                workflowId: undoWorkflowResult.workflowId,
-                correlationId: undoWorkflowResult.correlationId,
-                notificationsSent: undoWorkflowResult.notificationsSent,
-                executionTimeMs: undoWorkflowResult.executionTimeMs
+                workflowId: workflowResult.workflowId,
+                correlationId: workflowResult.correlationId,
+                notificationsSent: workflowResult.notificationsSent,
+                executionTimeMs: workflowResult.executionTimeMs
             },
             message: 'Medication take action undone successfully'
         });
     }
     catch (error) {
         console.error('❌ Error in POST /medication-commands/:id/undo-take:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+/**
+ * POST /medication-commands/:id/correct
+ * Correct older medication events (beyond 30-second undo window)
+ */
+router.post('/:commandId/correct', async (req, res) => {
+    try {
+        console.log('🔄 POST /medication-commands/:id/correct - Correcting medication:', req.params.commandId);
+        const userId = req.user?.uid;
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                error: 'Authentication required'
+            });
+        }
+        const { commandId } = req.params;
+        const { originalEventId, correctedAction, correctionReason, correctedData, notifyFamily = false } = req.body;
+        // Validate required fields
+        if (!originalEventId || !correctedAction || !correctionReason) {
+            return res.status(400).json({
+                success: false,
+                error: 'Original event ID, corrected action, and correction reason are required'
+            });
+        }
+        // Get command to verify access
+        const commandResult = await getCommandService().getCommand(commandId);
+        if (!commandResult.success || !commandResult.data) {
+            return res.status(404).json({
+                success: false,
+                error: 'Medication not found'
+            });
+        }
+        // Check access permissions
+        if (commandResult.data.patientId !== userId) {
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied'
+            });
+        }
+        // Execute correction using MedicationUndoService
+        const correctionResult = await getUndoService().correctMedicationEvent({
+            originalEventId,
+            correctedAction,
+            correctionReason,
+            correctedData,
+            correctedBy: userId,
+            notifyFamily
+        });
+        if (!correctionResult.success) {
+            return res.status(400).json({
+                success: false,
+                error: correctionResult.error
+            });
+        }
+        res.json({
+            success: true,
+            data: {
+                correctionEventId: correctionResult.undoEventId,
+                originalEventId,
+                correctedAction,
+                adherenceImpact: correctionResult.adherenceImpact
+            },
+            message: 'Medication event corrected successfully'
+        });
+    }
+    catch (error) {
+        console.error('❌ Error in POST /medication-commands/:id/correct:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+/**
+ * GET /medication-commands/:id/undo-history
+ * Get undo history for a medication
+ */
+router.get('/:commandId/undo-history', async (req, res) => {
+    try {
+        console.log('📋 GET /medication-commands/:id/undo-history - Getting undo history:', req.params.commandId);
+        const userId = req.user?.uid;
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                error: 'Authentication required'
+            });
+        }
+        const { commandId } = req.params;
+        const { limit } = req.query;
+        // Get command to verify access
+        const commandResult = await getCommandService().getCommand(commandId);
+        if (!commandResult.success || !commandResult.data) {
+            return res.status(404).json({
+                success: false,
+                error: 'Medication not found'
+            });
+        }
+        // Check access permissions
+        if (commandResult.data.patientId !== userId) {
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied'
+            });
+        }
+        // Get undo history
+        const historyResult = await getUndoService().getUndoHistory(commandId, limit ? parseInt(limit, 10) : 10);
+        if (!historyResult.success) {
+            return res.status(500).json({
+                success: false,
+                error: historyResult.error
+            });
+        }
+        res.json({
+            success: true,
+            data: historyResult.data || [],
+            total: historyResult.data?.length || 0,
+            message: 'Undo history retrieved successfully'
+        });
+    }
+    catch (error) {
+        console.error('❌ Error in GET /medication-commands/:id/undo-history:', error);
         res.status(500).json({
             success: false,
             error: 'Internal server error',

@@ -250,7 +250,7 @@ class MedicationNotificationService {
         }
     }
     /**
-     * Send SMS notification (placeholder - would integrate with Twilio or similar)
+     * Send SMS notification via Twilio
      */
     async sendSMSNotification(request, recipient) {
         try {
@@ -260,18 +260,58 @@ class MedicationNotificationService {
                     error: 'No phone number provided'
                 };
             }
-            // TODO: Integrate with SMS service (Twilio, AWS SNS, etc.)
-            console.log('📱 SMS notification would be sent to:', recipient.phone);
+            // Get Twilio credentials from environment
+            const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
+            const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+            const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
+            if (!twilioAccountSid || !twilioAuthToken || !twilioPhoneNumber) {
+                console.warn('⚠️ Twilio credentials not configured, SMS delivery skipped');
+                return {
+                    success: false,
+                    error: 'SMS service not configured'
+                };
+            }
+            // Import Twilio SDK dynamically
+            const twilio = require('twilio');
+            const client = twilio(twilioAccountSid, twilioAuthToken);
+            // Generate SMS content
+            const smsContent = this.generateSMSContent(request, recipient);
+            // Send SMS via Twilio
+            const message = await client.messages.create({
+                body: smsContent,
+                from: twilioPhoneNumber,
+                to: recipient.phone
+            });
+            console.log('✅ SMS sent successfully:', message.sid);
             return {
                 success: true,
-                messageId: `sms_${Date.now()}`
+                messageId: message.sid
             };
         }
         catch (error) {
+            console.error('❌ SMS delivery error:', error);
             return {
                 success: false,
                 error: error instanceof Error ? error.message : 'SMS delivery failed'
             };
+        }
+    }
+    /**
+     * Generate SMS content (concise for SMS character limits)
+     */
+    generateSMSContent(request, recipient) {
+        const { medicationName, notificationType, context } = request;
+        switch (notificationType) {
+            case 'reminder':
+                return `KinConnect: Time to take ${medicationName} (${context.medicationData?.dosageAmount}). Reply STOP to opt out.`;
+            case 'missed':
+                return `KinConnect: You missed your ${medicationName} dose. Please take it ASAP or contact your provider.`;
+            case 'alert':
+                return `KinConnect ALERT: ${request.message}`;
+            case 'status_change':
+                return `KinConnect: ${medicationName} - ${request.message}`;
+            default:
+                return `KinConnect: ${request.message}`;
         }
     }
     /**
@@ -626,89 +666,6 @@ class MedicationNotificationService {
             // Don't throw - logging failure shouldn't fail the notification
         }
     }
-    // ===== QUEUE PROCESSING =====
-    /**
-     * Process queued notifications (called by scheduled function)
-     */
-    async processNotificationQueue() {
-        try {
-            console.log('📥 MedicationNotificationService: Processing notification queue');
-            const now = admin.firestore.Timestamp.now();
-            // Get notifications ready for delivery
-            const queueQuery = await this.notificationQueue
-                .where('status', '==', 'queued')
-                .where('deliverAt', '<=', now)
-                .where('attempts', '<', 3)
-                .limit(50)
-                .get();
-            if (queueQuery.empty) {
-                return {
-                    success: true,
-                    data: { processed: 0, sent: 0, failed: 0, errors: [] }
-                };
-            }
-            const results = {
-                processed: 0,
-                sent: 0,
-                failed: 0,
-                errors: []
-            };
-            // Process each queued notification
-            for (const doc of queueQuery.docs) {
-                try {
-                    results.processed++;
-                    const queueItem = doc.data();
-                    // Send notification
-                    const sendResult = await this.sendNotification(queueItem);
-                    if (sendResult.success) {
-                        results.sent++;
-                        // Mark as sent
-                        await doc.ref.update({
-                            status: 'sent',
-                            sentAt: admin.firestore.Timestamp.now(),
-                            attempts: queueItem.attempts + 1
-                        });
-                    }
-                    else {
-                        results.failed++;
-                        results.errors.push(`${queueItem.medicationName}: ${sendResult.error}`);
-                        // Update attempt count
-                        const newAttempts = queueItem.attempts + 1;
-                        if (newAttempts >= queueItem.maxAttempts) {
-                            await doc.ref.update({
-                                status: 'failed',
-                                attempts: newAttempts,
-                                lastError: sendResult.error,
-                                failedAt: admin.firestore.Timestamp.now()
-                            });
-                        }
-                        else {
-                            await doc.ref.update({
-                                attempts: newAttempts,
-                                lastError: sendResult.error
-                            });
-                        }
-                    }
-                }
-                catch (itemError) {
-                    results.failed++;
-                    results.errors.push(`Queue item ${doc.id}: ${itemError instanceof Error ? itemError.message : 'Unknown error'}`);
-                }
-            }
-            console.log('📥 Queue processing complete:', results);
-            return {
-                success: true,
-                data: results
-            };
-        }
-        catch (error) {
-            console.error('❌ MedicationNotificationService: Error processing queue:', error);
-            return {
-                success: false,
-                error: error instanceof Error ? error.message : 'Failed to process notification queue'
-            };
-        }
-    }
     // ===== ANALYTICS =====
     /**
      * Get notification delivery statistics
@@ -777,6 +734,132 @@ class MedicationNotificationService {
                 error: error instanceof Error ? error.message : 'Failed to get delivery statistics'
             };
         }
+    }
+    // ===== QUEUE PROCESSING =====
+    /**
+     * Process queued notifications with retry logic (called by scheduled function)
+     */
+    async processNotificationQueue() {
+        try {
+            console.log('📥 MedicationNotificationService: Processing notification queue');
+            const now = admin.firestore.Timestamp.now();
+            // Get notifications ready for delivery
+            const queueQuery = await this.notificationQueue
+                .where('status', '==', 'queued')
+                .where('deliverAt', '<=', now)
+                .where('attempts', '<', 3)
+                .limit(50)
+                .get();
+            if (queueQuery.empty) {
+                return {
+                    success: true,
+                    data: { processed: 0, sent: 0, failed: 0, retried: 0, errors: [] }
+                };
+            }
+            const results = {
+                processed: 0,
+                sent: 0,
+                failed: 0,
+                retried: 0,
+                errors: []
+            };
+            // Process each queued notification with retry logic
+            for (const doc of queueQuery.docs) {
+                try {
+                    results.processed++;
+                    const queueItem = doc.data();
+                    // Implement exponential backoff for retries
+                    const backoffDelay = Math.pow(2, queueItem.attempts) * 1000; // 1s, 2s, 4s
+                    if (queueItem.attempts > 0) {
+                        console.log(`🔄 Retry attempt ${queueItem.attempts + 1} for ${queueItem.medicationName} (backoff: ${backoffDelay}ms)`);
+                        await new Promise(resolve => setTimeout(resolve, backoffDelay));
+                        results.retried++;
+                    }
+                    // Send notification with retry
+                    const sendResult = await this.sendNotificationWithRetry(queueItem);
+                    if (sendResult.success) {
+                        results.sent++;
+                        // Mark as sent
+                        await doc.ref.update({
+                            status: 'sent',
+                            sentAt: admin.firestore.Timestamp.now(),
+                            attempts: queueItem.attempts + 1,
+                            deliveryResult: sendResult.data
+                        });
+                    }
+                    else {
+                        results.failed++;
+                        results.errors.push(`${queueItem.medicationName}: ${sendResult.error}`);
+                        // Update attempt count
+                        const newAttempts = queueItem.attempts + 1;
+                        if (newAttempts >= queueItem.maxAttempts) {
+                            await doc.ref.update({
+                                status: 'failed',
+                                attempts: newAttempts,
+                                lastError: sendResult.error,
+                                failedAt: admin.firestore.Timestamp.now()
+                            });
+                            // Log permanent failure
+                            console.error(`❌ Permanent failure for ${queueItem.medicationName} after ${newAttempts} attempts`);
+                        }
+                        else {
+                            // Schedule retry with exponential backoff
+                            const nextRetryDelay = Math.pow(2, newAttempts) * 60 * 1000; // Minutes: 2, 4, 8
+                            const nextRetryTime = new Date(Date.now() + nextRetryDelay);
+                            await doc.ref.update({
+                                attempts: newAttempts,
+                                lastError: sendResult.error,
+                                deliverAt: admin.firestore.Timestamp.fromDate(nextRetryTime),
+                                nextRetryAt: admin.firestore.Timestamp.fromDate(nextRetryTime)
+                            });
+                            console.log(`🔄 Scheduled retry for ${queueItem.medicationName} at ${nextRetryTime.toISOString()}`);
+                        }
+                    }
+                }
+                catch (itemError) {
+                    results.failed++;
+                    results.errors.push(`Queue item ${doc.id}: ${itemError instanceof Error ? itemError.message : 'Unknown error'}`);
+                }
+            }
+            console.log('📥 Queue processing complete:', results);
+            return {
+                success: true,
+                data: results
+            };
+        }
+        catch (error) {
+            console.error('❌ MedicationNotificationService: Error processing queue:', error);
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to process notification queue'
+            };
+        }
+    }
+    /**
+     * Send notification with automatic retry logic
+     */
+    async sendNotificationWithRetry(request, maxRetries = 2) {
+        let lastError;
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            if (attempt > 0) {
+                console.log(`🔄 Retry attempt ${attempt} for ${request.medicationName}`);
+                // Wait before retry (exponential backoff)
+                await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+            }
+            const result = await this.sendNotification(request);
+            if (result.success) {
+                if (attempt > 0) {
+                    console.log(`✅ Retry successful on attempt ${attempt + 1}`);
+                }
+                return result;
+            }
+            lastError = result.error;
+            console.warn(`⚠️ Attempt ${attempt + 1} failed: ${lastError}`);
+        }
+        return {
+            success: false,
+            error: `Failed after ${maxRetries + 1} attempts: ${lastError}`
+        };
     }
 }
 exports.MedicationNotificationService = MedicationNotificationService;

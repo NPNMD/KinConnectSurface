@@ -395,14 +395,127 @@ export class TimeBucketService {
   // ===== UTILITY METHODS =====
 
   /**
-   * Validate time bucket configuration
+   * Validate time bucket configuration with enhanced 2 AM default prevention
    */
   validateTimeBuckets(preferences: PatientTimePreferences): {
     isValid: boolean;
     errors: string[];
     warnings: string[];
   } {
-    return TIME_BUCKET_UTILS.validateTimeBuckets(preferences);
+    const baseValidation = TIME_BUCKET_UTILS.validateTimeBuckets(preferences);
+    
+    // Enhanced validation to prevent 2 AM defaults
+    const twoAMValidation = this.validateAndPrevent2AMDefaults(preferences);
+    
+    return {
+      isValid: baseValidation.isValid && twoAMValidation.isValid,
+      errors: [...baseValidation.errors, ...twoAMValidation.errors],
+      warnings: [...baseValidation.warnings, ...twoAMValidation.warnings]
+    };
+  }
+
+  /**
+   * Validate and prevent 2 AM default time issues
+   * CRITICAL: Prevents the night shift 2 AM default bug
+   */
+  private validateAndPrevent2AMDefaults(preferences: PatientTimePreferences): {
+    isValid: boolean;
+    errors: string[];
+    warnings: string[];
+  } {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    // Determine work schedule type from lifestyle or default to standard
+    const workSchedule = this.inferWorkSchedule(preferences);
+
+    // Check each time bucket for problematic 02:00 defaults
+    Object.entries(preferences.timeBuckets).forEach(([bucketName, bucket]) => {
+      if (bucket.defaultTime === '02:00') {
+        if (workSchedule === 'night_shift' && bucketName === 'evening') {
+          // CRITICAL ERROR: This is the exact bug we're preventing
+          errors.push(
+            `CRITICAL: Night shift evening slot cannot default to 02:00. ` +
+            `Must use 00:00 (midnight) for evening slot (23:00-02:00 range).`
+          );
+        } else if (workSchedule === 'night_shift') {
+          // WARNING: Other night shift slots with 02:00 are unusual
+          warnings.push(
+            `Night shift ${bucketName} slot defaulting to 02:00 may cause confusion. ` +
+            `Consider using appropriate defaults: morning=15:00, lunch=20:00, beforeBed=08:00.`
+          );
+        } else {
+          // WARNING: Standard schedule with 02:00 is very unusual
+          warnings.push(
+            `${bucketName} slot defaulting to 02:00 is unusual for ${workSchedule} schedule. ` +
+            `This may indicate a configuration error. Verify this is intentional.`
+          );
+        }
+      }
+    });
+
+    // Specific validation for night shift evening slot configuration
+    if (workSchedule === 'night_shift' && preferences.timeBuckets.evening) {
+      const evening = preferences.timeBuckets.evening;
+
+      // Check for the exact problematic configuration
+      if (evening.timeRange.earliest === '01:00' &&
+          evening.timeRange.latest === '04:00' &&
+          evening.defaultTime === '02:00') {
+        errors.push(
+          `CRITICAL: Detected exact problematic night shift configuration. ` +
+          `Evening slot must be 23:00-02:00 with 00:00 default, not 01:00-04:00 with 02:00 default.`
+        );
+      }
+
+      // Ensure correct range and default for night shift evening
+      if (evening.timeRange.earliest === '23:00' &&
+          evening.timeRange.latest === '02:00' &&
+          evening.defaultTime !== '00:00') {
+        errors.push(
+          `Night shift evening slot (23:00-02:00) must default to 00:00 (midnight), not ${evening.defaultTime}.`
+        );
+      }
+
+      // Warn about any evening slot not using recommended configuration
+      if (evening.timeRange.earliest !== '23:00' || evening.timeRange.latest !== '02:00') {
+        warnings.push(
+          `Night shift evening slot uses non-standard range ${evening.timeRange.earliest}-${evening.timeRange.latest}. ` +
+          `Recommended: 23:00-02:00 with 00:00 default.`
+        );
+      }
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+      warnings
+    };
+  }
+
+  /**
+   * Infer work schedule type from patient preferences
+   */
+  private inferWorkSchedule(preferences: PatientTimePreferences): 'standard' | 'night_shift' | 'custom' {
+    // Check if morning slot is in afternoon (indicates night shift)
+    const morningTime = TIME_BUCKET_UTILS.timeToMinutes(preferences.timeBuckets.morning.defaultTime);
+    
+    // Night shift typically has morning in afternoon (14:00-18:00)
+    if (morningTime >= 14 * 60 && morningTime <= 18 * 60) {
+      return 'night_shift';
+    }
+
+    // Check if evening slot crosses midnight (indicates night shift)
+    const eveningStart = TIME_BUCKET_UTILS.timeToMinutes(preferences.timeBuckets.evening.timeRange.earliest);
+    const eveningEnd = TIME_BUCKET_UTILS.timeToMinutes(preferences.timeBuckets.evening.timeRange.latest);
+    
+    if (eveningStart > eveningEnd) {
+      // Range crosses midnight (e.g., 23:00-02:00)
+      return 'night_shift';
+    }
+
+    // Standard schedule
+    return 'standard';
   }
 
   /**

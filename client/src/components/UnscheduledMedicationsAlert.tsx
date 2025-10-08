@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AlertTriangle, Calendar, CheckCircle, Loader2, Bell, Wrench } from 'lucide-react';
 import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
 import { quickScheduleDiagnostic, autoRepairMedicationSchedules } from '@/lib/medicationScheduleFixes';
+import { isUnifiedMedication } from '@/types/medication';
 import type { Medication } from '@shared/types';
 
 interface UnscheduledMedicationsAlertProps {
@@ -25,11 +26,24 @@ export default function UnscheduledMedicationsAlert({
     const checkUnscheduledMedications = async () => {
       try {
         // Find medications with reminders enabled but no valid schedules
-        const medicationsWithReminders = medications.filter(med =>
-          med.hasReminders &&
-          med.isActive &&
-          !med.isPRN
-        );
+        // Handle both unified and legacy medication formats
+        const medicationsWithReminders = medications.filter(med => {
+          if (isUnifiedMedication(med)) {
+            // For unified medications: check reminders.enabled and status
+            return (
+              med.reminders?.enabled &&
+              med.status?.isActive &&
+              !med.status?.isPRN
+            );
+          } else {
+            // For legacy medications: use existing logic
+            return (
+              med.hasReminders &&
+              med.isActive &&
+              !med.isPRN
+            );
+          }
+        });
 
         if (medicationsWithReminders.length === 0) {
           setShowAlert(false);
@@ -63,6 +77,18 @@ export default function UnscheduledMedicationsAlert({
             // Check if medication has actual calendar events (functionality check)
             // Instead of strict validation, we check if events exist for the next 7 days
             let hasValidSchedule = false;
+            
+            // FIX 2: Check for unified medications with embedded schedule times FIRST
+            // Unified medications store schedule times directly in the medication object
+            // and don't need separate calendar events validation
+            if (isUnifiedMedication(medication)) {
+              const hasScheduleTimes = medication.schedule?.times && medication.schedule.times.length > 0;
+              if (hasScheduleTimes) {
+                console.log('✅ Unified medication has embedded schedule times, skipping calendar validation:', medication.name);
+                hasValidSchedule = true;
+                continue; // Skip to next medication - this one is properly scheduled
+              }
+            }
             
             try {
               const today = new Date();
@@ -125,11 +151,30 @@ export default function UnscheduledMedicationsAlert({
             }
 
             if (!hasValidSchedule) {
-              console.log('No valid active schedules for medication:', medication.name);
-              if (schedules.length > 0) {
-                scheduledButInvalid.push(medication);
+              // FIX 1: Add early continue for unified medications with schedule times
+              // This is a fallback check in case the medication wasn't caught by the earlier check
+              if (isUnifiedMedication(medication)) {
+                const hasScheduleTimes = medication.schedule?.times && medication.schedule.times.length > 0;
+                if (hasScheduleTimes) {
+                  console.log('✅ Unified medication has schedule times configured (fallback check):', medication.name);
+                  hasValidSchedule = true;
+                  continue; // Skip to next medication - don't add to invalid lists
+                } else {
+                  console.log('❌ No valid active schedules for unified medication:', medication.name);
+                  if (schedules.length > 0) {
+                    scheduledButInvalid.push(medication);
+                  } else {
+                    unscheduled.push(medication);
+                  }
+                }
               } else {
-                unscheduled.push(medication);
+                // Legacy medication without valid schedule
+                console.log('❌ No valid active schedules for legacy medication:', medication.name);
+                if (schedules.length > 0) {
+                  scheduledButInvalid.push(medication);
+                } else {
+                  unscheduled.push(medication);
+                }
               }
             } else {
               console.log('Valid schedule found for medication:', medication.name);

@@ -372,7 +372,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
       console.log('🔧 CalendarIntegration: Patient ID:', patientId);
       console.log('🔧 CalendarIntegration: Using endpoint:', API_ENDPOINTS.MEDICAL_EVENTS(patientId));
       
-      // Fetch events from the API
+      // Fetch events from the API (includes medication reminders synced from medication_calendar_events)
       const response = await apiClient.get<{ success: boolean; data: MedicalEvent[]; message?: string }>(
         API_ENDPOINTS.MEDICAL_EVENTS(patientId)
       );
@@ -389,7 +389,11 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
           updatedAt: new Date(event.updatedAt)
         }));
         setEvents(events);
+        
+        // Log medication reminder events for debugging
+        const medicationEvents = events.filter(e => e.eventType === 'medication_reminder');
         console.log('✅ CalendarIntegration: Medical events loaded successfully:', events.length, 'events');
+        console.log('💊 CalendarIntegration: Medication reminders:', medicationEvents.length, 'events');
         
         // Show message if API returned a fallback message
         if (response.message) {

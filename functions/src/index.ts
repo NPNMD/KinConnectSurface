@@ -10,6 +10,9 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Import unified medication API
 import unifiedMedicationApi from './api/unified/unifiedMedicationApi';
+import notificationPreferencesApi from './api/notificationPreferences';
+import familyAdherenceNotificationsApi from './api/familyAdherenceNotifications';
+import medicationCalendarSyncApi from './api/medicationCalendarSync';
 
 // Initialize Admin SDK once
 if (!admin.apps.length) {
@@ -4066,12 +4069,15 @@ app.delete('/meal-logs/:mealLogId', authenticate, async (req, res) => {
 	}
 });
 
-// ===== MEDICATION SCHEDULE ROUTES =====
+// ===== MEDICATION SCHEDULE ROUTES (DEPRECATED - Use Unified Model) =====
 
 // Get medication schedules for the current user
+// DEPRECATED: Schedules are now embedded in medications. Use GET /medications instead.
 app.get('/medication-calendar/schedules', authenticate, async (req, res) => {
 	try {
 		const patientId = (req as any).user.uid;
+		
+		console.warn('⚠️ DEPRECATED ENDPOINT: /medication-calendar/schedules - Use GET /medications with unified model instead');
 
 		const schedulesQuery = await firestore.collection('medication_schedules')
 			.where('patientId', '==', patientId)
@@ -4093,7 +4099,9 @@ app.get('/medication-calendar/schedules', authenticate, async (req, res) => {
 		res.json({
 			success: true,
 			data: schedules,
-			message: 'Medication schedules retrieved successfully'
+			message: 'Medication schedules retrieved successfully',
+			deprecated: true,
+			deprecationNotice: 'This endpoint is deprecated. Use GET /medications to get medications with embedded schedules.'
 		});
 	} catch (error) {
 		console.error('Error getting medication schedules:', error);
@@ -4105,6 +4113,7 @@ app.get('/medication-calendar/schedules', authenticate, async (req, res) => {
 });
 
 // Get medication schedules for a specific medication
+// DEPRECATED: Schedules are now embedded in medications. Use GET /medications/:medicationId instead.
 app.get('/medication-calendar/schedules/medication/:medicationId', authenticate, async (req, res) => {
 	try {
 		const { medicationId } = req.params;
@@ -4156,7 +4165,9 @@ app.get('/medication-calendar/schedules/medication/:medicationId', authenticate,
 			res.json({
 				success: true,
 				data: schedules,
-				message: 'Medication schedules retrieved successfully'
+				message: 'Medication schedules retrieved successfully',
+				deprecated: true,
+				deprecationNotice: 'This endpoint is deprecated. Use GET /medications/:medicationId to get medication with embedded schedule.'
 			});
 		} catch (queryError) {
 			console.error('❌ Query error for medication schedules:', queryError);
@@ -4177,6 +4188,7 @@ app.get('/medication-calendar/schedules/medication/:medicationId', authenticate,
 });
 
 // Create a new medication schedule
+// DEPRECATED: Schedules are now embedded in medications. Use PATCH /medications/:medicationId/schedule instead.
 app.post('/medication-calendar/schedules', authenticate, async (req, res) => {
 	try {
 		const patientId = (req as any).user.uid;
@@ -4305,7 +4317,9 @@ app.post('/medication-calendar/schedules', authenticate, async (req, res) => {
 				createdAt: newSchedule.createdAt.toDate(),
 				updatedAt: newSchedule.updatedAt.toDate()
 			},
-			message: 'Medication schedule created successfully'
+			message: 'Medication schedule created successfully',
+			deprecated: true,
+			deprecationNotice: 'This endpoint is deprecated. Use PATCH /medications/:medicationId/schedule to update medication schedule.'
 		});
 	} catch (error) {
 		console.error('❌ Error creating medication schedule:', error);
@@ -4317,6 +4331,7 @@ app.post('/medication-calendar/schedules', authenticate, async (req, res) => {
 });
 
 // Update a medication schedule
+// DEPRECATED: Schedules are now embedded in medications. Use PATCH /medications/:medicationId/schedule instead.
 app.put('/medication-calendar/schedules/:scheduleId', authenticate, async (req, res) => {
 	try {
 		const { scheduleId } = req.params;
@@ -4384,7 +4399,9 @@ app.put('/medication-calendar/schedules/:scheduleId', authenticate, async (req, 
 				updatedAt: updatedData?.updatedAt?.toDate(),
 				pausedUntil: updatedData?.pausedUntil?.toDate()
 			},
-			message: 'Medication schedule updated successfully'
+			message: 'Medication schedule updated successfully',
+			deprecated: true,
+			deprecationNotice: 'This endpoint is deprecated. Use PATCH /medications/:medicationId/schedule to update medication schedule.'
 		});
 	} catch (error) {
 		console.error('Error updating medication schedule:', error);
@@ -6064,18 +6081,19 @@ app.put('/patients/profile', authenticate, async (req, res) => {
 	}
 });
 
-// ===== MEDICATIONS ROUTES =====
+// ===== MEDICATIONS ROUTES (UNIFIED MODEL) =====
 
 // Get medications for a user (supports family member access via patientId parameter)
+// UPDATED: Now returns unified medication model with embedded schedule and reminders
 app.get('/medications', authenticate, async (req, res) => {
 	try {
 		const currentUserId = (req as any).user.uid;
-		const { patientId } = req.query;
+		const { patientId, includeInactive } = req.query;
 		
 		// Determine which patient's medications to fetch
 		const targetPatientId = patientId as string || currentUserId;
 		
-		console.log('💊 Getting medications for patient:', targetPatientId, 'requested by:', currentUserId);
+		console.log('💊 [UNIFIED] Getting medications for patient:', targetPatientId, 'requested by:', currentUserId);
 		
 		// Check if user has access to this patient's medications
 		if (targetPatientId !== currentUserId) {
@@ -6102,18 +6120,67 @@ app.get('/medications', authenticate, async (req, res) => {
 			.orderBy('name')
 			.get();
 		
-		const medications = medicationsQuery.docs.map(doc => ({
-			id: doc.id,
-			...doc.data(),
-			createdAt: doc.data().createdAt?.toDate(),
-			updatedAt: doc.data().updatedAt?.toDate()
-		}));
+		const medications = medicationsQuery.docs.map(doc => {
+			const data = doc.data();
+			
+			// Check if this is a unified medication (has metadata.version)
+			const isUnified = !!data.metadata?.version;
+			
+			if (isUnified) {
+				// Return unified format with proper date conversions
+				return {
+					id: doc.id,
+					...data,
+					schedule: {
+						...data.schedule,
+						startDate: data.schedule?.startDate?.toDate?.() || data.schedule?.startDate,
+						endDate: data.schedule?.endDate?.toDate?.() || data.schedule?.endDate
+					},
+					metadata: {
+						...data.metadata,
+						createdAt: data.metadata?.createdAt?.toDate?.() || data.metadata?.createdAt,
+						updatedAt: data.metadata?.updatedAt?.toDate?.() || data.metadata?.updatedAt,
+						migratedFrom: data.metadata?.migratedFrom ? {
+							...data.metadata.migratedFrom,
+							migratedAt: data.metadata.migratedFrom.migratedAt?.toDate?.() || data.metadata.migratedFrom.migratedAt
+						} : undefined
+					}
+				};
+			} else {
+				// Return legacy format for backward compatibility
+				return {
+					id: doc.id,
+					...data,
+					createdAt: data.createdAt?.toDate(),
+					updatedAt: data.updatedAt?.toDate(),
+					_legacy: true // Flag to indicate this is old format
+				};
+			}
+		});
 		
-		console.log('✅ Found', medications.length, 'medications for patient:', targetPatientId);
+		// Filter out inactive medications unless explicitly requested
+		const filteredMedications = includeInactive === 'true'
+			? medications
+			: medications.filter((med: any) => {
+				// For unified: check status.isActive
+				// For legacy: check isActive
+				return med.status?.isActive !== false && med.isActive !== false;
+			});
+		
+		console.log('✅ Found', filteredMedications.length, 'medications for patient:', targetPatientId);
+		console.log('📊 Medication format breakdown:', {
+			unified: medications.filter((m: any) => !m._legacy).length,
+			legacy: medications.filter((m: any) => m._legacy).length
+		});
 		
 		res.json({
 			success: true,
-			data: medications
+			data: filteredMedications,
+			metadata: {
+				total: filteredMedications.length,
+				unified: medications.filter((m: any) => !m._legacy).length,
+				legacy: medications.filter((m: any) => m._legacy).length
+			}
 		});
 	} catch (error) {
 		console.error('❌ Error getting medications:', error);
@@ -6200,6 +6267,15 @@ app.delete('/medications/:medicationId', authenticate, async (req, res) => {
 			batch.delete(doc.ref);
 		});
 		
+		// Delete associated reminders
+		const remindersQuery = await firestore.collection('medication_reminders')
+			.where('medicationId', '==', medicationId)
+			.get();
+		
+		remindersQuery.docs.forEach(doc => {
+			batch.delete(doc.ref);
+		});
+		
 		// Delete the medication
 		batch.delete(medicationDoc.ref);
 		
@@ -6219,6 +6295,493 @@ app.delete('/medications/:medicationId', authenticate, async (req, res) => {
 		});
 	}
 });
+// Get single medication by ID (UNIFIED MODEL)
+// UPDATED: Returns unified medication model with embedded schedule and reminders
+app.get('/medications/:medicationId', authenticate, async (req, res) => {
+	try {
+		const { medicationId } = req.params;
+		const currentUserId = (req as any).user.uid;
+		
+		console.log('💊 [UNIFIED] Getting medication:', medicationId, 'requested by:', currentUserId);
+		
+		// Get the medication document
+		const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+		
+		if (!medicationDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication not found'
+			});
+		}
+		
+		const medicationData = medicationDoc.data();
+		
+		if (!medicationData) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication data not found'
+			});
+		}
+		
+		// Check if user has access to this medication
+		if (medicationData.patientId !== currentUserId) {
+			// Check family access
+			const familyAccess = await firestore.collection('family_calendar_access')
+				.where('familyMemberId', '==', currentUserId)
+				.where('patientId', '==', medicationData?.patientId)
+				.where('status', '==', 'active')
+				.get();
+			
+			if (familyAccess.empty) {
+				return res.status(403).json({
+					success: false,
+					error: 'Access denied'
+				});
+			}
+			
+			console.log('✅ Family access verified for medication');
+		}
+		
+		// Check if this is a unified medication (has metadata.version)
+		const isUnified = !!medicationData.metadata?.version;
+		
+		let medication;
+		if (isUnified) {
+			// Return unified format with proper date conversions
+			medication = {
+				id: medicationDoc.id,
+				...medicationData,
+				schedule: {
+					...medicationData.schedule,
+					startDate: medicationData.schedule?.startDate?.toDate?.() || medicationData.schedule?.startDate,
+					endDate: medicationData.schedule?.endDate?.toDate?.() || medicationData.schedule?.endDate
+				},
+				metadata: {
+					...medicationData.metadata,
+					createdAt: medicationData.metadata?.createdAt?.toDate?.() || medicationData.metadata?.createdAt,
+					updatedAt: medicationData.metadata?.updatedAt?.toDate?.() || medicationData.metadata?.updatedAt,
+					migratedFrom: medicationData.metadata?.migratedFrom ? {
+						...medicationData.metadata.migratedFrom,
+						migratedAt: medicationData.metadata.migratedFrom.migratedAt?.toDate?.() || medicationData.metadata.migratedFrom.migratedAt
+					} : undefined
+				}
+			};
+		} else {
+			// Return legacy format for backward compatibility
+			medication = {
+				id: medicationDoc.id,
+				...medicationData,
+				createdAt: medicationData.createdAt?.toDate(),
+				updatedAt: medicationData.updatedAt?.toDate(),
+				_legacy: true // Flag to indicate this is old format
+			};
+		}
+		
+		console.log('✅ Medication retrieved:', medicationId, 'format:', isUnified ? 'unified' : 'legacy');
+		
+		res.json({
+			success: true,
+			data: medication
+		});
+	} catch (error) {
+		console.error('❌ Error getting medication:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error',
+			details: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
+});
+
+// PATCH: Update medication schedule only (UNIFIED MODEL)
+app.patch('/medications/:medicationId/schedule', authenticate, async (req, res) => {
+	try {
+		const { medicationId } = req.params;
+		const userId = (req as any).user.uid;
+		const scheduleUpdates = req.body;
+		
+		console.log('📅 [UNIFIED] Updating medication schedule:', medicationId);
+		
+		// Get the medication document
+		const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+		
+		if (!medicationDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication not found'
+			});
+		}
+		
+		const medicationData = medicationDoc.data();
+		
+		if (!medicationData) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication data not found'
+			});
+		}
+		
+		// Check access permissions
+		if (medicationData.patientId !== userId) {
+			const familyAccess = await firestore.collection('family_calendar_access')
+				.where('familyMemberId', '==', userId)
+				.where('patientId', '==', medicationData?.patientId)
+				.where('status', '==', 'active')
+				.get();
+			
+			if (familyAccess.empty || !familyAccess.docs[0].data().permissions?.canEdit) {
+				return res.status(403).json({
+					success: false,
+					error: 'Access denied'
+				});
+			}
+		}
+		
+		// Check if this is a unified medication
+		if (!medicationData.metadata?.version) {
+			return res.status(400).json({
+				success: false,
+				error: 'This medication must be migrated to unified model first',
+				hint: 'Use POST /medications/migrate-all to migrate all medications'
+			});
+		}
+		
+		// Prepare schedule updates
+		const updatedSchedule: any = {
+			...medicationData.schedule
+		};
+		
+		// Update only provided fields
+		if (scheduleUpdates.frequency !== undefined) updatedSchedule.frequency = scheduleUpdates.frequency;
+		if (scheduleUpdates.times !== undefined) updatedSchedule.times = scheduleUpdates.times;
+		if (scheduleUpdates.startDate !== undefined) {
+			updatedSchedule.startDate = new Date(scheduleUpdates.startDate);
+		}
+		if (scheduleUpdates.endDate !== undefined) {
+			updatedSchedule.endDate = scheduleUpdates.endDate ? new Date(scheduleUpdates.endDate) : null;
+		}
+		if (scheduleUpdates.isIndefinite !== undefined) updatedSchedule.isIndefinite = scheduleUpdates.isIndefinite;
+		if (scheduleUpdates.dosageAmount !== undefined) updatedSchedule.dosageAmount = scheduleUpdates.dosageAmount;
+		
+		// Update medication document
+		await medicationDoc.ref.update({
+			schedule: updatedSchedule,
+			'metadata.updatedAt': new Date()
+		});
+		
+		// Get updated medication
+		const updatedDoc = await medicationDoc.ref.get();
+		const updatedData = updatedDoc.data();
+		
+		console.log('✅ Medication schedule updated successfully');
+		
+		res.json({
+			success: true,
+			data: {
+				id: medicationId,
+				schedule: {
+					...updatedData?.schedule,
+					startDate: updatedData?.schedule?.startDate?.toDate?.() || updatedData?.schedule?.startDate,
+					endDate: updatedData?.schedule?.endDate?.toDate?.() || updatedData?.schedule?.endDate
+				}
+			},
+			message: 'Medication schedule updated successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error updating medication schedule:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error',
+			details: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
+});
+
+// PATCH: Update medication reminders only (UNIFIED MODEL)
+app.patch('/medications/:medicationId/reminders', authenticate, async (req, res) => {
+	try {
+		const { medicationId } = req.params;
+		const userId = (req as any).user.uid;
+		const reminderUpdates = req.body;
+		
+		console.log('🔔 [UNIFIED] Updating medication reminders:', medicationId);
+		
+		// Get the medication document
+		const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+		
+		if (!medicationDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication not found'
+			});
+		}
+		
+		const medicationData = medicationDoc.data();
+		
+		if (!medicationData) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication data not found'
+			});
+		}
+		
+		// Check access permissions
+		if (medicationData.patientId !== userId) {
+			const familyAccess = await firestore.collection('family_calendar_access')
+				.where('familyMemberId', '==', userId)
+				.where('patientId', '==', medicationData?.patientId)
+				.where('status', '==', 'active')
+				.get();
+			
+			if (familyAccess.empty || !familyAccess.docs[0].data().permissions?.canEdit) {
+				return res.status(403).json({
+					success: false,
+					error: 'Access denied'
+				});
+			}
+		}
+		
+		// Check if this is a unified medication
+		if (!medicationData.metadata?.version) {
+			return res.status(400).json({
+				success: false,
+				error: 'This medication must be migrated to unified model first',
+				hint: 'Use POST /medications/migrate-all to migrate all medications'
+			});
+		}
+		
+		// Prepare reminder updates
+		const updatedReminders: any = {
+			...medicationData.reminders
+		};
+		
+		// Update only provided fields
+		if (reminderUpdates.enabled !== undefined) updatedReminders.enabled = reminderUpdates.enabled;
+		if (reminderUpdates.minutesBefore !== undefined) updatedReminders.minutesBefore = reminderUpdates.minutesBefore;
+		if (reminderUpdates.notificationMethods !== undefined) updatedReminders.notificationMethods = reminderUpdates.notificationMethods;
+		
+		// Update medication document
+		await medicationDoc.ref.update({
+			reminders: updatedReminders,
+			'metadata.updatedAt': new Date()
+		});
+		
+		// Get updated medication
+		const updatedDoc = await medicationDoc.ref.get();
+		const updatedData = updatedDoc.data();
+		
+		console.log('✅ Medication reminders updated successfully');
+		
+		res.json({
+			success: true,
+			data: {
+				id: medicationId,
+				reminders: updatedData?.reminders
+			},
+			message: 'Medication reminders updated successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error updating medication reminders:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error',
+			details: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
+});
+
+// PATCH: Update medication status only (UNIFIED MODEL)
+app.patch('/medications/:medicationId/status', authenticate, async (req, res) => {
+	try {
+		const { medicationId } = req.params;
+		const userId = (req as any).user.uid;
+		const statusUpdates = req.body;
+		
+		console.log('🔄 [UNIFIED] Updating medication status:', medicationId);
+		
+		// Get the medication document
+		const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+		
+		if (!medicationDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication not found'
+			});
+		}
+		
+		const medicationData = medicationDoc.data();
+		
+		if (!medicationData) {
+			return res.status(404).json({
+				success: false,
+				error: 'Medication data not found'
+			});
+		}
+		
+		// Check access permissions
+		if (medicationData.patientId !== userId) {
+			const familyAccess = await firestore.collection('family_calendar_access')
+				.where('familyMemberId', '==', userId)
+				.where('patientId', '==', medicationData?.patientId)
+				.where('status', '==', 'active')
+				.get();
+			
+			if (familyAccess.empty || !familyAccess.docs[0].data().permissions?.canEdit) {
+				return res.status(403).json({
+					success: false,
+					error: 'Access denied'
+				});
+			}
+		}
+		
+		// Check if this is a unified medication
+		if (!medicationData.metadata?.version) {
+			return res.status(400).json({
+				success: false,
+				error: 'This medication must be migrated to unified model first',
+				hint: 'Use POST /medications/migrate-all to migrate all medications'
+			});
+		}
+		
+		// Prepare status updates
+		const updatedStatus: any = {
+			...medicationData.status
+		};
+		
+		// Update only provided fields
+		if (statusUpdates.isActive !== undefined) updatedStatus.isActive = statusUpdates.isActive;
+		if (statusUpdates.isPRN !== undefined) updatedStatus.isPRN = statusUpdates.isPRN;
+		if (statusUpdates.current !== undefined) updatedStatus.current = statusUpdates.current;
+		
+		// Update medication document
+		await medicationDoc.ref.update({
+			status: updatedStatus,
+			'metadata.updatedAt': new Date()
+		});
+		
+		// Get updated medication
+		const updatedDoc = await medicationDoc.ref.get();
+		const updatedData = updatedDoc.data();
+		
+		console.log('✅ Medication status updated successfully');
+		
+		res.json({
+			success: true,
+			data: {
+				id: medicationId,
+				status: updatedData?.status
+			},
+			message: 'Medication status updated successfully'
+		});
+	} catch (error) {
+		console.error('❌ Error updating medication status:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error',
+			details: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
+});
+
+// ===== UNIFIED MEDICATION MIGRATION ENDPOINTS =====
+
+// Import production migration functions
+import { 
+	migrateAllMedications, 
+	migrateMedicationsForPatient,
+	getMigrationStatus 
+} from './migrations/migrateToUnifiedMedications';
+
+// Trigger full migration of all medications (Admin endpoint)
+app.post('/medications/migrate-all', authenticate, async (req, res) => {
+	try {
+		const userId = (req as any).user.uid;
+		const { batchSize = 10, dryRun = false } = req.body;
+		
+		console.log('🚀 [MIGRATION] Full medication migration requested by:', userId);
+		console.log('📊 Migration parameters:', { batchSize, dryRun });
+		
+		// Optional: Add admin check here if needed
+		// For now, any authenticated user can trigger migration for their own medications
+		
+		// Run migration
+		const migrationResult = await migrateAllMedications(batchSize, dryRun);
+		
+		console.log('✅ Migration completed:', {
+			total: migrationResult.totalMedications,
+			successful: migrationResult.successful,
+			failed: migrationResult.failed,
+			skipped: migrationResult.skipped
+		});
+		
+		res.json({
+			success: true,
+			data: migrationResult,
+			message: `Migration completed: ${migrationResult.successful} successful, ${migrationResult.failed} failed, ${migrationResult.skipped} skipped`
+		});
+	} catch (error) {
+		console.error('❌ Error in migration endpoint:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error',
+			details: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
+});
+
+// Migrate medications for current user only
+app.post('/medications/migrate-my-medications', authenticate, async (req, res) => {
+	try {
+		const userId = (req as any).user.uid;
+		const { dryRun = false } = req.body;
+		
+		console.log('🚀 [MIGRATION] User medication migration requested by:', userId);
+		
+		// Run migration for this user only
+		const migrationResult = await migrateMedicationsForPatient(userId, dryRun);
+		
+		console.log('✅ User migration completed:', {
+			total: migrationResult.totalMedications,
+			successful: migrationResult.successful,
+			failed: migrationResult.failed,
+			skipped: migrationResult.skipped
+		});
+		
+		res.json({
+			success: true,
+			data: migrationResult,
+			message: `Migration completed: ${migrationResult.successful} successful, ${migrationResult.failed} failed, ${migrationResult.skipped} skipped`
+		});
+	} catch (error) {
+		console.error('❌ Error in user migration endpoint:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error',
+			details: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
+});
+
+// Get migration status
+app.get('/medications/migration-status', authenticate, async (req, res) => {
+	try {
+		const status = await getMigrationStatus();
+		
+		res.json({
+			success: true,
+			data: status,
+			message: `${status.migratedCount} of ${status.totalMedications} medications migrated (${status.migrationPercentage}%)`
+		});
+	} catch (error) {
+		console.error('❌ Error getting migration status:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error',
+			details: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
+});
+
 
 // Add medication
 app.post('/medications', authenticate, async (req, res) => {
@@ -10270,6 +10833,185 @@ function isContraindicated(medication: any, contraindication: any): boolean {
   return medName.includes(contraindicatedMed) || contraindicatedMed.includes(medName);
 }
 
+// ===== UNIFIED MEDICATION POC ENDPOINTS =====
+
+// Import POC migration functions
+import { migrateMedicationToPOC, readUnifiedMedicationPOC, compareReadPerformance } from './migrations/unifiedMedicationPOC';
+
+// POC: Migrate a single medication to unified model
+app.post('/medications/poc/migrate/:medicationId', authenticate, async (req, res) => {
+  try {
+    const { medicationId } = req.params;
+    const userId = (req as any).user.uid;
+    
+    console.log('🔄 POC Migration requested for medication:', medicationId, 'by user:', userId);
+    
+    // Verify medication exists and user has access
+    const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+    
+    if (!medicationDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Medication not found'
+      });
+    }
+    
+    const medicationData = medicationDoc.data();
+    
+    // Check access permissions
+    if (medicationData?.patientId !== userId) {
+      const familyAccess = await firestore.collection('family_calendar_access')
+        .where('familyMemberId', '==', userId)
+        .where('patientId', '==', medicationData?.patientId)
+        .where('status', '==', 'active')
+        .get();
+      
+      if (familyAccess.empty) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access denied'
+        });
+      }
+    }
+    
+    // Perform migration
+    const migrationResult = await migrateMedicationToPOC(medicationId);
+    
+    if (!migrationResult.success) {
+      return res.status(500).json({
+        success: false,
+        error: 'Migration failed',
+        details: migrationResult.errors
+      });
+    }
+    
+    console.log('✅ POC migration completed successfully');
+    
+    res.json({
+      success: true,
+      data: migrationResult,
+      message: 'Medication migrated to unified POC model successfully'
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in POC migration endpoint:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// POC: Read unified medication (demonstrates single-read efficiency)
+app.get('/medications/poc/:medicationId', authenticate, async (req, res) => {
+  try {
+    const { medicationId } = req.params;
+    const userId = (req as any).user.uid;
+    
+    console.log('📖 POC Read requested for medication:', medicationId, 'by user:', userId);
+    
+    // Read from unified POC collection
+    const unifiedMedication = await readUnifiedMedicationPOC(medicationId);
+    
+    if (!unifiedMedication) {
+      return res.status(404).json({
+        success: false,
+        error: 'Unified medication not found in POC collection',
+        hint: 'Use POST /medications/poc/migrate/:medicationId to migrate this medication first'
+      });
+    }
+    
+    // Check access permissions
+    if (unifiedMedication.patientId !== userId) {
+      const familyAccess = await firestore.collection('family_calendar_access')
+        .where('familyMemberId', '==', userId)
+        .where('patientId', '==', unifiedMedication.patientId)
+        .where('status', '==', 'active')
+        .get();
+      
+      if (familyAccess.empty) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access denied'
+        });
+      }
+    }
+    
+    console.log('✅ POC read completed successfully');
+    
+    res.json({
+      success: true,
+      data: unifiedMedication,
+      message: 'Unified medication retrieved successfully (single read operation)'
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in POC read endpoint:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// POC: Compare read performance (old vs new approach)
+app.get('/medications/poc/:medicationId/performance', authenticate, async (req, res) => {
+  try {
+    const { medicationId } = req.params;
+    const userId = (req as any).user.uid;
+    
+    console.log('⚡ POC Performance comparison requested for medication:', medicationId);
+    
+    // Verify access
+    const medicationDoc = await firestore.collection('medications').doc(medicationId).get();
+    
+    if (!medicationDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Medication not found'
+      });
+    }
+    
+    const medicationData = medicationDoc.data();
+    
+    if (medicationData?.patientId !== userId) {
+      const familyAccess = await firestore.collection('family_calendar_access')
+        .where('familyMemberId', '==', userId)
+        .where('patientId', '==', medicationData?.patientId)
+        .where('status', '==', 'active')
+        .get();
+      
+      if (familyAccess.empty) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access denied'
+        });
+      }
+    }
+    
+    // Run performance comparison
+    const performanceResult = await compareReadPerformance(medicationId);
+    
+    console.log('✅ Performance comparison completed');
+    
+    res.json({
+      success: true,
+      data: performanceResult,
+      message: 'Performance comparison completed successfully'
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in POC performance comparison:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 // Enhanced error handling middleware with comprehensive logging
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('❌ === UNHANDLED ERROR CAUGHT ===');
@@ -10297,10 +11039,118 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
   });
 });
 
+// ===== NIGHT SHIFT TIME CONFIGURATION MIGRATION ENDPOINT =====
+
+// Import migration functions
+import {
+  fixNightShiftDefaults,
+  rollbackNightShiftFix,
+  getMigrationStatus as getNightShiftMigrationStatus,
+  generateMigrationReport
+} from './migrations/fixNightShiftDefaults';
+
+// Run night shift time configuration migration
+app.post('/migrations/fix-night-shift-defaults', authenticate, async (req, res) => {
+  try {
+    const userId = (req as any).user.uid;
+    const { dryRun = true } = req.body;
+    
+    console.log('🔧 Night shift migration requested by:', userId, 'dryRun:', dryRun);
+    
+    // Run migration
+    const migrationResult = await fixNightShiftDefaults(dryRun, userId);
+    
+    // Generate report
+    const report = generateMigrationReport(migrationResult);
+    
+    res.json({
+      success: migrationResult.success,
+      data: migrationResult,
+      report,
+      message: dryRun 
+        ? `DRY RUN: Found ${migrationResult.patientsNeedingFix} patients needing fixes`
+        : `Migration completed: ${migrationResult.patientsFixed} patients fixed`
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in migration endpoint:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// Rollback night shift migration
+app.post('/migrations/rollback-night-shift-fix', authenticate, async (req, res) => {
+  try {
+    const userId = (req as any).user.uid;
+    const { backupId } = req.body;
+    
+    if (!backupId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Backup ID is required'
+      });
+    }
+    
+    console.log('🔄 Rollback requested by:', userId, 'backupId:', backupId);
+    
+    const rollbackResult = await rollbackNightShiftFix(backupId);
+    
+    res.json({
+      success: rollbackResult.success,
+      data: rollbackResult,
+      message: `Rollback completed: ${rollbackResult.patientsRestored} patients restored`
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in rollback endpoint:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// Get migration status
+app.get('/migrations/night-shift-status', authenticate, async (req, res) => {
+  try {
+    const status = await getNightShiftMigrationStatus();
+    
+    res.json({
+      success: true,
+      data: status,
+      message: status.hasBeenRun
+        ? `Migration has been run: ${status.totalFixed} patients fixed`
+        : 'Migration has not been run yet'
+    });
+    
+  } catch (error) {
+    console.error('❌ Error getting migration status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 // ===== UNIFIED MEDICATION API INTEGRATION =====
 
 // Mount unified medication API with authentication middleware
 app.use('/unified-medication', authenticate, unifiedMedicationApi);
+
+// Mount notification preferences API with authentication middleware
+app.use('/notification-preferences', authenticate, notificationPreferencesApi);
+
+// Mount family adherence notifications API with authentication middleware
+app.use('/api', authenticate, familyAdherenceNotificationsApi);
+
+// Mount medication calendar sync API with authentication middleware
+app.use('/medication-calendar-sync', authenticate, medicationCalendarSyncApi);
 
 // Backward compatibility routes (redirect to unified API) with authentication
 app.use('/medication-commands', authenticate, (req, res, next) => {
@@ -10402,3 +11252,16 @@ export { summarizeVisit } from './workers/aiSummarizationWorker';
 
 // Export daily medication reset scheduled function
 export { scheduledMedicationDailyReset } from './scheduledMedicationDailyReset';
+
+// Export unified medication missed detection scheduled function
+export { scheduledMissedDetection } from './scheduledMissedDetection';
+
+// Export scheduled medication reminders function
+export { scheduledMedicationReminders } from './scheduledMedicationReminders';
+
+// Export scheduled adherence summary functions
+export {
+  scheduledWeeklyAdherenceSummaries,
+  scheduledMonthlyAdherenceSummaries,
+  scheduledAdherencePatternDetection
+} from './scheduledAdherenceSummaries';
