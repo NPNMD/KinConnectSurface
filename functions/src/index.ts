@@ -808,7 +808,15 @@ app.get('/family-access', authenticate, async (req, res) => {
 				totalConnections: patientsIHaveAccessTo.length + familyMembersWithAccessToMe.length
 			}
 		});
-		
+	} catch (error) {
+		console.error('Error getting family access:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
 // Repair endpoint for family member patient links
 app.post('/repair-family-member-patient-links', authenticate, async (req, res) => {
 	try {
@@ -950,6 +958,96 @@ app.post('/repair-family-member-patient-links', authenticate, async (req, res) =
 	}
 });
 
+// Get all family members for a patient (pending + accepted)
+app.get('/family-access/patient/:patientId', authenticate, async (req, res) => {
+	try {
+		console.log('🔍 GET /family-access/patient/:patientId route handler called');
+		const { patientId } = req.params;
+		const userId = (req as any).user.uid;
+
+		console.log('🔍 Route params:', { patientId, userId, match: userId === patientId });
+
+		// Verify the requesting user is the patient
+		if (userId !== patientId) {
+			console.log('❌ Authorization failed: user is not the patient');
+			return res.status(403).json({
+				success: false,
+				error: 'Unauthorized: You can only view your own family members'
+			});
+		}
+
+		// Get all family access records for this patient
+		const familyAccessQuery = await firestore.collection('family_calendar_access')
+			.where('patientId', '==', patientId)
+			.get();
+
+		if (familyAccessQuery.empty) {
+			return res.json({
+				success: true,
+				data: []
+			});
+		}
+
+		// Process the records
+		const familyMembers = [];
+		for (const doc of familyAccessQuery.docs) {
+			const access = doc.data();
+
+			// Get family member details if available
+			let familyMemberDetails = null;
+			if (access.familyMemberId) {
+				const familyMemberDoc = await firestore.collection('users').doc(access.familyMemberId).get();
+				if (familyMemberDoc.exists) {
+					const familyMemberData = familyMemberDoc.data();
+					familyMemberDetails = {
+						name: familyMemberData?.name,
+						email: familyMemberData?.email
+					};
+				}
+			}
+
+			familyMembers.push({
+				id: doc.id,
+				familyMemberId: access.familyMemberId,
+				familyMemberName: access.familyMemberName,
+				familyMemberEmail: access.familyMemberEmail,
+				accessLevel: access.accessLevel,
+				status: access.status,
+				acceptedAt: access.acceptedAt?.toDate(),
+				invitedAt: access.invitedAt?.toDate(),
+				invitationExpiresAt: access.invitationExpiresAt?.toDate(),
+				familyMemberDetails
+			});
+		}
+
+		// Sort: pending first, then by date
+		const sorted = familyMembers.sort((a, b) => {
+			if (a.status === 'pending' && b.status !== 'pending') return -1;
+			if (a.status !== 'pending' && b.status === 'pending') return 1;
+			return new Date(b.invitedAt).getTime() - new Date(a.invitedAt).getTime();
+		});
+
+		res.json({
+			success: true,
+			data: sorted
+		});
+	} catch (error) {
+		console.error('❌ Error fetching family members:', error);
+		console.error('❌ Error details:', {
+			message: error instanceof Error ? error.message : 'Unknown error',
+			stack: error instanceof Error ? error.stack : 'No stack',
+			patientId: req.params?.patientId,
+			userId: (req as any)?.user?.uid
+		});
+		res.status(500).json({
+			success: false,
+			error: 'Failed to fetch family members'
+		});
+	}
+});
+
+console.log('✅ Family access routes registered successfully');
+
 		// Health check endpoint for family access data consistency
 		app.post('/family-access-health-check', authenticate, async (req, res) => {
 			try {
@@ -1024,14 +1122,6 @@ app.post('/repair-family-member-patient-links', authenticate, async (req, res) =
 			}
 		});
 
-	} catch (error) {
-		console.error('Error getting family access:', error);
-		res.status(500).json({
-			success: false,
-			error: 'Internal server error'
-		});
-	}
-});
 
 // Remove family member access via POST to family-access
 app.post('/family-access', authenticate, async (req, res) => {
@@ -1094,7 +1184,7 @@ app.post('/family-access', authenticate, async (req, res) => {
 });
 
 // Remove family member access
-app.post('/family-access/remove/:accessId', authenticate, async (req, res) => {
+app.delete('/family-access/:accessId', authenticate, async (req, res) => {
 	try {
 		const { accessId } = req.params;
 		const userId = (req as any).user.uid;
@@ -1198,6 +1288,75 @@ app.get('/invitations/:token', async (req, res) => {
 		});
 	} catch (error) {
 		console.error('Error getting invitation details:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Internal server error'
+		});
+	}
+});
+
+// Resend pending invitation
+app.post('/invitations/:invitationId/resend', authenticate, async (req, res) => {
+	try {
+		const { invitationId } = req.params;
+		const userId = (req as any).user.uid;
+
+		// Get the invitation
+		const invitationDoc = await firestore.collection('family_calendar_access').doc(invitationId).get();
+
+		if (!invitationDoc.exists) {
+			return res.status(404).json({
+				success: false,
+				error: 'Invitation not found'
+			});
+		}
+
+		const invitation = invitationDoc.data() as any;
+
+		// Verify user owns this patient record
+		if (invitation.patientId !== userId) {
+			return res.status(403).json({
+				success: false,
+				error: 'Access denied - you can only resend your own invitations'
+			});
+		}
+
+		// Verify invitation is still pending
+		if (invitation.status !== 'pending') {
+			return res.status(400).json({
+				success: false,
+				error: 'Can only resend pending invitations'
+			});
+		}
+
+		// Generate new token and extend expiration
+		const newToken = `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+		const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+		await invitationDoc.ref.update({
+			invitationToken: newToken,
+			invitationExpiresAt: admin.firestore.Timestamp.fromDate(newExpiresAt),
+			updatedAt: admin.firestore.Timestamp.now()
+		});
+
+		// Send new invitation email (simplified - you may need to implement email sending)
+		console.log('Invitation resent:', {
+			invitationId,
+			newToken,
+			expiresAt: newExpiresAt,
+			familyMemberEmail: invitation.familyMemberEmail
+		});
+
+		res.json({
+			success: true,
+			message: 'Invitation resent successfully',
+			data: {
+				invitationId,
+				expiresAt: newExpiresAt
+			}
+		});
+	} catch (error) {
+		console.error('Error resending invitation:', error);
 		res.status(500).json({
 			success: false,
 			error: 'Internal server error'

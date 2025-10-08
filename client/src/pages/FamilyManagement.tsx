@@ -51,7 +51,7 @@ export default function FamilyManagement() {
       setError(null);
       
       const response = await apiClient.get<{ success: boolean; data: FamilyMember[] }>(
-        `/api/invitations/family-access/patient/${activePatientId}`
+        `/family-access/patient/${activePatientId}`
       );
       
       if (response.success) {
@@ -74,7 +74,7 @@ export default function FamilyManagement() {
       setActionLoading(true);
       
       const response = await apiClient.patch<{ success: boolean; message?: string }>(
-        `/invitations/family-access/${selectedMember.id}/access-level`,
+        `/family-access/${selectedMember.id}/access-level`,
         { accessLevel: newAccessLevel }
       );
       
@@ -101,7 +101,7 @@ export default function FamilyManagement() {
       setActionLoading(true);
       
       const response = await apiClient.delete<{ success: boolean; message?: string }>(
-        `/invitations/family-access/${selectedMember.id}`
+        `/family-access/${selectedMember.id}`
       );
       
       if (response.success) {
@@ -125,7 +125,7 @@ export default function FamilyManagement() {
       setActionLoading(true);
       
       const response = await apiClient.post<{ success: boolean; message?: string }>(
-        `/invitations/invitations/${member.id}/resend`
+        `/invitations/${member.id}/resend`
       );
       
       if (response.success) {

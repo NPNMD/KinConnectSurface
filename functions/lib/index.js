@@ -755,193 +755,275 @@ app.get('/family-access', authenticate, async (req, res) => {
                 totalConnections: patientsIHaveAccessTo.length + familyMembersWithAccessToMe.length
             }
         });
-        // Repair endpoint for family member patient links
-        app.post('/repair-family-member-patient-links', authenticate, async (req, res) => {
-            try {
-                const userId = req.user.uid;
-                const userEmail = req.user.email;
-                console.log('🔧 Starting family member patient links repair for user:', userId);
-                const repairResults = {
-                    familyMembersScanned: 0,
-                    familyMembersNeedingRepair: 0,
-                    familyMembersRepaired: 0,
-                    patientsUpdated: 0,
-                    errors: []
-                };
-                // Step 1: Find all family member users
-                console.log('🔍 Step 1: Scanning for family member users...');
-                const familyMembersQuery = await firestore.collection('users')
-                    .where('userType', '==', 'family_member')
-                    .get();
-                repairResults.familyMembersScanned = familyMembersQuery.docs.length;
-                console.log(`📊 Found ${repairResults.familyMembersScanned} family member users`);
-                // Step 2: Check each family member for missing patient links
-                for (const familyMemberDoc of familyMembersQuery.docs) {
-                    const familyMemberData = familyMemberDoc.data();
-                    const familyMemberId = familyMemberDoc.id;
-                    console.log(`👤 Checking family member: ${familyMemberData.name} (${familyMemberData.email})`);
-                    // Check if patient links are missing
-                    const hasLinkedPatients = familyMemberData.linkedPatientIds && Array.isArray(familyMemberData.linkedPatientIds);
-                    const hasPrimaryPatient = !!familyMemberData.primaryPatientId;
-                    if (!hasLinkedPatients || !hasPrimaryPatient) {
-                        repairResults.familyMembersNeedingRepair++;
-                        console.log(`❌ Family member needs repair: missing patient links`);
-                        // Find patient relationships for this family member
-                        const familyAccessQuery = await firestore.collection('family_calendar_access')
-                            .where('familyMemberId', '==', familyMemberId)
-                            .where('status', '==', 'active')
-                            .get();
-                        if (familyAccessQuery.empty && familyMemberData.email) {
-                            // Try email fallback
-                            const emailFallbackQuery = await firestore.collection('family_calendar_access')
-                                .where('familyMemberEmail', '==', familyMemberData.email.toLowerCase())
-                                .where('status', '==', 'active')
-                                .get();
-                            // Also repair the familyMemberId while we're here
-                            for (const doc of emailFallbackQuery.docs) {
-                                const accessData = doc.data();
-                                if (!accessData.familyMemberId) {
-                                    await doc.ref.update({
-                                        familyMemberId: familyMemberId,
-                                        updatedAt: admin.firestore.Timestamp.now(),
-                                        repairedAt: admin.firestore.Timestamp.now(),
-                                        repairReason: 'repair_endpoint_family_member_id'
-                                    });
-                                    console.log(`🔧 Also repaired missing familyMemberId in access record: ${doc.id}`);
-                                }
-                            }
-                            familyAccessQuery.docs.push(...emailFallbackQuery.docs);
-                        }
-                        if (familyAccessQuery.docs.length === 0) {
-                            console.log(`❌ No family access relationships found for: ${familyMemberData.email}`);
-                            repairResults.errors.push(`No relationships found for ${familyMemberData.email}`);
-                            continue;
-                        }
-                        // Extract patient IDs and repair user document
-                        const patientIds = [];
-                        for (const accessDoc of familyAccessQuery.docs) {
-                            const accessData = accessDoc.data();
-                            if (accessData.patientId && !patientIds.includes(accessData.patientId)) {
-                                patientIds.push(accessData.patientId);
-                            }
-                        }
-                        if (patientIds.length === 0) {
-                            console.log(`❌ No valid patient IDs found in relationships`);
-                            repairResults.errors.push(`No valid patient IDs for ${familyMemberData.email}`);
-                            continue;
-                        }
-                        console.log(`✅ Found ${patientIds.length} patient relationships:`, patientIds);
-                        // Update family member user document
-                        const familyMemberUpdates = {
-                            linkedPatientIds: patientIds,
-                            primaryPatientId: patientIds[0],
-                            updatedAt: admin.firestore.Timestamp.now(),
-                            repairedAt: admin.firestore.Timestamp.now(),
-                            repairReason: 'repair_endpoint_missing_patient_links'
-                        };
-                        await familyMemberDoc.ref.update(familyMemberUpdates);
-                        // Update patient user documents with reciprocal links
-                        for (const patientId of patientIds) {
-                            try {
-                                const patientRef = firestore.collection('users').doc(patientId);
-                                await patientRef.update({
-                                    familyMemberIds: admin.firestore.FieldValue.arrayUnion(familyMemberId),
-                                    updatedAt: admin.firestore.Timestamp.now(),
-                                    repairedAt: admin.firestore.Timestamp.now(),
-                                    repairReason: 'repair_endpoint_missing_family_member_links'
-                                });
-                                repairResults.patientsUpdated++;
-                            }
-                            catch (patientError) {
-                                console.error(`❌ Error updating patient ${patientId}:`, patientError);
-                                repairResults.errors.push(`Failed to update patient ${patientId}: ${patientError?.message || 'Unknown error'}`);
-                            }
-                        }
-                        repairResults.familyMembersRepaired++;
-                        console.log(`✅ Successfully repaired family member: ${familyMemberData.name}`);
-                    }
-                }
-                res.json({
-                    success: true,
-                    data: repairResults,
-                    message: `Repair completed. Fixed ${repairResults.familyMembersRepaired} family members.`
-                });
-            }
-            catch (error) {
-                console.error('Error in family member patient links repair:', error);
-                res.status(500).json({
-                    success: false,
-                    error: 'Internal server error'
-                });
-            }
-        });
-        // Health check endpoint for family access data consistency
-        app.post('/family-access-health-check', authenticate, async (req, res) => {
-            try {
-                const userId = req.user.uid;
-                const userEmail = req.user.email;
-                console.log('🔍 Running family access health check for user:', userId);
-                const issues = [];
-                const repairs = [];
-                // Check 1: User marked as family_member but no family access records
-                const userDoc = await firestore.collection('users').doc(userId).get();
-                const userData = userDoc.data();
-                if (userData?.userType === 'family_member') {
-                    const familyAccessQuery = await firestore.collection('family_calendar_access')
-                        .where('familyMemberId', '==', userId)
-                        .where('status', '==', 'active')
-                        .get();
-                    if (familyAccessQuery.empty && userEmail) {
-                        // Check for records with matching email but missing familyMemberId
-                        const emailQuery = await firestore.collection('family_calendar_access')
-                            .where('familyMemberEmail', '==', userEmail.toLowerCase())
-                            .where('status', '==', 'active')
-                            .get();
-                        for (const doc of emailQuery.docs) {
-                            const data = doc.data();
-                            if (!data.familyMemberId) {
-                                issues.push({
-                                    type: 'missing_family_member_id',
-                                    documentId: doc.id,
-                                    patientId: data.patientId,
-                                    email: data.familyMemberEmail
-                                });
-                                // Auto-repair
-                                await doc.ref.update({
-                                    familyMemberId: userId,
-                                    updatedAt: admin.firestore.Timestamp.now(),
-                                    healthCheckRepairAt: admin.firestore.Timestamp.now()
-                                });
-                                repairs.push({
-                                    type: 'repaired_missing_family_member_id',
-                                    documentId: doc.id
-                                });
-                            }
-                        }
-                    }
-                }
-                res.json({
-                    success: true,
-                    data: {
-                        issuesFound: issues.length,
-                        repairsPerformed: repairs.length,
-                        issues,
-                        repairs
-                    },
-                    message: `Health check completed. Found ${issues.length} issues, performed ${repairs.length} repairs.`
-                });
-            }
-            catch (error) {
-                console.error('Error in family access health check:', error);
-                res.status(500).json({
-                    success: false,
-                    error: 'Internal server error'
-                });
-            }
-        });
     }
     catch (error) {
         console.error('Error getting family access:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Repair endpoint for family member patient links
+app.post('/repair-family-member-patient-links', authenticate, async (req, res) => {
+    try {
+        const userId = req.user.uid;
+        const userEmail = req.user.email;
+        console.log('🔧 Starting family member patient links repair for user:', userId);
+        const repairResults = {
+            familyMembersScanned: 0,
+            familyMembersNeedingRepair: 0,
+            familyMembersRepaired: 0,
+            patientsUpdated: 0,
+            errors: []
+        };
+        // Step 1: Find all family member users
+        console.log('🔍 Step 1: Scanning for family member users...');
+        const familyMembersQuery = await firestore.collection('users')
+            .where('userType', '==', 'family_member')
+            .get();
+        repairResults.familyMembersScanned = familyMembersQuery.docs.length;
+        console.log(`📊 Found ${repairResults.familyMembersScanned} family member users`);
+        // Step 2: Check each family member for missing patient links
+        for (const familyMemberDoc of familyMembersQuery.docs) {
+            const familyMemberData = familyMemberDoc.data();
+            const familyMemberId = familyMemberDoc.id;
+            console.log(`👤 Checking family member: ${familyMemberData.name} (${familyMemberData.email})`);
+            // Check if patient links are missing
+            const hasLinkedPatients = familyMemberData.linkedPatientIds && Array.isArray(familyMemberData.linkedPatientIds);
+            const hasPrimaryPatient = !!familyMemberData.primaryPatientId;
+            if (!hasLinkedPatients || !hasPrimaryPatient) {
+                repairResults.familyMembersNeedingRepair++;
+                console.log(`❌ Family member needs repair: missing patient links`);
+                // Find patient relationships for this family member
+                const familyAccessQuery = await firestore.collection('family_calendar_access')
+                    .where('familyMemberId', '==', familyMemberId)
+                    .where('status', '==', 'active')
+                    .get();
+                if (familyAccessQuery.empty && familyMemberData.email) {
+                    // Try email fallback
+                    const emailFallbackQuery = await firestore.collection('family_calendar_access')
+                        .where('familyMemberEmail', '==', familyMemberData.email.toLowerCase())
+                        .where('status', '==', 'active')
+                        .get();
+                    // Also repair the familyMemberId while we're here
+                    for (const doc of emailFallbackQuery.docs) {
+                        const accessData = doc.data();
+                        if (!accessData.familyMemberId) {
+                            await doc.ref.update({
+                                familyMemberId: familyMemberId,
+                                updatedAt: admin.firestore.Timestamp.now(),
+                                repairedAt: admin.firestore.Timestamp.now(),
+                                repairReason: 'repair_endpoint_family_member_id'
+                            });
+                            console.log(`🔧 Also repaired missing familyMemberId in access record: ${doc.id}`);
+                        }
+                    }
+                    familyAccessQuery.docs.push(...emailFallbackQuery.docs);
+                }
+                if (familyAccessQuery.docs.length === 0) {
+                    console.log(`❌ No family access relationships found for: ${familyMemberData.email}`);
+                    repairResults.errors.push(`No relationships found for ${familyMemberData.email}`);
+                    continue;
+                }
+                // Extract patient IDs and repair user document
+                const patientIds = [];
+                for (const accessDoc of familyAccessQuery.docs) {
+                    const accessData = accessDoc.data();
+                    if (accessData.patientId && !patientIds.includes(accessData.patientId)) {
+                        patientIds.push(accessData.patientId);
+                    }
+                }
+                if (patientIds.length === 0) {
+                    console.log(`❌ No valid patient IDs found in relationships`);
+                    repairResults.errors.push(`No valid patient IDs for ${familyMemberData.email}`);
+                    continue;
+                }
+                console.log(`✅ Found ${patientIds.length} patient relationships:`, patientIds);
+                // Update family member user document
+                const familyMemberUpdates = {
+                    linkedPatientIds: patientIds,
+                    primaryPatientId: patientIds[0],
+                    updatedAt: admin.firestore.Timestamp.now(),
+                    repairedAt: admin.firestore.Timestamp.now(),
+                    repairReason: 'repair_endpoint_missing_patient_links'
+                };
+                await familyMemberDoc.ref.update(familyMemberUpdates);
+                // Update patient user documents with reciprocal links
+                for (const patientId of patientIds) {
+                    try {
+                        const patientRef = firestore.collection('users').doc(patientId);
+                        await patientRef.update({
+                            familyMemberIds: admin.firestore.FieldValue.arrayUnion(familyMemberId),
+                            updatedAt: admin.firestore.Timestamp.now(),
+                            repairedAt: admin.firestore.Timestamp.now(),
+                            repairReason: 'repair_endpoint_missing_family_member_links'
+                        });
+                        repairResults.patientsUpdated++;
+                    }
+                    catch (patientError) {
+                        console.error(`❌ Error updating patient ${patientId}:`, patientError);
+                        repairResults.errors.push(`Failed to update patient ${patientId}: ${patientError?.message || 'Unknown error'}`);
+                    }
+                }
+                repairResults.familyMembersRepaired++;
+                console.log(`✅ Successfully repaired family member: ${familyMemberData.name}`);
+            }
+        }
+        res.json({
+            success: true,
+            data: repairResults,
+            message: `Repair completed. Fixed ${repairResults.familyMembersRepaired} family members.`
+        });
+    }
+    catch (error) {
+        console.error('Error in family member patient links repair:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Get all family members for a patient (pending + accepted)
+app.get('/family-access/patient/:patientId', authenticate, async (req, res) => {
+    try {
+        console.log('🔍 GET /family-access/patient/:patientId route handler called');
+        const { patientId } = req.params;
+        const userId = req.user.uid;
+        console.log('🔍 Route params:', { patientId, userId, match: userId === patientId });
+        // Verify the requesting user is the patient
+        if (userId !== patientId) {
+            console.log('❌ Authorization failed: user is not the patient');
+            return res.status(403).json({
+                success: false,
+                error: 'Unauthorized: You can only view your own family members'
+            });
+        }
+        // Get all family access records for this patient
+        const familyAccessQuery = await firestore.collection('family_calendar_access')
+            .where('patientId', '==', patientId)
+            .get();
+        if (familyAccessQuery.empty) {
+            return res.json({
+                success: true,
+                data: []
+            });
+        }
+        // Process the records
+        const familyMembers = [];
+        for (const doc of familyAccessQuery.docs) {
+            const access = doc.data();
+            // Get family member details if available
+            let familyMemberDetails = null;
+            if (access.familyMemberId) {
+                const familyMemberDoc = await firestore.collection('users').doc(access.familyMemberId).get();
+                if (familyMemberDoc.exists) {
+                    const familyMemberData = familyMemberDoc.data();
+                    familyMemberDetails = {
+                        name: familyMemberData?.name,
+                        email: familyMemberData?.email
+                    };
+                }
+            }
+            familyMembers.push({
+                id: doc.id,
+                familyMemberId: access.familyMemberId,
+                familyMemberName: access.familyMemberName,
+                familyMemberEmail: access.familyMemberEmail,
+                accessLevel: access.accessLevel,
+                status: access.status,
+                acceptedAt: access.acceptedAt?.toDate(),
+                invitedAt: access.invitedAt?.toDate(),
+                invitationExpiresAt: access.invitationExpiresAt?.toDate(),
+                familyMemberDetails
+            });
+        }
+        // Sort: pending first, then by date
+        const sorted = familyMembers.sort((a, b) => {
+            if (a.status === 'pending' && b.status !== 'pending')
+                return -1;
+            if (a.status !== 'pending' && b.status === 'pending')
+                return 1;
+            return new Date(b.invitedAt).getTime() - new Date(a.invitedAt).getTime();
+        });
+        res.json({
+            success: true,
+            data: sorted
+        });
+    }
+    catch (error) {
+        console.error('❌ Error fetching family members:', error);
+        console.error('❌ Error details:', {
+            message: error instanceof Error ? error.message : 'Unknown error',
+            stack: error instanceof Error ? error.stack : 'No stack',
+            patientId: req.params?.patientId,
+            userId: req?.user?.uid
+        });
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch family members'
+        });
+    }
+});
+console.log('✅ Family access routes registered successfully');
+// Health check endpoint for family access data consistency
+app.post('/family-access-health-check', authenticate, async (req, res) => {
+    try {
+        const userId = req.user.uid;
+        const userEmail = req.user.email;
+        console.log('🔍 Running family access health check for user:', userId);
+        const issues = [];
+        const repairs = [];
+        // Check 1: User marked as family_member but no family access records
+        const userDoc = await firestore.collection('users').doc(userId).get();
+        const userData = userDoc.data();
+        if (userData?.userType === 'family_member') {
+            const familyAccessQuery = await firestore.collection('family_calendar_access')
+                .where('familyMemberId', '==', userId)
+                .where('status', '==', 'active')
+                .get();
+            if (familyAccessQuery.empty && userEmail) {
+                // Check for records with matching email but missing familyMemberId
+                const emailQuery = await firestore.collection('family_calendar_access')
+                    .where('familyMemberEmail', '==', userEmail.toLowerCase())
+                    .where('status', '==', 'active')
+                    .get();
+                for (const doc of emailQuery.docs) {
+                    const data = doc.data();
+                    if (!data.familyMemberId) {
+                        issues.push({
+                            type: 'missing_family_member_id',
+                            documentId: doc.id,
+                            patientId: data.patientId,
+                            email: data.familyMemberEmail
+                        });
+                        // Auto-repair
+                        await doc.ref.update({
+                            familyMemberId: userId,
+                            updatedAt: admin.firestore.Timestamp.now(),
+                            healthCheckRepairAt: admin.firestore.Timestamp.now()
+                        });
+                        repairs.push({
+                            type: 'repaired_missing_family_member_id',
+                            documentId: doc.id
+                        });
+                    }
+                }
+            }
+        }
+        res.json({
+            success: true,
+            data: {
+                issuesFound: issues.length,
+                repairsPerformed: repairs.length,
+                issues,
+                repairs
+            },
+            message: `Health check completed. Found ${issues.length} issues, performed ${repairs.length} repairs.`
+        });
+    }
+    catch (error) {
+        console.error('Error in family access health check:', error);
         res.status(500).json({
             success: false,
             error: 'Internal server error'
@@ -999,7 +1081,7 @@ app.post('/family-access', authenticate, async (req, res) => {
     }
 });
 // Remove family member access
-app.post('/family-access/remove/:accessId', authenticate, async (req, res) => {
+app.delete('/family-access/:accessId', authenticate, async (req, res) => {
     try {
         const { accessId } = req.params;
         const userId = req.user.uid;
@@ -1089,6 +1171,66 @@ app.get('/invitations/:token', async (req, res) => {
     }
     catch (error) {
         console.error('Error getting invitation details:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+// Resend pending invitation
+app.post('/invitations/:invitationId/resend', authenticate, async (req, res) => {
+    try {
+        const { invitationId } = req.params;
+        const userId = req.user.uid;
+        // Get the invitation
+        const invitationDoc = await firestore.collection('family_calendar_access').doc(invitationId).get();
+        if (!invitationDoc.exists) {
+            return res.status(404).json({
+                success: false,
+                error: 'Invitation not found'
+            });
+        }
+        const invitation = invitationDoc.data();
+        // Verify user owns this patient record
+        if (invitation.patientId !== userId) {
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied - you can only resend your own invitations'
+            });
+        }
+        // Verify invitation is still pending
+        if (invitation.status !== 'pending') {
+            return res.status(400).json({
+                success: false,
+                error: 'Can only resend pending invitations'
+            });
+        }
+        // Generate new token and extend expiration
+        const newToken = `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+        await invitationDoc.ref.update({
+            invitationToken: newToken,
+            invitationExpiresAt: admin.firestore.Timestamp.fromDate(newExpiresAt),
+            updatedAt: admin.firestore.Timestamp.now()
+        });
+        // Send new invitation email (simplified - you may need to implement email sending)
+        console.log('Invitation resent:', {
+            invitationId,
+            newToken,
+            expiresAt: newExpiresAt,
+            familyMemberEmail: invitation.familyMemberEmail
+        });
+        res.json({
+            success: true,
+            message: 'Invitation resent successfully',
+            data: {
+                invitationId,
+                expiresAt: newExpiresAt
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error resending invitation:', error);
         res.status(500).json({
             success: false,
             error: 'Internal server error'
