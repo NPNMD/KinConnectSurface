@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useFamily } from '@/contexts/FamilyContext';
 import {
@@ -14,7 +14,7 @@ import {
 import { Medication, NewMedication } from '@shared/types';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import { createSmartRefresh, createDebouncedFunction } from '@/lib/requestDebouncer';
-import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
+import { unifiedMedicationApi } from '@/lib/unifiedMedicationApi';
 import { parseFrequencyToScheduleType, generateDefaultTimesForFrequency } from '@/utils/medicationFrequencyUtils';
 import MedicationManager from '@/components/MedicationManager';
 import TimeBucketView from '@/components/TimeBucketView';
@@ -23,7 +23,6 @@ import UnscheduledMedicationsAlert from '@/components/UnscheduledMedicationsAler
 import AdherenceDashboard from '@/components/AdherenceDashboard';
 import MedicationMigrationTrigger from '@/components/MedicationMigrationTrigger';
 import { ViewOnlyBanner } from '@/components/ViewOnlyBanner';
-import { PermissionGate } from '@/components/PermissionGate';
 
 export default function Medications() {
   const {
@@ -45,16 +44,6 @@ export default function Medications() {
     totalMissedDoses: number;
   } | null>(null);
   
-  // State for schedule creation feedback
-  const [scheduleCreationStatus, setScheduleCreationStatus] = useState<{
-    isCreating: boolean;
-    success: boolean | null;
-    message: string | null;
-  }>({
-    isCreating: false,
-    success: null,
-    message: null
-  });
 
   // Create smart refresh function for medications
   const smartLoadMedications = createSmartRefresh(
@@ -63,22 +52,48 @@ export default function Medications() {
         setIsLoadingMedications(true);
         const effectivePatientId = getEffectivePatientId();
         if (!effectivePatientId) return;
-        
-        const endpoint = userRole === 'family_member'
-          ? API_ENDPOINTS.MEDICATIONS_FOR_PATIENT(effectivePatientId)
-          : API_ENDPOINTS.MEDICATIONS;
-        
-        const response = await apiClient.get<{ success: boolean; data: Medication[] }>(endpoint);
-        
+
+        // Use unified API for consistent single source of truth
+        const response = await unifiedMedicationApi.getMedications({
+          patientId: effectivePatientId,
+          isActive: true // Only show active medications by default
+        });
+
         if (response.success && response.data) {
-          // Parse date strings back to Date objects
+          // Convert unified medication format to legacy format for compatibility
           const medicationsWithDates = response.data.map(med => ({
-            ...med,
-            prescribedDate: new Date(med.prescribedDate),
-            startDate: med.startDate ? new Date(med.startDate) : undefined,
-            endDate: med.endDate ? new Date(med.endDate) : undefined,
-            createdAt: new Date(med.createdAt),
-            updatedAt: new Date(med.updatedAt),
+            id: med.id,
+            patientId: med.patientId,
+            name: med.medication.name,
+            genericName: med.medication.genericName,
+            brandName: med.medication.brandName,
+            rxcui: med.medication.rxcui,
+            dosage: med.medication.dosage,
+            strength: med.medication.strength,
+            dosageForm: med.medication.dosageForm,
+            route: med.medication.route,
+            instructions: med.medication.instructions,
+            prescribedBy: med.medication.prescribedBy,
+            prescribedDate: med.metadata.createdAt,
+            pharmacy: med.medication.pharmacy,
+            prescriptionNumber: med.medication.prescriptionNumber,
+            refillsRemaining: med.medication.refillsRemaining,
+            maxDailyDose: med.medication.maxDailyDose,
+            sideEffects: med.medication.sideEffects,
+            notes: med.medication.notes,
+            frequency: mapUnifiedFrequencyToLegacy(med.schedule.frequency),
+            times: med.schedule.times,
+            daysOfWeek: med.schedule.daysOfWeek,
+            dayOfMonth: med.schedule.dayOfMonth,
+            startDate: med.schedule.startDate,
+            endDate: med.schedule.endDate,
+            isIndefinite: med.schedule.endDate ? false : true,
+            hasReminders: med.reminders.enabled,
+            reminderTimes: med.reminders.minutesBefore.map(String), // Convert numbers to strings for compatibility
+            isActive: med.status.isActive,
+            isPRN: med.status.isPRN,
+            createdAt: med.metadata.createdAt,
+            updatedAt: med.metadata.updatedAt,
           }));
           setMedications(medicationsWithDates);
         }
@@ -127,12 +142,10 @@ export default function Medications() {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - 7);
 
-      const response = await medicationCalendarApi.getMissedMedications({
-        patientId,
-        startDate,
-        endDate,
-        limit: 50
-      });
+      // Note: getMissedMedications not yet implemented in unified API
+      // This will need to be added or use a different approach
+      console.warn('getMissedMedications not yet available in unified API');
+      const response = { success: false, data: [] };
 
       if (response.success && response.data) {
         setMissedMedicationsCount(response.data.length);
@@ -144,7 +157,22 @@ export default function Medications() {
 
   const loadAdherenceStats = async () => {
     try {
-      const response = await medicationCalendarApi.getAdherenceSummary();
+      // Use unified API's comprehensive adherence method
+      const response = await unifiedMedicationApi.getComprehensiveAdherence({
+        patientId: getEffectivePatientId() || undefined
+      });
+      
+      // Map to expected format
+      if (response.success && response.data) {
+        response.data = {
+          summary: {
+            totalMedications: response.data.totalMedications || 0,
+            overallAdherenceRate: response.data.overallAdherenceRate || 0,
+            totalTakenDoses: response.data.totalTakenDoses || 0,
+            totalMissedDoses: response.data.totalMissedDoses || 0
+          }
+        };
+      }
       if (response.success && response.data) {
         setAdherenceStats(response.data.summary);
       }
@@ -259,7 +287,10 @@ export default function Medications() {
           
           console.log('🔧 Medications: Creating schedule with data:', scheduleData);
           
-          const scheduleResponse = await medicationCalendarApi.createMedicationSchedule(scheduleData);
+          // Note: createMedicationSchedule not yet in unified API
+          // For now, log a warning - this will be implemented later
+          console.warn('createMedicationSchedule not yet available in unified API');
+          const scheduleResponse = { success: false, error: 'Schedule creation not yet implemented in unified API' };
           
           if (scheduleResponse.success) {
             scheduleCreated = true;
@@ -369,34 +400,28 @@ export default function Medications() {
   const handleDeleteMedication = async (id: string) => {
     try {
       setIsLoadingMedications(true);
-      const response = await apiClient.delete<{ success: boolean }>(
-        API_ENDPOINTS.MEDICATION_BY_ID(id)
-      );
-      
+
+      // Use unified API for consistent deletion with proper cascade cleanup
+      const response = await unifiedMedicationApi.deleteMedication(id, false, {
+        reason: 'Deleted by user from medications page'
+      });
+
       if (response.success) {
-        // Clear the medications cache to force fresh data
-        const cacheKey = 'medications_/medications';
-        if ('caches' in window) {
-          caches.open('api-cache').then(cache => {
-            cache.delete(cacheKey).then(() => {
-              console.log('✅ Cleared medications cache after deletion');
-            });
-          });
-        }
-        
-        // Update local state
+        console.log('✅ Medication deleted successfully with cascade cleanup');
+
+        // Update local state immediately
         setMedications(prev => prev.filter(med => med.id !== id));
-        
+
         // Force immediate refresh to ensure UI is in sync
         await loadMedications();
-        
+
         // Refresh related data
         loadMissedMedicationsCount();
         loadAdherenceStats();
         setRefreshTrigger(prev => prev + 1);
       } else {
         // If backend delete failed, don't remove from UI
-        throw new Error('Failed to delete medication from server');
+        throw new Error(response.error || 'Failed to delete medication from server');
       }
     } catch (error) {
       console.error('Error deleting medication:', error);
@@ -405,6 +430,20 @@ export default function Medications() {
       throw error;
     } finally {
       setIsLoadingMedications(false);
+    }
+  };
+
+  // Helper method to map unified frequency to legacy frequency
+  const mapUnifiedFrequencyToLegacy = (unifiedFrequency: string): string => {
+    switch (unifiedFrequency) {
+      case 'daily': return 'daily';
+      case 'twice_daily': return 'twice_daily';
+      case 'three_times_daily': return 'three_times_daily';
+      case 'four_times_daily': return 'four_times_daily';
+      case 'weekly': return 'weekly';
+      case 'monthly': return 'monthly';
+      case 'as_needed': return 'as_needed';
+      default: return 'daily';
     }
   };
 

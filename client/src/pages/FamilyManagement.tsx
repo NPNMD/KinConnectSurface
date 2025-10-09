@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, UserPlus, Shield, Eye, Clock, AlertCircle, MoreVertical, RefreshCw, Trash2, Edit } from 'lucide-react';
+import { Users, UserPlus, Shield, Eye, Clock, AlertCircle, MoreVertical, RefreshCw, Trash2, Edit, Heart, Calendar, Pill, User } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useFamily } from '@/contexts/FamilyContext';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -187,7 +187,7 @@ export default function FamilyManagement() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-20">
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center justify-between">
@@ -391,6 +391,61 @@ export default function FamilyManagement() {
           loading={actionLoading}
         />
       )}
+
+      {/* Mobile Bottom Navigation */}
+      <nav className="mobile-nav-container">
+        <div className="flex items-center justify-between">
+          <a
+            href="/dashboard"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-rose-600 hover:text-rose-700 transition-colors"
+          >
+            <div className="bg-rose-100 p-1.5 rounded-lg">
+              <Heart className="w-5 h-5" />
+            </div>
+            <span className="text-xs">Home</span>
+          </a>
+          
+          <a
+            href="/medications"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-blue-600 hover:text-blue-700 transition-colors"
+          >
+            <div className="bg-blue-100 p-1.5 rounded-lg">
+              <Pill className="w-5 h-5" />
+            </div>
+            <span className="text-xs">Medications</span>
+          </a>
+          
+          <a
+            href="/calendar"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-purple-600 hover:text-purple-700 transition-colors"
+          >
+            <div className="bg-purple-100 p-1.5 rounded-lg">
+              <Calendar className="w-5 h-5" />
+            </div>
+            <span className="text-xs">Calendar</span>
+          </a>
+          
+          <a
+            href="/profile"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-green-600 hover:text-green-700 transition-colors"
+          >
+            <div className="bg-green-100 p-1.5 rounded-lg">
+              <User className="w-5 h-5" />
+            </div>
+            <span className="text-xs">Profile</span>
+          </a>
+          
+          <a
+            href="/family-management"
+            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-amber-600 hover:text-amber-700 transition-colors"
+          >
+            <div className="bg-amber-100 p-1.5 rounded-lg">
+              <Users className="w-5 h-5" />
+            </div>
+            <span className="text-xs font-medium">Family</span>
+          </a>
+        </div>
+      </nav>
     </div>
   );
 }

@@ -1,0 +1,12 @@
+{
+  "timestamp": "2025-10-09T16:55:55.737Z",
+  "testPassed": true,
+  "commandId": "xWCuwcFUkIWLwzOdiwOi",
+  "eventsCreated": 5,
+  "orphanedEvents": 0,
+  "archivedEvents": 0,
+  "deleteTime": 233,
+  "waitTime": 10000,
+  "triggerDeployed": true,
+  "recommendation": "CASCADE DELETE is working - safe to deploy"
+}

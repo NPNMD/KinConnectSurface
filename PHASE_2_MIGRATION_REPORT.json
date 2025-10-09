@@ -1,0 +1,87 @@
+{
+  "id": "migration-2025-10-09T15:45:55.800Z",
+  "startTime": "2025-10-09T15:45:55.801Z",
+  "phase": "data_migration",
+  "steps": [
+    {
+      "timestamp": "2025-10-09T15:45:55.801Z",
+      "step": "Extracting unique medications from schedules"
+    },
+    {
+      "timestamp": "2025-10-09T15:45:56.427Z",
+      "step": "Medications extracted",
+      "count": 2
+    },
+    {
+      "timestamp": "2025-10-09T15:45:56.428Z",
+      "step": "Creating medication commands"
+    },
+    {
+      "timestamp": "2025-10-09T15:45:56.614Z",
+      "step": "Medication commands created",
+      "count": 2
+    },
+    {
+      "timestamp": "2025-10-09T15:45:56.614Z",
+      "step": "Creating schedule commands"
+    },
+    {
+      "timestamp": "2025-10-09T15:45:57.023Z",
+      "step": "Schedule commands created",
+      "count": 3
+    },
+    {
+      "timestamp": "2025-10-09T15:45:57.024Z",
+      "step": "Transforming calendar events to medication_events"
+    },
+    {
+      "timestamp": "2025-10-09T15:45:58.354Z",
+      "step": "Final batch committed",
+      "events": 181,
+      "total": 181
+    },
+    {
+      "timestamp": "2025-10-09T15:45:58.354Z",
+      "step": "Calendar events transformed",
+      "count": 181
+    },
+    {
+      "timestamp": "2025-10-09T15:45:58.354Z",
+      "step": "Validating migration"
+    },
+    {
+      "timestamp": "2025-10-09T15:45:59.343Z",
+      "step": "Validation complete",
+      "medicationCommands": 2,
+      "scheduleCommands": 3,
+      "medicationEvents": 181,
+      "legacySchedules": 3,
+      "legacyEvents": 181
+    },
+    {
+      "timestamp": "2025-10-09T15:45:59.344Z",
+      "step": "Updating migration tracking"
+    },
+    {
+      "timestamp": "2025-10-09T15:45:59.466Z",
+      "step": "Migration tracking updated"
+    }
+  ],
+  "errors": [],
+  "summary": {
+    "medicationsExtracted": 2,
+    "medicationCommandsCreated": 2,
+    "scheduleCommandsCreated": 3,
+    "eventsTransformed": 181,
+    "validation": {
+      "medicationCommands": 2,
+      "scheduleCommands": 3,
+      "medicationEvents": 181,
+      "legacySchedules": 3,
+      "legacyEvents": 181
+    },
+    "issues": []
+  },
+  "endTime": "2025-10-09T15:45:59.466Z",
+  "duration": 3665
+}

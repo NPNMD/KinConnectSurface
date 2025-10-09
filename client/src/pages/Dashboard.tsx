@@ -31,7 +31,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
-import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
+import { unifiedMedicationApi } from '@/lib/unifiedMedicationApi';
 import { createSmartRefresh, createSmartRefreshWithMount, createDebouncedFunction } from '@/lib/requestDebouncer';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import VisitSummaryCard from '@/components/VisitSummaryCard';
@@ -298,7 +298,7 @@ export default function Dashboard() {
       const effectivePatientId = getEffectivePatientId();
       console.log('🔍 Dashboard: Using effective patient ID for medication buckets:', effectivePatientId);
       
-      const result = await medicationCalendarApi.getTodayMedicationBuckets(now, {
+      const result = await unifiedMedicationApi.getTodayMedicationBuckets(now, {
         patientId: effectivePatientId || undefined,
         forceFresh: false
       });
@@ -306,15 +306,35 @@ export default function Dashboard() {
       console.log('🔍 Dashboard: Medication buckets result:', result);
 
       if (result.success && result.data) {
-        setTodaysMedications(result.data);
+        // Map unified API response to legacy format for compatibility
+        const mappedData: TodayMedicationBuckets = {
+          now: result.data.now as any || [],
+          dueSoon: result.data.dueSoon as any || [],
+          morning: result.data.morning as any || [],
+          noon: result.data.lunch as any || [],
+          evening: result.data.evening as any || [],
+          bedtime: result.data.beforeBed as any || [],
+          overdue: result.data.overdue as any || [],
+          completed: result.data.completed as any || [],
+          patientPreferences: {
+            timeSlots: {
+              morning: { start: '06:00', end: '10:00', defaultTime: '08:00', label: 'Morning' },
+              noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Lunch' },
+              evening: { start: '17:00', end: '20:00', defaultTime: '18:00', label: 'Evening' },
+              bedtime: { start: '21:00', end: '23:59', defaultTime: '22:00', label: 'Before Bed' }
+            }
+          } as any,
+          lastUpdated: result.data.lastUpdated
+        };
+        setTodaysMedications(mappedData);
         console.log('🔍 Dashboard: Today\'s medication buckets loaded:', {
           overdue: result.data.overdue.length,
           now: result.data.now.length,
           dueSoon: result.data.dueSoon.length,
           morning: result.data.morning.length,
-          noon: result.data.noon.length,
+          noon: result.data.lunch?.length || 0,
           evening: result.data.evening.length,
-          bedtime: result.data.bedtime.length
+          bedtime: result.data.beforeBed?.length || 0
         });
       }
     } catch (error) {

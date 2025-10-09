@@ -1,3 +1,9 @@
+/**
+ * MIGRATED TO UNIFIED SYSTEM
+ * Now uses medication_events collection instead of legacy medication_calendar_events
+ * This service monitors the unified event sourcing system for health metrics
+ */
+
 import * as admin from 'firebase-admin';
 
 export interface MonitoringMetrics {
@@ -181,16 +187,18 @@ export class MedicationMonitoringService {
         }
       }
       
-      // Check for stuck scheduled events
+      // Check for stuck scheduled events in unified system
       const now = new Date();
-      const stuckEventsQuery = await this.firestore.collection('medication_calendar_events')
-        .where('status', '==', 'scheduled')
-        .where('scheduledDateTime', '<=', admin.firestore.Timestamp.fromDate(new Date(now.getTime() - (4 * 60 * 60 * 1000))))
+      const fourHoursAgo = new Date(now.getTime() - (4 * 60 * 60 * 1000));
+      
+      const stuckEventsQuery = await this.firestore.collection('medication_events')
+        .where('eventType', '==', 'dose_scheduled')
+        .where('timing.scheduledFor', '<=', admin.firestore.Timestamp.fromDate(fourHoursAgo))
         .limit(1)
         .get();
       
       if (!stuckEventsQuery.empty) {
-        issues.push('Found events scheduled >4 hours ago still marked as "scheduled"');
+        issues.push('Found dose_scheduled events >4 hours ago without corresponding dose_taken/missed events');
         recommendations.push('Run manual missed detection or check grace period configuration');
       }
       

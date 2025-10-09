@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-10-09T15-38-13-208Z",
+  "backup_location": "c:\\Users\\natha\\OneDrive\\Documents\\KinConnectSurface\\backups\\medication-migration-2025-10-09T15-38-13-208Z",
+  "summary": {
+    "medications": 0,
+    "medication_schedules": 3,
+    "medication_reminders": 0,
+    "medication_calendar_events": 181,
+    "prn_medication_logs": 0,
+    "medication_status_changes": 0,
+    "medication_reminder_sent_log": 0,
+    "medication_notification_delivery_log": 0,
+    "medication_commands": 0,
+    "medication_events": 0,
+    "medication_events_archive": 0
+  }
+}

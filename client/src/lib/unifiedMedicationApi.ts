@@ -971,6 +971,305 @@ export class UnifiedMedicationApi {
     }
   }
 
+  /**
+   * Pause a medication
+   */
+  async pauseMedication(
+    commandId: string,
+    reason: string,
+    options: {
+      pauseUntil?: Date;
+      notifyFamily?: boolean;
+      notes?: string;
+    } = {}
+  ): Promise<ApiResponse<{
+    commandId: string;
+    pausedUntil?: Date;
+    reason: string;
+    workflow: {
+      workflowId: string;
+      correlationId: string;
+      notificationsSent: number;
+      executionTimeMs: number;
+    };
+  }>> {
+    try {
+      console.log('⏸️ UnifiedMedicationApi: Pausing medication:', commandId);
+
+      const headers = await getAuthHeaders();
+      
+      const requestData = {
+        reason,
+        pauseUntil: options.pauseUntil?.toISOString(),
+        notifyFamily: options.notifyFamily || false,
+        notes: options.notes
+      };
+
+      const response = await fetch(`${API_BASE}/unified-medication/medication-commands/${commandId}/pause`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify(requestData)
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || `HTTP ${response.status}`);
+      }
+
+      console.log('✅ Medication paused successfully');
+
+      return result;
+
+    } catch (error) {
+      console.error('❌ Error pausing medication:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to pause medication'
+      };
+    }
+  }
+
+  /**
+   * Resume a paused medication
+   */
+  async resumeMedication(
+    commandId: string,
+    options: {
+      notifyFamily?: boolean;
+      notes?: string;
+    } = {}
+  ): Promise<ApiResponse<{
+    commandId: string;
+    resumedAt: Date;
+    workflow: {
+      workflowId: string;
+      correlationId: string;
+      notificationsSent: number;
+      executionTimeMs: number;
+    };
+  }>> {
+    try {
+      console.log('▶️ UnifiedMedicationApi: Resuming medication:', commandId);
+
+      const headers = await getAuthHeaders();
+      
+      const requestData = {
+        notifyFamily: options.notifyFamily || false,
+        notes: options.notes
+      };
+
+      const response = await fetch(`${API_BASE}/unified-medication/medication-commands/${commandId}/resume`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify(requestData)
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || `HTTP ${response.status}`);
+      }
+
+      console.log('✅ Medication resumed successfully');
+
+      return result;
+
+    } catch (error) {
+      console.error('❌ Error resuming medication:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to resume medication'
+      };
+    }
+  }
+
+  /**
+   * Skip a dose
+   */
+  async skipDose(
+    commandId: string,
+    eventId: string,
+    reason: 'forgot' | 'felt_sick' | 'ran_out' | 'side_effects' | 'other',
+    options: {
+      notes?: string;
+      notifyFamily?: boolean;
+    } = {}
+  ): Promise<ApiResponse<{
+    eventId: string;
+    commandId: string;
+    skippedAt: Date;
+    reason: string;
+    workflow: {
+      workflowId: string;
+      correlationId: string;
+      notificationsSent: number;
+      executionTimeMs: number;
+    };
+  }>> {
+    try {
+      console.log('⏭️ UnifiedMedicationApi: Skipping dose:', commandId, eventId);
+
+      const headers = await getAuthHeaders();
+      
+      const requestData = {
+        eventId,
+        reason,
+        notes: options.notes,
+        notifyFamily: options.notifyFamily || false
+      };
+
+      const response = await fetch(`${API_BASE}/unified-medication/medication-commands/${commandId}/skip`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify(requestData)
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || `HTTP ${response.status}`);
+      }
+
+      console.log('✅ Dose skipped successfully');
+
+      return result;
+
+    } catch (error) {
+      console.error('❌ Error skipping dose:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to skip dose'
+      };
+    }
+  }
+
+  /**
+   * Snooze a dose
+   */
+  async snoozeDose(
+    commandId: string,
+    eventId: string,
+    snoozeMinutes: number,
+    options: {
+      notes?: string;
+      notifyFamily?: boolean;
+    } = {}
+  ): Promise<ApiResponse<{
+    eventId: string;
+    commandId: string;
+    snoozedAt: Date;
+    snoozeMinutes: number;
+    newScheduledTime: Date;
+    workflow: {
+      workflowId: string;
+      correlationId: string;
+      notificationsSent: number;
+      executionTimeMs: number;
+    };
+  }>> {
+    try {
+      console.log('⏰ UnifiedMedicationApi: Snoozing dose:', commandId, eventId, snoozeMinutes);
+
+      const headers = await getAuthHeaders();
+      
+      const requestData = {
+        eventId,
+        snoozeMinutes,
+        notes: options.notes,
+        notifyFamily: options.notifyFamily || false
+      };
+
+      const response = await fetch(`${API_BASE}/unified-medication/medication-commands/${commandId}/snooze`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify(requestData)
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || `HTTP ${response.status}`);
+      }
+
+      console.log('✅ Dose snoozed successfully');
+
+      return result;
+
+    } catch (error) {
+      console.error('❌ Error snoozing dose:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to snooze dose'
+      };
+    }
+  }
+
+  /**
+   * Delete a medication
+   */
+  async deleteMedication(
+    commandId: string,
+    hardDelete: boolean = false,
+    options: {
+      reason?: string;
+      notifyFamily?: boolean;
+    } = {}
+  ): Promise<ApiResponse<{
+    commandId: string;
+    deletedAt: Date;
+    hardDelete: boolean;
+    eventsDeleted?: number;
+    workflow: {
+      workflowId: string;
+      correlationId: string;
+      notificationsSent: number;
+      executionTimeMs: number;
+    };
+  }>> {
+    try {
+      console.log('🗑️ UnifiedMedicationApi: Deleting medication:', commandId, hardDelete ? '(hard)' : '(soft)');
+
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams();
+      
+      if (hardDelete) params.append('hardDelete', 'true');
+
+      const url = `${API_BASE}/unified-medication/medication-commands/${commandId}${params.toString() ? `?${params}` : ''}`;
+
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({
+          reason: options.reason,
+          notifyFamily: options.notifyFamily || false
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || `HTTP ${response.status}`);
+      }
+
+      console.log('✅ Medication deleted successfully');
+
+      return result;
+
+    } catch (error) {
+      console.error('❌ Error deleting medication:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to delete medication'
+      };
+    }
+  }
+
   // ===== UTILITY METHODS =====
 
   /**

@@ -17,10 +17,10 @@ import {
 } from 'lucide-react';
 import type {
   EnhancedMedicationCalendarEvent,
-  TodayMedicationBuckets,
+  TodayMedicationBuckets as LegacyTodayMedicationBuckets,
   PatientMedicationPreferences
 } from '@shared/types';
-import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
+import { unifiedMedicationApi } from '@/lib/unifiedMedicationApi';
 import { createSmartRefresh } from '@/lib/requestDebouncer';
 import { useFamily } from '@/contexts/FamilyContext';
 import LoadingSpinner from './LoadingSpinner';
@@ -51,7 +51,7 @@ export default function TimeBucketView({
   compactMode = false,
   refreshTrigger = 0
 }: TimeBucketViewProps) {
-  const [buckets, setBuckets] = useState<TodayMedicationBuckets | null>(null);
+  const [buckets, setBuckets] = useState<LegacyTodayMedicationBuckets | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [expandedBuckets, setExpandedBuckets] = useState<Set<string>>(new Set(['now', 'overdue', 'completed']));
   const [processingAction, setProcessingAction] = useState<string | null>(null);
@@ -69,7 +69,7 @@ export default function TimeBucketView({
         setError(null);
         
         // Use the new time buckets API endpoint with proper patient ID
-        const bucketsResult = await medicationCalendarApi.getTodayMedicationBuckets(date, {
+        const bucketsResult = await unifiedMedicationApi.getTodayMedicationBuckets(date, {
           patientId: patientId || undefined,
           forceFresh: false
         });
@@ -80,7 +80,27 @@ export default function TimeBucketView({
           return;
         }
 
-        setBuckets(bucketsResult.data);
+        // Map unified API response to legacy format for compatibility
+        const mappedData: LegacyTodayMedicationBuckets = {
+          now: bucketsResult.data.now as any || [],
+          dueSoon: bucketsResult.data.dueSoon as any || [],
+          morning: bucketsResult.data.morning as any || [],
+          noon: bucketsResult.data.lunch as any || [],
+          evening: bucketsResult.data.evening as any || [],
+          bedtime: bucketsResult.data.beforeBed as any || [],
+          overdue: bucketsResult.data.overdue as any || [],
+          completed: bucketsResult.data.completed as any || [],
+          patientPreferences: {
+            timeSlots: {
+              morning: { start: '06:00', end: '10:00', defaultTime: '08:00', label: 'Morning' },
+              noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Lunch' },
+              evening: { start: '17:00', end: '20:00', defaultTime: '18:00', label: 'Evening' },
+              bedtime: { start: '21:00', end: '23:59', defaultTime: '22:00', label: 'Before Bed' }
+            }
+          } as any,
+          lastUpdated: bucketsResult.data.lastUpdated
+        };
+        setBuckets(mappedData);
         setError(null); // Clear any previous errors
         
         // Add debugging for medication display
@@ -88,17 +108,17 @@ export default function TimeBucketView({
           now: bucketsResult.data.now?.length || 0,
           dueSoon: bucketsResult.data.dueSoon?.length || 0,
           morning: bucketsResult.data.morning?.length || 0,
-          noon: bucketsResult.data.noon?.length || 0,
+          noon: bucketsResult.data.lunch?.length || 0,
           evening: bucketsResult.data.evening?.length || 0,
-          bedtime: bucketsResult.data.bedtime?.length || 0,
+          bedtime: bucketsResult.data.beforeBed?.length || 0,
           overdue: bucketsResult.data.overdue?.length || 0,
           completed: bucketsResult.data.completed?.length || 0,
           total: (bucketsResult.data.now?.length || 0) +
                  (bucketsResult.data.dueSoon?.length || 0) +
                  (bucketsResult.data.morning?.length || 0) +
-                 (bucketsResult.data.noon?.length || 0) +
+                 (bucketsResult.data.lunch?.length || 0) +
                  (bucketsResult.data.evening?.length || 0) +
-                 (bucketsResult.data.bedtime?.length || 0) +
+                 (bucketsResult.data.beforeBed?.length || 0) +
                  (bucketsResult.data.overdue?.length || 0) +
                  (bucketsResult.data.completed?.length || 0)
         });
@@ -190,26 +210,56 @@ export default function TimeBucketView({
       let result;
       switch (action) {
         case 'take':
-          result = await medicationCalendarApi.markMedicationTaken(eventId, new Date());
+          // Find the event to get commandId and scheduledDateTime
+          const event = Object.values(buckets || {})
+            .flat()
+            .find((e: any) => e.id === eventId);
+          
+          if (event) {
+            result = await unifiedMedicationApi.markMedicationTaken(event.commandId || event.medicationId, {
+              scheduledDateTime: new Date(event.scheduledDateTime),
+              takenAt: new Date()
+            });
+          }
           break;
         case 'snooze':
           if (actionData?.minutes) {
-            result = await medicationCalendarApi.snoozeMedication(eventId, actionData.minutes, actionData.reason);
+            const event = Object.values(buckets || {})
+              .flat()
+              .find((e: any) => e.id === eventId);
+            
+            if (event) {
+              result = await unifiedMedicationApi.snoozeDose(
+                event.commandId || event.medicationId,
+                eventId,
+                actionData.minutes,
+                { notes: actionData.reason }
+              );
+            }
           }
           break;
         case 'skip':
           if (actionData?.reason) {
-            result = await medicationCalendarApi.skipMedication(eventId, actionData.reason, actionData.notes);
+            const event = Object.values(buckets || {})
+              .flat()
+              .find((e: any) => e.id === eventId);
+            
+            if (event) {
+              result = await unifiedMedicationApi.skipDose(
+                event.commandId || event.medicationId,
+                eventId,
+                actionData.reason,
+                { notes: actionData.notes }
+              );
+            }
           }
           break;
         case 'reschedule':
           if (actionData?.newTime && actionData?.reason) {
-            result = await medicationCalendarApi.rescheduleMedication(
-              eventId,
-              actionData.newTime,
-              actionData.reason,
-              actionData.isOneTime || false
-            );
+            // Reschedule is not yet implemented in unified API
+            // For now, we'll skip this and add a TODO
+            console.warn('Reschedule not yet implemented in unified API');
+            result = { success: false, error: 'Reschedule feature coming soon' };
           }
           break;
       }
@@ -233,7 +283,7 @@ export default function TimeBucketView({
             bedtime: removeFrom(prev.bedtime),
             completed: removeFrom(prev.completed || []),
             lastUpdated: new Date()
-          } as TodayMedicationBuckets;
+          } as LegacyTodayMedicationBuckets;
         });
 
         // Force immediate refresh by bypassing smart refresh cache
@@ -243,12 +293,32 @@ export default function TimeBucketView({
             console.log('🔄 Force refreshing buckets after medication action');
             
             // Directly call the API without smart refresh to ensure fresh data
-            const bucketsResult = await medicationCalendarApi.getTodayMedicationBuckets(date, {
+            const bucketsResult = await unifiedMedicationApi.getTodayMedicationBuckets(date, {
               forceFresh: true,
               patientId: patientId || undefined
             });
             if (bucketsResult.success && bucketsResult.data) {
-              setBuckets(bucketsResult.data);
+              // Map unified API response to legacy format for compatibility
+              const mappedData: LegacyTodayMedicationBuckets = {
+                now: bucketsResult.data.now as any || [],
+                dueSoon: bucketsResult.data.dueSoon as any || [],
+                morning: bucketsResult.data.morning as any || [],
+                noon: bucketsResult.data.lunch as any || [],
+                evening: bucketsResult.data.evening as any || [],
+                bedtime: bucketsResult.data.beforeBed as any || [],
+                overdue: bucketsResult.data.overdue as any || [],
+                completed: bucketsResult.data.completed as any || [],
+                patientPreferences: {
+                  timeSlots: {
+                    morning: { start: '06:00', end: '10:00', defaultTime: '08:00', label: 'Morning' },
+                    noon: { start: '11:00', end: '14:00', defaultTime: '12:00', label: 'Lunch' },
+                    evening: { start: '17:00', end: '20:00', defaultTime: '18:00', label: 'Evening' },
+                    bedtime: { start: '21:00', end: '23:59', defaultTime: '22:00', label: 'Before Bed' }
+                  }
+                } as any,
+                lastUpdated: bucketsResult.data.lastUpdated
+              };
+              setBuckets(mappedData);
               setError(null);
               console.log('✅ Buckets refreshed successfully after action');
             } else {

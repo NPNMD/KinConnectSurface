@@ -173,6 +173,32 @@ async function authenticate(req: express.Request, res: express.Response, next: e
 	}
 }
 
+// Deprecation middleware for legacy endpoints
+function addDeprecationHeaders(
+	 endpoint: string,
+	 replacement: string,
+	 sunsetDate: string = '2025-12-31'
+) {
+	 return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+	   // Add deprecation headers
+	   res.setHeader('X-API-Deprecated', 'true');
+	   res.setHeader('X-API-Sunset', sunsetDate);
+	   res.setHeader('X-API-Replacement', replacement);
+	   res.setHeader('Deprecation', `date="${sunsetDate}"`);
+	   
+	   // Log usage for monitoring
+	   console.warn('⚠️ DEPRECATED ENDPOINT USED:', {
+	     endpoint,
+	     replacement,
+	     userId: (req as any).user?.uid,
+	     timestamp: new Date().toISOString(),
+	     userAgent: req.headers['user-agent']
+	   });
+	   
+	   next();
+	 };
+}
+
 // Helper function to generate calendar events for a medication schedule
 async function generateCalendarEventsForSchedule(scheduleId: string, scheduleData: any) {
 	try {
@@ -4232,7 +4258,14 @@ app.delete('/meal-logs/:mealLogId', authenticate, async (req, res) => {
 
 // Get medication schedules for the current user
 // DEPRECATED: Schedules are now embedded in medications. Use GET /medications instead.
-app.get('/medication-calendar/schedules', authenticate, async (req, res) => {
+app.get('/medication-calendar/schedules',
+  authenticate,
+  addDeprecationHeaders(
+    '/medication-calendar/schedules',
+    '/unified-medication/medication-commands',
+    '2025-12-31'
+  ),
+  async (req, res) => {
 	try {
 		const patientId = (req as any).user.uid;
 		
@@ -4259,8 +4292,13 @@ app.get('/medication-calendar/schedules', authenticate, async (req, res) => {
 			success: true,
 			data: schedules,
 			message: 'Medication schedules retrieved successfully',
-			deprecated: true,
-			deprecationNotice: 'This endpoint is deprecated. Use GET /medications to get medications with embedded schedules.'
+			_deprecated: {
+				isDeprecated: true,
+				sunsetDate: '2025-12-31',
+				replacement: '/unified-medication/medication-commands',
+				notice: 'This endpoint is deprecated. Use GET /unified-medication/medication-commands to get medications with embedded schedules.',
+				migrationGuide: 'https://docs.kinconnect.app/api/migration/unified-medication'
+			}
 		});
 	} catch (error) {
 		console.error('Error getting medication schedules:', error);
@@ -4348,7 +4386,14 @@ app.get('/medication-calendar/schedules/medication/:medicationId', authenticate,
 
 // Create a new medication schedule
 // DEPRECATED: Schedules are now embedded in medications. Use PATCH /medications/:medicationId/schedule instead.
-app.post('/medication-calendar/schedules', authenticate, async (req, res) => {
+app.post('/medication-calendar/schedules',
+  authenticate,
+  addDeprecationHeaders(
+    '/medication-calendar/schedules',
+    '/unified-medication/medication-commands',
+    '2025-12-31'
+  ),
+  async (req, res) => {
 	try {
 		const patientId = (req as any).user.uid;
 		const scheduleData = req.body;
@@ -4477,8 +4522,13 @@ app.post('/medication-calendar/schedules', authenticate, async (req, res) => {
 				updatedAt: newSchedule.updatedAt.toDate()
 			},
 			message: 'Medication schedule created successfully',
-			deprecated: true,
-			deprecationNotice: 'This endpoint is deprecated. Use PATCH /medications/:medicationId/schedule to update medication schedule.'
+			_deprecated: {
+				isDeprecated: true,
+				sunsetDate: '2025-12-31',
+				replacement: '/unified-medication/medication-commands',
+				notice: 'This endpoint is deprecated. Use POST /unified-medication/medication-commands to create medications with schedules.',
+				migrationGuide: 'https://docs.kinconnect.app/api/migration/unified-medication'
+			}
 		});
 	} catch (error) {
 		console.error('❌ Error creating medication schedule:', error);
@@ -6362,7 +6412,14 @@ app.get('/medications', authenticate, async (req, res) => {
 });
 
 // Delete medication
-app.delete('/medications/:medicationId', authenticate, async (req, res) => {
+app.delete('/medications/:medicationId',
+  authenticate,
+  addDeprecationHeaders(
+    '/medications/:medicationId',
+    '/unified-medication/medication-commands/:id',
+    '2025-12-31'
+  ),
+  async (req, res) => {
 	try {
 		const { medicationId } = req.params;
 		const userId = (req as any).user.uid;
@@ -6444,7 +6501,14 @@ app.delete('/medications/:medicationId', authenticate, async (req, res) => {
 		
 		res.json({
 			success: true,
-			message: 'Medication deleted successfully'
+			message: 'Medication deleted successfully',
+			_deprecated: {
+				isDeprecated: true,
+				sunsetDate: '2025-12-31',
+				replacement: 'DELETE /unified-medication/medication-commands/:id',
+				notice: 'This endpoint is deprecated. Use DELETE /unified-medication/medication-commands/:id for proper cascade deletion.',
+				migrationGuide: 'https://docs.kinconnect.app/api/migration/unified-medication'
+			}
 		});
 	} catch (error) {
 		console.error('Error deleting medication:', error);
@@ -6456,7 +6520,14 @@ app.delete('/medications/:medicationId', authenticate, async (req, res) => {
 });
 // Get single medication by ID (UNIFIED MODEL)
 // UPDATED: Returns unified medication model with embedded schedule and reminders
-app.get('/medications/:medicationId', authenticate, async (req, res) => {
+app.get('/medications/:medicationId',
+  authenticate,
+  addDeprecationHeaders(
+    '/medications/:medicationId',
+    '/unified-medication/medication-commands/:id',
+    '2025-12-31'
+  ),
+  async (req, res) => {
 	try {
 		const { medicationId } = req.params;
 		const currentUserId = (req as any).user.uid;
@@ -6943,7 +7014,14 @@ app.get('/medications/migration-status', authenticate, async (req, res) => {
 
 
 // Add medication
-app.post('/medications', authenticate, async (req, res) => {
+app.post('/medications',
+  authenticate,
+  addDeprecationHeaders(
+    '/medications',
+    '/unified-medication/medication-commands',
+    '2025-12-31'
+  ),
+  async (req, res) => {
 	try {
 		const userId = (req as any).user.uid;
 		const medicationData = req.body;
@@ -7398,7 +7476,14 @@ app.post('/medications/bulk-create-schedules', authenticate, async (req, res) =>
 });
 
 // Update medication with enhanced error logging
-app.put('/medications/:medicationId', authenticate, async (req, res) => {
+app.put('/medications/:medicationId',
+  authenticate,
+  addDeprecationHeaders(
+    '/medications/:medicationId',
+    '/unified-medication/medication-commands/:id',
+    '2025-12-31'
+  ),
+  async (req, res) => {
 	try {
 		console.log('🚀 === MEDICATION UPDATE DEBUG START ===');
 		const { medicationId } = req.params;
@@ -11424,3 +11509,6 @@ export {
   scheduledMonthlyAdherenceSummaries,
   scheduledAdherencePatternDetection
 } from './scheduledAdherenceSummaries';
+
+// Export CASCADE DELETE trigger for medication commands
+export { onMedicationCommandDelete } from './triggers/medicationCascadeDelete';

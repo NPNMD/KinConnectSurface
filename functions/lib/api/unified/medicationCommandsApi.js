@@ -55,6 +55,8 @@ const express_1 = __importDefault(require("express"));
 const admin = __importStar(require("firebase-admin"));
 const MedicationOrchestrator_1 = require("../../services/unified/MedicationOrchestrator");
 const MedicationCommandService_1 = require("../../services/unified/MedicationCommandService");
+const MedicationEventService_1 = require("../../services/unified/MedicationEventService");
+const MedicationNotificationService_1 = require("../../services/unified/MedicationNotificationService");
 const AdherenceAnalyticsService_1 = require("../../services/unified/AdherenceAnalyticsService");
 const MedicationUndoService_1 = require("../../services/unified/MedicationUndoService");
 const router = express_1.default.Router();
@@ -326,11 +328,18 @@ router.put('/:commandId', async (req, res) => {
 });
 /**
  * DELETE /medication-commands/:id
- * Delete (discontinue) medication command
+ * Delete medication command with CASCADE delete of all related events
+ *
+ * CRITICAL FIX: This endpoint now properly cascades deletes to:
+ * - medication_events (all events for this command)
+ * - medication_events_archive (archived events if any)
+ * - Updates migration tracking
+ *
+ * This fixes the original bug where deleting a medication left orphaned events.
  */
 router.delete('/:commandId', async (req, res) => {
     try {
-        console.log('🗑️ DELETE /medication-commands/:id - Deleting medication:', req.params.commandId);
+        console.log('🗑️ DELETE /medication-commands/:id - CASCADE DELETE for medication:', req.params.commandId);
         const userId = req.user?.uid;
         if (!userId) {
             return res.status(401).json({
@@ -339,7 +348,7 @@ router.delete('/:commandId', async (req, res) => {
             });
         }
         const { commandId } = req.params;
-        const { reason = 'Deleted by user' } = req.body;
+        const { reason = 'Deleted by user', hardDelete = false } = req.body;
         // Get current command to check permissions
         const currentResult = await getCommandService().getCommand(commandId);
         if (!currentResult.success || !currentResult.data) {
@@ -348,38 +357,133 @@ router.delete('/:commandId', async (req, res) => {
                 error: 'Medication not found'
             });
         }
+        const command = currentResult.data;
         // Check access permissions
-        if (currentResult.data.patientId !== userId) {
+        if (command.patientId !== userId) {
             // TODO: Add family access validation here
             return res.status(403).json({
                 success: false,
                 error: 'Access denied'
             });
         }
-        // Execute status change workflow (discontinue)
-        const workflowResult = await getOrchestrator().medicationStatusChangeWorkflow(commandId, {
-            newStatus: 'discontinued',
-            reason,
-            updatedBy: userId
-        }, {
-            notifyFamily: true,
-            urgency: 'low'
-        });
-        if (!workflowResult.success) {
+        console.log('🔍 Starting CASCADE DELETE operation for commandId:', commandId);
+        // Initialize deletion counters
+        const deletionResults = {
+            commandDeleted: false,
+            eventsDeleted: 0,
+            archivedEventsDeleted: 0,
+            migrationTrackingUpdated: false,
+            errors: []
+        };
+        // Use Firestore transaction for atomicity
+        const db = admin.firestore();
+        try {
+            await db.runTransaction(async (transaction) => {
+                // Step 1: Query all medication_events for this command
+                console.log('📋 Step 1: Querying medication_events for commandId:', commandId);
+                const eventsQuery = await db.collection('medication_events')
+                    .where('commandId', '==', commandId)
+                    .get();
+                console.log(`📊 Found ${eventsQuery.docs.length} medication_events to delete`);
+                deletionResults.eventsDeleted = eventsQuery.docs.length;
+                // Step 2: Query archived events if they exist
+                console.log('📋 Step 2: Querying medication_events_archive for commandId:', commandId);
+                const archivedEventsQuery = await db.collection('medication_events_archive')
+                    .where('commandId', '==', commandId)
+                    .get();
+                console.log(`📊 Found ${archivedEventsQuery.docs.length} archived events to delete`);
+                deletionResults.archivedEventsDeleted = archivedEventsQuery.docs.length;
+                // Step 3: Delete all events in transaction
+                console.log('🗑️ Step 3: Deleting medication_events...');
+                eventsQuery.docs.forEach(doc => {
+                    transaction.delete(doc.ref);
+                });
+                // Step 4: Delete archived events
+                console.log('🗑️ Step 4: Deleting archived events...');
+                archivedEventsQuery.docs.forEach(doc => {
+                    transaction.delete(doc.ref);
+                });
+                // Step 5: Handle command deletion based on hardDelete flag
+                if (hardDelete) {
+                    // Hard delete: Remove the command document entirely
+                    console.log('🗑️ Step 5: HARD DELETE - Removing command document');
+                    const commandRef = db.collection('medication_commands').doc(commandId);
+                    transaction.delete(commandRef);
+                    deletionResults.commandDeleted = true;
+                }
+                else {
+                    // Soft delete: Mark as discontinued (default behavior)
+                    console.log('🗑️ Step 5: SOFT DELETE - Marking command as discontinued');
+                    const commandRef = db.collection('medication_commands').doc(commandId);
+                    transaction.update(commandRef, {
+                        'status.current': 'discontinued',
+                        'status.discontinuedAt': new Date(),
+                        'status.discontinuedBy': userId,
+                        'status.discontinuedReason': reason,
+                        'metadata.updatedAt': new Date(),
+                        'metadata.deletedAt': new Date(),
+                        'metadata.deletedBy': userId
+                    });
+                    deletionResults.commandDeleted = true;
+                }
+                // Step 6: Update migration tracking
+                console.log('📊 Step 6: Updating migration tracking...');
+                const trackingRef = db.collection('migration_tracking').doc('medication_system');
+                const trackingDoc = await transaction.get(trackingRef);
+                if (trackingDoc.exists) {
+                    const trackingData = trackingDoc.data();
+                    const currentStats = trackingData?.statistics || {};
+                    transaction.update(trackingRef, {
+                        'statistics.totalDeleted': (currentStats.totalDeleted || 0) + 1,
+                        'statistics.eventsDeleted': (currentStats.eventsDeleted || 0) + deletionResults.eventsDeleted,
+                        'statistics.archivedEventsDeleted': (currentStats.archivedEventsDeleted || 0) + deletionResults.archivedEventsDeleted,
+                        'lastOperation': {
+                            type: 'cascade_delete',
+                            commandId,
+                            deletedBy: userId,
+                            timestamp: new Date(),
+                            eventsDeleted: deletionResults.eventsDeleted,
+                            archivedEventsDeleted: deletionResults.archivedEventsDeleted,
+                            hardDelete
+                        },
+                        updatedAt: new Date()
+                    });
+                    deletionResults.migrationTrackingUpdated = true;
+                }
+            });
+            console.log('✅ CASCADE DELETE transaction completed successfully');
+        }
+        catch (transactionError) {
+            console.error('❌ CASCADE DELETE transaction failed:', transactionError);
             return res.status(500).json({
                 success: false,
-                error: workflowResult.error,
-                workflowId: workflowResult.workflowId
+                error: 'Failed to complete cascade delete',
+                details: transactionError instanceof Error ? transactionError.message : 'Unknown error'
             });
         }
+        // Log final results
+        console.log('📊 CASCADE DELETE Results:', {
+            commandId,
+            commandDeleted: deletionResults.commandDeleted,
+            eventsDeleted: deletionResults.eventsDeleted,
+            archivedEventsDeleted: deletionResults.archivedEventsDeleted,
+            totalDeleted: deletionResults.eventsDeleted + deletionResults.archivedEventsDeleted + 1,
+            migrationTrackingUpdated: deletionResults.migrationTrackingUpdated,
+            deleteType: hardDelete ? 'HARD' : 'SOFT'
+        });
         res.json({
             success: true,
-            workflow: {
-                workflowId: workflowResult.workflowId,
-                correlationId: workflowResult.correlationId,
-                notificationsSent: workflowResult.notificationsSent
+            data: {
+                commandId,
+                deleteType: hardDelete ? 'hard' : 'soft',
+                deletionResults: {
+                    commandDeleted: deletionResults.commandDeleted,
+                    eventsDeleted: deletionResults.eventsDeleted,
+                    archivedEventsDeleted: deletionResults.archivedEventsDeleted,
+                    totalItemsDeleted: deletionResults.eventsDeleted + deletionResults.archivedEventsDeleted + 1
+                }
             },
-            message: 'Medication discontinued successfully'
+            message: `Medication ${hardDelete ? 'deleted' : 'discontinued'} successfully with ${deletionResults.eventsDeleted + deletionResults.archivedEventsDeleted} related events removed`
         });
     }
     catch (error) {
@@ -855,6 +959,384 @@ router.post('/:commandId/status', async (req, res) => {
     }
     catch (error) {
         console.error('❌ Error in POST /medication-commands/:id/status:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+/**
+ * POST /medication-commands/:id/pause
+ * Pause medication (convenience endpoint - delegates to status change)
+ */
+router.post('/:commandId/pause', async (req, res) => {
+    try {
+        console.log('⏸️ POST /medication-commands/:id/pause - Pausing medication:', req.params.commandId);
+        const userId = req.user?.uid;
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                error: 'Authentication required'
+            });
+        }
+        const { commandId } = req.params;
+        const { reason = 'Paused by user', pausedUntil, notifyFamily = true } = req.body;
+        // Get command to verify access
+        const commandResult = await getCommandService().getCommand(commandId);
+        if (!commandResult.success || !commandResult.data) {
+            return res.status(404).json({
+                success: false,
+                error: 'Medication not found'
+            });
+        }
+        // Check access permissions
+        if (commandResult.data.patientId !== userId) {
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied'
+            });
+        }
+        // Execute status change workflow (pause)
+        const workflowResult = await getOrchestrator().medicationStatusChangeWorkflow(commandId, {
+            newStatus: 'paused',
+            reason,
+            updatedBy: userId,
+            additionalData: pausedUntil ? { pausedUntil: new Date(pausedUntil) } : undefined
+        }, {
+            notifyFamily,
+            urgency: 'low'
+        });
+        if (!workflowResult.success) {
+            return res.status(500).json({
+                success: false,
+                error: workflowResult.error,
+                workflowId: workflowResult.workflowId
+            });
+        }
+        res.json({
+            success: true,
+            data: {
+                commandId,
+                status: 'paused',
+                reason,
+                pausedUntil: pausedUntil ? new Date(pausedUntil) : null
+            },
+            workflow: {
+                workflowId: workflowResult.workflowId,
+                correlationId: workflowResult.correlationId,
+                notificationsSent: workflowResult.notificationsSent
+            },
+            message: 'Medication paused successfully'
+        });
+    }
+    catch (error) {
+        console.error('❌ Error in POST /medication-commands/:id/pause:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+/**
+ * POST /medication-commands/:id/resume
+ * Resume paused medication (convenience endpoint - delegates to status change)
+ */
+router.post('/:commandId/resume', async (req, res) => {
+    try {
+        console.log('▶️ POST /medication-commands/:id/resume - Resuming medication:', req.params.commandId);
+        const userId = req.user?.uid;
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                error: 'Authentication required'
+            });
+        }
+        const { commandId } = req.params;
+        const { reason = 'Resumed by user', notifyFamily = true } = req.body;
+        // Get command to verify access
+        const commandResult = await getCommandService().getCommand(commandId);
+        if (!commandResult.success || !commandResult.data) {
+            return res.status(404).json({
+                success: false,
+                error: 'Medication not found'
+            });
+        }
+        // Check access permissions
+        if (commandResult.data.patientId !== userId) {
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied'
+            });
+        }
+        // Execute status change workflow (resume to active)
+        const workflowResult = await getOrchestrator().medicationStatusChangeWorkflow(commandId, {
+            newStatus: 'active',
+            reason,
+            updatedBy: userId
+        }, {
+            notifyFamily,
+            urgency: 'low'
+        });
+        if (!workflowResult.success) {
+            return res.status(500).json({
+                success: false,
+                error: workflowResult.error,
+                workflowId: workflowResult.workflowId
+            });
+        }
+        res.json({
+            success: true,
+            data: {
+                commandId,
+                status: 'active',
+                reason
+            },
+            workflow: {
+                workflowId: workflowResult.workflowId,
+                correlationId: workflowResult.correlationId,
+                notificationsSent: workflowResult.notificationsSent
+            },
+            message: 'Medication resumed successfully'
+        });
+    }
+    catch (error) {
+        console.error('❌ Error in POST /medication-commands/:id/resume:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+/**
+ * POST /medication-commands/:id/skip
+ * Skip a scheduled dose with reason
+ */
+router.post('/:commandId/skip', async (req, res) => {
+    try {
+        console.log('⏭️ POST /medication-commands/:id/skip - Skipping dose:', req.params.commandId);
+        const userId = req.user?.uid;
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                error: 'Authentication required'
+            });
+        }
+        const { commandId } = req.params;
+        const { scheduledDateTime, reason, notes, notifyFamily = false } = req.body;
+        // Validate required fields
+        if (!scheduledDateTime || !reason) {
+            return res.status(400).json({
+                success: false,
+                error: 'Scheduled date time and reason are required'
+            });
+        }
+        // Get command to verify access
+        const commandResult = await getCommandService().getCommand(commandId);
+        if (!commandResult.success || !commandResult.data) {
+            return res.status(404).json({
+                success: false,
+                error: 'Medication not found'
+            });
+        }
+        const command = commandResult.data;
+        // Check access permissions
+        if (command.patientId !== userId) {
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied'
+            });
+        }
+        // Create skip event directly using event service
+        const eventService = new MedicationEventService_1.MedicationEventService();
+        const correlationId = `skip_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const skipEventResult = await eventService.createEvent({
+            commandId,
+            patientId: command.patientId,
+            eventType: 'dose_skipped',
+            eventData: {
+                scheduledDateTime: new Date(scheduledDateTime),
+                skipReason: reason,
+                actionNotes: notes
+            },
+            context: {
+                medicationName: command.medication.name,
+                triggerSource: 'user_action'
+            },
+            timing: {
+                scheduledFor: new Date(scheduledDateTime)
+            },
+            createdBy: userId,
+            correlationId
+        });
+        if (!skipEventResult.success) {
+            return res.status(500).json({
+                success: false,
+                error: skipEventResult.error
+            });
+        }
+        // Send notifications if requested
+        let notificationsSent = 0;
+        if (notifyFamily) {
+            const notificationService = new MedicationNotificationService_1.MedicationNotificationService();
+            const notificationResult = await notificationService.sendNotification({
+                patientId: command.patientId,
+                commandId,
+                medicationName: command.medication.name,
+                notificationType: 'status_change',
+                urgency: 'low',
+                title: 'Medication Dose Skipped',
+                message: `${command.medication.name} dose was skipped. Reason: ${reason}`,
+                recipients: [], // Would need to fetch family members
+                context: {
+                    correlationId,
+                    triggerSource: 'user_action'
+                }
+            });
+            notificationsSent = notificationResult.data?.totalSent || 0;
+        }
+        res.json({
+            success: true,
+            data: {
+                eventId: skipEventResult.data.id,
+                commandId,
+                scheduledDateTime: new Date(scheduledDateTime),
+                reason,
+                skippedAt: new Date(),
+                notificationsSent
+            },
+            message: 'Dose skipped successfully'
+        });
+    }
+    catch (error) {
+        console.error('❌ Error in POST /medication-commands/:id/skip:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+/**
+ * POST /medication-commands/:id/snooze
+ * Snooze a medication reminder
+ */
+router.post('/:commandId/snooze', async (req, res) => {
+    try {
+        console.log('💤 POST /medication-commands/:id/snooze - Snoozing reminder:', req.params.commandId);
+        const userId = req.user?.uid;
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                error: 'Authentication required'
+            });
+        }
+        const { commandId } = req.params;
+        const { scheduledDateTime, snoozeMinutes, reason, notifyFamily = false } = req.body;
+        // Validate required fields
+        if (!scheduledDateTime || !snoozeMinutes) {
+            return res.status(400).json({
+                success: false,
+                error: 'Scheduled date time and snooze minutes are required'
+            });
+        }
+        // Validate snooze duration
+        if (snoozeMinutes < 1 || snoozeMinutes > 480) {
+            return res.status(400).json({
+                success: false,
+                error: 'Snooze minutes must be between 1 and 480 (8 hours)'
+            });
+        }
+        // Get command to verify access
+        const commandResult = await getCommandService().getCommand(commandId);
+        if (!commandResult.success || !commandResult.data) {
+            return res.status(404).json({
+                success: false,
+                error: 'Medication not found'
+            });
+        }
+        const command = commandResult.data;
+        // Check access permissions
+        if (command.patientId !== userId) {
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied'
+            });
+        }
+        // Calculate new scheduled time
+        const originalTime = new Date(scheduledDateTime);
+        const newScheduledTime = new Date(originalTime.getTime() + (snoozeMinutes * 60 * 1000));
+        // Create snooze event directly using event service
+        const eventService = new MedicationEventService_1.MedicationEventService();
+        const correlationId = `snooze_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const snoozeEventResult = await eventService.createEvent({
+            commandId,
+            patientId: command.patientId,
+            eventType: 'dose_snoozed',
+            eventData: {
+                scheduledDateTime: originalTime,
+                newScheduledTime: newScheduledTime,
+                snoozeMinutes,
+                actionReason: reason,
+                additionalData: {
+                    originalScheduledDateTime: originalTime.toISOString(),
+                    newScheduledDateTime: newScheduledTime.toISOString()
+                }
+            },
+            context: {
+                medicationName: command.medication.name,
+                triggerSource: 'user_action'
+            },
+            timing: {
+                scheduledFor: newScheduledTime
+            },
+            createdBy: userId,
+            correlationId
+        });
+        if (!snoozeEventResult.success) {
+            return res.status(500).json({
+                success: false,
+                error: snoozeEventResult.error
+            });
+        }
+        // Send notifications if requested
+        let notificationsSent = 0;
+        if (notifyFamily) {
+            const notificationService = new MedicationNotificationService_1.MedicationNotificationService();
+            const notificationResult = await notificationService.sendNotification({
+                patientId: command.patientId,
+                commandId,
+                medicationName: command.medication.name,
+                notificationType: 'status_change',
+                urgency: 'low',
+                title: 'Medication Reminder Snoozed',
+                message: `${command.medication.name} reminder was snoozed for ${snoozeMinutes} minutes`,
+                recipients: [], // Would need to fetch family members
+                context: {
+                    correlationId,
+                    triggerSource: 'user_action'
+                }
+            });
+            notificationsSent = notificationResult.data?.totalSent || 0;
+        }
+        res.json({
+            success: true,
+            data: {
+                eventId: snoozeEventResult.data.id,
+                commandId,
+                originalScheduledDateTime: originalTime,
+                newScheduledDateTime: newScheduledTime,
+                snoozeMinutes,
+                snoozedAt: new Date(),
+                notificationsSent
+            },
+            message: `Reminder snoozed for ${snoozeMinutes} minutes`
+        });
+    }
+    catch (error) {
+        console.error('❌ Error in POST /medication-commands/:id/snooze:', error);
         res.status(500).json({
             success: false,
             error: 'Internal server error',

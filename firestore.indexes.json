@@ -279,6 +279,24 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "eventType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "patientId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "timing.eventTimestamp",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "medication_events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
           "fieldPath": "archiveStatus.isArchived",
           "order": "ASCENDING"
         },
@@ -553,6 +571,24 @@
       ]
     },
     {
+      "collectionGroup": "medication_commands",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "patientId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status.isActive",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "medication.name",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "medication_schedules",
       "queryScope": "COLLECTION",
       "fields": [
@@ -577,6 +613,62 @@
         {
           "fieldPath": "isActive",
           "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "medication_events_archive",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "patientId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "archiveStatus.archivedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "medication_events_archive",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "patientId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "archiveStatus.belongsToDate",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "migration_tracking",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "migrationName",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "migration_tracking",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startedAt",
+          "order": "DESCENDING"
         }
       ]
     }
