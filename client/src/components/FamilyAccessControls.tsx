@@ -6,6 +6,7 @@ import { apiClient, API_ENDPOINTS } from '../lib/api';
 interface FamilyAccessControlsProps {
   patientId: string;
   onClose?: () => void;
+  hideInviteButton?: boolean;
 }
 
 const ACCESS_LEVELS: { value: FamilyAccessLevel; label: string; description: string }[] = [
@@ -31,7 +32,7 @@ const RELATIONSHIPS = [
   'aunt_uncle', 'cousin', 'friend', 'caregiver', 'other'
 ];
 
-export default function FamilyAccessControls({ patientId, onClose }: FamilyAccessControlsProps) {
+export default function FamilyAccessControls({ patientId, onClose, hideInviteButton = false }: FamilyAccessControlsProps) {
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [editingMember, setEditingMember] = useState<FamilyMember | null>(null);
   const [showInviteForm, setShowInviteForm] = useState(false);
@@ -190,25 +191,28 @@ export default function FamilyAccessControls({ patientId, onClose }: FamilyAcces
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center space-x-3">
-          <Users className="w-6 h-6 text-blue-600" />
+          <Users className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Family Access Controls</h3>
-            <p className="text-sm text-gray-600">Manage who can access and modify medical information</p>
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900">Family Access Controls</h3>
+            <p className="text-xs sm:text-sm text-gray-600">Manage who can access and modify medical information</p>
           </div>
         </div>
         
         <div className="flex items-center space-x-3">
-          <button
-            onClick={() => setShowInviteForm(true)}
-            className="btn-primary flex items-center space-x-2"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Invite Family Member</span>
-          </button>
+          {!hideInviteButton && (
+            <button
+              onClick={() => setShowInviteForm(true)}
+              className="btn-primary flex items-center space-x-2 text-sm sm:text-base"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">Invite Family Member</span>
+              <span className="sm:hidden">Invite</span>
+            </button>
+          )}
           {onClose && (
             <button
               onClick={onClose}
@@ -222,8 +226,8 @@ export default function FamilyAccessControls({ patientId, onClose }: FamilyAcces
 
       {/* Invite Form */}
       {showInviteForm && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-          <h4 className="text-md font-medium text-gray-900 mb-4">Invite Family Member</h4>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 sm:p-6">
+          <h4 className="text-sm sm:text-md font-medium text-gray-900 mb-4">Invite Family Member</h4>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -361,19 +365,20 @@ export default function FamilyAccessControls({ patientId, onClose }: FamilyAcces
 
       {/* Family Members List */}
       {!loading && !error && (
-        <div className="space-y-4">
+        <div className="space-y-3 sm:space-y-4">
           {familyMembers.map((member) => (
           <div
             key={member.id}
-            className="bg-white border border-gray-200 rounded-lg p-4"
+            className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4"
           >
-            <div className="flex items-start justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
               <div className="flex-1">
-                <div className="flex items-center space-x-3 mb-2">
-                  <h4 className="font-medium text-gray-900">{member.name}</h4>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <h4 className="font-medium text-gray-900 text-sm sm:text-base">{member.name}</h4>
                   <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getAccessLevelColor(member.accessLevel)}`}>
                     <Shield className="w-3 h-3 mr-1" />
-                    {ACCESS_LEVELS.find(l => l.value === member.accessLevel)?.label}
+                    <span className="hidden sm:inline">{ACCESS_LEVELS.find(l => l.value === member.accessLevel)?.label}</span>
+                    <span className="sm:hidden">{ACCESS_LEVELS.find(l => l.value === member.accessLevel)?.label.split(' ')[0]}</span>
                   </span>
                   <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getInvitationStatusColor(member.invitationStatus)}`}>
                     {member.invitationStatus === 'accepted' && <Check className="w-3 h-3 mr-1" />}
@@ -381,15 +386,15 @@ export default function FamilyAccessControls({ patientId, onClose }: FamilyAcces
                   </span>
                 </div>
                 
-                <div className="space-y-1 text-sm text-gray-600">
-                  <div className="flex items-center space-x-4">
+                <div className="space-y-1 text-xs sm:text-sm text-gray-600">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-1 sm:space-y-0">
                     <div className="flex items-center space-x-2">
-                      <Mail className="w-4 h-4" />
-                      <span>{member.email}</span>
+                      <Mail className="w-3 h-3 sm:w-4 sm:h-4" />
+                      <span className="truncate">{member.email}</span>
                     </div>
                     {member.phone && (
                       <div className="flex items-center space-x-2">
-                        <Phone className="w-4 h-4" />
+                        <Phone className="w-3 h-3 sm:w-4 sm:h-4" />
                         <span>{member.phone}</span>
                       </div>
                     )}
@@ -414,11 +419,11 @@ export default function FamilyAccessControls({ patientId, onClose }: FamilyAcces
                 </div>
               </div>
               
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 sm:space-x-2">
                 {member.invitationStatus === 'pending' && (
                   <button
                     onClick={() => handleResendInvite(member)}
-                    className="text-blue-600 hover:text-blue-700 p-1"
+                    className="text-blue-600 hover:text-blue-700 p-1.5 sm:p-1"
                     title="Resend invitation"
                   >
                     <Mail className="w-4 h-4" />
@@ -426,14 +431,14 @@ export default function FamilyAccessControls({ patientId, onClose }: FamilyAcces
                 )}
                 <button
                   onClick={() => setEditingMember(member)}
-                  className="text-gray-600 hover:text-gray-700 p-1"
+                  className="text-gray-600 hover:text-gray-700 p-1.5 sm:p-1"
                   title="Edit permissions"
                 >
                   <Settings className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => handleRemoveMember(member.id)}
-                  className="text-red-600 hover:text-red-700 p-1"
+                  className="text-red-600 hover:text-red-700 p-1.5 sm:p-1"
                   title="Remove family member"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -446,19 +451,21 @@ export default function FamilyAccessControls({ patientId, onClose }: FamilyAcces
       )}
 
       {!loading && !error && familyMembers.length === 0 && (
-        <div className="text-center py-8">
-          <Users className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-          <h4 className="text-lg font-medium text-gray-900 mb-2">No family members added</h4>
-          <p className="text-gray-500 mb-4">
+        <div className="text-center py-6 sm:py-8">
+          <Users className="w-10 h-10 sm:w-12 sm:h-12 text-gray-300 mx-auto mb-3 sm:mb-4" />
+          <h4 className="text-base sm:text-lg font-medium text-gray-900 mb-2">No family members added</h4>
+          <p className="text-sm sm:text-base text-gray-500 mb-4 px-4">
             Invite family members to help coordinate medical care and appointments.
           </p>
-          <button
-            onClick={() => setShowInviteForm(true)}
-            className="btn-primary flex items-center space-x-2 mx-auto"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Invite First Family Member</span>
-          </button>
+          {!hideInviteButton && (
+            <button
+              onClick={() => setShowInviteForm(true)}
+              className="btn-primary flex items-center space-x-2 mx-auto text-sm sm:text-base"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Invite First Family Member</span>
+            </button>
+          )}
         </div>
       )}
 

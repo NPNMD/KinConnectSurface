@@ -625,25 +625,25 @@ export default function PatientProfile() {
                 <div className="flex items-center space-x-2">
                   <button
                     onClick={handleCancel}
-                    className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center space-x-1"
+                    className="px-2 py-1 md:px-3 md:py-1.5 text-xs md:text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center space-x-1"
                   >
-                    <X className="w-4 h-4" />
+                    <X className="w-3.5 h-3.5 md:w-4 md:h-4" />
                     <span>Cancel</span>
                   </button>
                   <button
                     onClick={handleSave}
-                    className="px-3 py-1.5 text-sm text-white bg-primary-600 hover:bg-primary-700 rounded-md transition-colors flex items-center space-x-1"
+                    className="px-2 py-1 md:px-3 md:py-1.5 text-xs md:text-sm text-white bg-primary-600 hover:bg-primary-700 rounded-md transition-colors flex items-center space-x-1"
                   >
-                    <Save className="w-4 h-4" />
+                    <Save className="w-3.5 h-3.5 md:w-4 md:h-4" />
                     <span>Save</span>
                   </button>
                 </div>
               ) : (
                 <button
                   onClick={() => setIsEditing(true)}
-                  className="px-3 py-1.5 text-sm text-primary-600 hover:text-primary-700 border border-primary-600 rounded-md hover:bg-primary-50 transition-colors flex items-center space-x-1"
+                  className="px-2 py-1 md:px-3 md:py-1.5 text-xs md:text-sm text-primary-600 hover:text-primary-700 border border-primary-600 rounded-md hover:bg-primary-50 transition-colors flex items-center space-x-1"
                 >
-                  <Edit className="w-4 h-4" />
+                  <Edit className="w-3.5 h-3.5 md:w-4 md:h-4" />
                   <span>Edit</span>
                 </button>
               )}
@@ -780,9 +780,9 @@ export default function PatientProfile() {
               {isEditing && (
                 <button
                   onClick={() => addArrayItem('medicalConditions')}
-                  className="btn-secondary flex items-center space-x-2"
+                  className="btn-secondary flex items-center space-x-2 text-xs md:text-sm px-2 py-1 md:px-3 md:py-1.5"
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="w-3.5 h-3.5 md:w-4 md:h-4" />
                   <span>Add Condition</span>
                 </button>
               )}
@@ -816,9 +816,9 @@ export default function PatientProfile() {
               {isEditing && (
                 <button
                   onClick={() => addArrayItem('allergies')}
-                  className="btn-secondary flex items-center space-x-2"
+                  className="btn-secondary flex items-center space-x-2 text-xs md:text-sm px-2 py-1 md:px-3 md:py-1.5"
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="w-3.5 h-3.5 md:w-4 md:h-4" />
                   <span>Add Allergy</span>
                 </button>
               )}
@@ -849,9 +849,9 @@ export default function PatientProfile() {
             <PermissionGate requiredPermission="canCreate">
               <button
                 onClick={() => setIsAddingInsurance(true)}
-                className="btn-primary flex items-center space-x-2"
+                className="btn-primary flex items-center space-x-2 text-xs md:text-sm px-2 py-1 md:px-3 md:py-1.5"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-3.5 h-3.5 md:w-4 md:h-4" />
                 <span>Add Insurance</span>
               </button>
             </PermissionGate>
