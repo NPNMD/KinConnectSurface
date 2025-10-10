@@ -508,11 +508,11 @@ export default function HealthcareProvidersManager({
                 setIsAddingFacility(true);
               }
             }}
-            className="btn-primary flex items-center space-x-2"
+            className="btn-primary flex items-center justify-center space-x-2 text-sm md:text-base px-3 py-2 md:px-4 md:py-2 min-h-[44px] w-auto"
             disabled={isLoading}
           >
-            <Plus className="w-4 h-4" />
-            <span>
+            <Plus className="w-4 h-4 md:w-5 md:h-5" />
+            <span className="whitespace-nowrap">
               Add {activeTab === 'providers' ? 'Provider' : 'Facility'}
             </span>
           </button>
@@ -1008,10 +1008,10 @@ export default function HealthcareProvidersManager({
               </p>
               <button
                 onClick={() => setIsAddingProvider(true)}
-                className="btn-primary flex items-center space-x-2 mx-auto"
+                className="btn-primary flex items-center justify-center space-x-2 mx-auto text-sm md:text-base px-3 py-2 md:px-4 md:py-2 min-h-[44px]"
               >
-                <Plus className="w-4 h-4" />
-                <span>Add Your First Provider</span>
+                <Plus className="w-4 h-4 md:w-5 md:h-5" />
+                <span className="whitespace-nowrap">Add Your First Provider</span>
               </button>
             </div>
           )}
@@ -1414,10 +1414,10 @@ export default function HealthcareProvidersManager({
               </p>
               <button
                 onClick={() => setIsAddingFacility(true)}
-                className="btn-primary flex items-center space-x-2 mx-auto"
+                className="btn-primary flex items-center justify-center space-x-2 mx-auto text-sm md:text-base px-3 py-2 md:px-4 md:py-2 min-h-[44px]"
               >
-                <Plus className="w-4 h-4" />
-                <span>Add Your First Facility</span>
+                <Plus className="w-4 h-4 md:w-5 md:h-5" />
+                <span className="whitespace-nowrap">Add Your First Facility</span>
               </button>
             </div>
           )}

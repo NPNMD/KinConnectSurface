@@ -849,10 +849,10 @@ export default function PatientProfile() {
             <PermissionGate requiredPermission="canCreate">
               <button
                 onClick={() => setIsAddingInsurance(true)}
-                className="btn-primary flex items-center space-x-2 text-xs md:text-sm px-2 py-1 md:px-3 md:py-1.5"
+                className="btn-primary flex items-center justify-center space-x-2 text-xs md:text-sm px-3 py-2 md:px-4 md:py-2 min-h-[44px] w-auto"
               >
-                <Plus className="w-3.5 h-3.5 md:w-4 md:h-4" />
-                <span>Add Insurance</span>
+                <Plus className="w-4 h-4 md:w-5 md:h-5" />
+                <span className="whitespace-nowrap">Add Insurance</span>
               </button>
             </PermissionGate>
           </div>

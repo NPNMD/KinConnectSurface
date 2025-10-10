@@ -2753,3 +2753,97 @@ export const PAIN_SCALE = [
   { value: 9, label: 'Severe', description: 'Extremely severe pain', color: 'text-red-700' },
   { value: 10, label: 'Worst', description: 'Worst possible pain', color: 'text-red-800' }
 ] as const;
+
+// ===== UNIFIED CALENDAR TYPES =====
+
+// Unified Calendar Event - combines medical events and medication events
+export interface UnifiedCalendarEvent {
+  id: string;
+  type: 'medical' | 'medication';
+  patientId: string;
+  
+  // Common fields
+  title: string;
+  description?: string;
+  startDateTime: Date;
+  endDateTime: Date;
+  isAllDay: boolean;
+  
+  // Medical event specific fields (when type === 'medical')
+  medicalEvent?: MedicalEvent;
+  
+  // Medication event specific fields (when type === 'medication')
+  medicationEvent?: MedicationCalendarEvent;
+  
+  // Display properties
+  color?: string;
+  icon?: string;
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  
+  // Permissions
+  canEdit: boolean;
+  canDelete: boolean;
+  
+  // Metadata
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Delete Medical Event Request
+export interface DeleteMedicalEventRequest {
+  eventId: string;
+  patientId: string;
+  scope?: 'single' | 'future' | 'all'; // For recurring events
+  reason?: string;
+  notifyFamily?: boolean;
+  deletedBy: string;
+}
+
+// Delete Medical Event Response
+export interface DeleteMedicalEventResponse {
+  success: boolean;
+  deletedCount: number;
+  affectedEventIds: string[];
+  message?: string;
+  error?: string;
+}
+
+// Deleted Medical Event (Audit Trail)
+export interface DeletedMedicalEvent {
+  id: string;
+  originalEventId: string;
+  patientId: string;
+  eventData: Partial<MedicalEvent>; // Snapshot of deleted event
+  deletionScope: 'single' | 'future' | 'all';
+  deletionReason?: string;
+  deletedBy: string;
+  deletedAt: Date;
+  familyNotified: boolean;
+  relatedEventIds?: string[]; // For recurring event deletions
+}
+
+// Calendar Update Event (for real-time sync)
+export interface CalendarUpdateEvent {
+  type: 'created' | 'updated' | 'deleted';
+  eventType: 'medical' | 'medication';
+  eventId: string;
+  patientId: string;
+  timestamp: Date;
+  userId: string;
+}
+
+// Calendar Context State
+export interface CalendarContextState {
+  events: UnifiedCalendarEvent[];
+  loading: boolean;
+  error: string | null;
+  lastUpdated: Date | null;
+}
+
+// Calendar Context Actions
+export interface CalendarContextActions {
+  fetchEvents: (patientId: string, startDate?: Date, endDate?: Date) => Promise<void>;
+  deleteEvent: (request: DeleteMedicalEventRequest) => Promise<DeleteMedicalEventResponse>;
+  refreshEvents: () => Promise<void>;
+  clearError: () => void;
+}

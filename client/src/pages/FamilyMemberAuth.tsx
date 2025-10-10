@@ -108,7 +108,7 @@ export default function FamilyMemberAuth() {
             onClick={() => navigate('/')}
             className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700"
           >
-            Go to KinConnect
+            Go to FamMedicalCare
           </button>
         </div>
       </div>
@@ -122,7 +122,7 @@ export default function FamilyMemberAuth() {
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center space-x-3">
             <Heart className="w-8 h-8 text-primary-600" />
-            <span className="text-2xl font-bold text-gray-900">KinConnect</span>
+            <span className="text-2xl font-bold text-gray-900">FamMedicalCare</span>
           </div>
         </div>
       </header>
@@ -135,7 +135,7 @@ export default function FamilyMemberAuth() {
               <Users className="w-10 h-10 text-blue-600" />
             </div>
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              Welcome to KinConnect!
+              Welcome to FamMedicalCare!
             </h1>
             <p className="text-lg text-gray-600 mb-4">
               {invitation?.inviterName} has invited you to join their family care network.
@@ -176,7 +176,7 @@ export default function FamilyMemberAuth() {
               Sign in to accept this invitation
             </h2>
             <p className="text-gray-600 mb-8">
-              Create your KinConnect account or sign in to your existing account to join the care network.
+              Create your FamMedicalCare account or sign in to your existing account to join the care network.
             </p>
 
             {error && (
@@ -212,7 +212,7 @@ export default function FamilyMemberAuth() {
 
             <div className="mt-6 text-center">
               <p className="text-sm text-gray-500 max-w-md mx-auto">
-                <strong>New to KinConnect?</strong> This will create your account automatically.<br/>
+                <strong>New to FamMedicalCare?</strong> This will create your account automatically.<br/>
                 <strong>Already have an account?</strong> This will sign you in securely.
               </p>
             </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useFamily } from '@/contexts/FamilyContext';
+import { useCalendar } from '@/contexts/CalendarContext';
 import { signOutUser } from '@/lib/firebase';
 import {
   Heart,
@@ -60,8 +61,8 @@ export default function Dashboard() {
   const [loadingMedications, setLoadingMedications] = useState(false);
   const [medicationFilter, setMedicationFilter] = useState<'active' | 'inactive' | 'all'>('active');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const { events: calendarEvents, loading: loadingCalendar } = useCalendar();
   const [upcomingAppointments, setUpcomingAppointments] = useState<MedicalEvent[]>([]);
-  const [loadingAppointments, setLoadingAppointments] = useState(false);
   const [takingMedication, setTakingMedication] = useState<string | null>(null);
   const [showVisitRecording, setShowVisitRecording] = useState(false);
   const [actionableEvents, setActionableEvents] = useState<ActionableEvent[]>([]);
@@ -277,8 +278,6 @@ export default function Dashboard() {
         
         // Remove the event from actionable events list
         setActionableEvents(prevEvents => prevEvents.filter(e => e.id !== event.id));
-        
-        await fetchUpcomingAppointments(); // Refresh appointments
       } else {
         throw new Error(response.error || 'Failed to add event to calendar');
       }
@@ -344,45 +343,26 @@ export default function Dashboard() {
     }
   };
 
-  const fetchUpcomingAppointments = async () => {
-    try {
-      setLoadingAppointments(true);
-      const effectivePatientId = getEffectivePatientId();
-      if (!effectivePatientId) return;
+  // Extract upcoming appointments from calendar context
+  useEffect(() => {
+    const now = new Date();
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
 
-      const response = await apiClient.get<{ success: boolean; data: MedicalEvent[] }>(
-        API_ENDPOINTS.MEDICAL_EVENTS(effectivePatientId)
-      );
+    const upcoming = calendarEvents
+      .filter(event =>
+        event.type === 'medical' &&
+        event.medicalEvent &&
+        event.startDateTime >= now &&
+        event.startDateTime <= thirtyDaysFromNow &&
+        ['scheduled', 'confirmed'].includes(event.medicalEvent.status)
+      )
+      .map(event => event.medicalEvent!)
+      .sort((a, b) => a.startDateTime.getTime() - b.startDateTime.getTime())
+      .slice(0, 5); // Show only next 5 appointments
 
-      if (response.success && response.data) {
-        const now = new Date();
-        const thirtyDaysFromNow = new Date();
-        thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
-
-        const upcoming = response.data
-          .filter(event => {
-            const eventDate = new Date(event.startDateTime);
-            return eventDate >= now && eventDate <= thirtyDaysFromNow && 
-                   ['scheduled', 'confirmed'].includes(event.status);
-          })
-          .map(event => ({
-            ...event,
-            startDateTime: new Date(event.startDateTime),
-            endDateTime: new Date(event.endDateTime),
-            createdAt: new Date(event.createdAt),
-            updatedAt: new Date(event.updatedAt)
-          }))
-          .sort((a, b) => a.startDateTime.getTime() - b.startDateTime.getTime())
-          .slice(0, 5); // Show only next 5 appointments
-
-        setUpcomingAppointments(upcoming);
-      }
-    } catch (error) {
-      console.error('❌ Error fetching upcoming appointments:', error);
-    } finally {
-      setLoadingAppointments(false);
-    }
-  };
+    setUpcomingAppointments(upcoming);
+  }, [calendarEvents]);
 
 
   const handleMedicationAction = (eventId: string, action: 'take' | 'snooze' | 'skip' | 'reschedule') => {
@@ -420,11 +400,6 @@ export default function Dashboard() {
   );
 
 
-  const smartFetchUpcomingAppointments = createSmartRefreshWithMount(
-    fetchUpcomingAppointments,
-    120000, // 2 minutes minimum between calls
-    'dashboard_appointments'
-  );
 
   useEffect(() => {
     const effectivePatientId = getEffectivePatientId();
@@ -458,10 +433,6 @@ export default function Dashboard() {
       setTimeout(() => {
         smartFetchTodaysMedications(bypassCache);
       }, 200);
-      
-      setTimeout(() => {
-        smartFetchUpcomingAppointments(bypassCache);
-      }, 400);
       
       // Mark that initial mount is complete
       if (isInitialMount.current) {
@@ -524,10 +495,6 @@ export default function Dashboard() {
         setTimeout(() => {
           smartFetchTodaysMedications(bypassCache);
         }, 300);
-        
-        setTimeout(() => {
-          smartFetchUpcomingAppointments(bypassCache);
-        }, 600);
       }
     };
 
@@ -564,10 +531,43 @@ export default function Dashboard() {
   }, []);
 
   const formatTime = (date: Date): string => {
+    console.log('🔍 DEBUG formatTime called with:', {
+      date,
+      type: typeof date,
+      isDate: date instanceof Date,
+      hasToLocaleTimeString: typeof date?.toLocaleTimeString === 'function',
+      constructor: date?.constructor?.name
+    });
+    
+    // Defensive: ensure we have a valid Date object
+    if (!(date instanceof Date)) {
+      console.error('❌ formatTime received non-Date value, attempting conversion:', date);
+      const converted = new Date(date as any);
+      console.log('🔄 Converted to:', converted);
+      return converted.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   const formatDate = (date: Date): string => {
+    console.log('🔍 DEBUG formatDate called with:', {
+      date,
+      type: typeof date,
+      isDate: date instanceof Date
+    });
+    
+    // Defensive: ensure we have a valid Date object
+    if (!(date instanceof Date)) {
+      console.error('❌ formatDate received non-Date value, attempting conversion:', date);
+      const converted = new Date(date as any);
+      return converted.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric'
+      });
+    }
+    
     return date.toLocaleDateString('en-US', {
       weekday: 'short',
       month: 'short',
@@ -643,7 +643,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
               <Heart className="w-6 h-6 text-primary-600" />
-              <span className="text-lg font-bold text-gray-900">KinConnect</span>
+              <span className="text-lg font-bold text-gray-900">FamMedicalCare</span>
             </div>
             
             {/* Patient Switcher for Family Members */}
@@ -964,7 +964,7 @@ export default function Dashboard() {
             </Link>
           </div>
           
-          {loadingAppointments ? (
+          {loadingCalendar ? (
             <div className="bg-white rounded-lg p-4 border border-gray-200">
               <div className="flex items-center justify-center py-4">
                 <LoadingSpinner size="sm" />
@@ -1046,7 +1046,6 @@ export default function Dashboard() {
               // Force refresh all data by bypassing smart refresh cache
               smartFetchVisitSummaries(true);
               setTimeout(() => smartFetchTodaysMedications(true), 200);
-              setTimeout(() => smartFetchUpcomingAppointments(true), 400);
             }}
             className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-rose-600 hover:text-rose-700 transition-colors"
           >

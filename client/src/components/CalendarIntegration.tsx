@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, Plus, Clock, MapPin, User, Stethoscope, AlertCircle, CheckCircle, Users, Car, Settings, ChevronLeft, ChevronRight, Search, Filter, Download, Share2, BarChart3, FileText } from 'lucide-react';
+import { Calendar, Plus, Clock, MapPin, User, Stethoscope, AlertCircle, CheckCircle, Users, Car, Settings, ChevronLeft, ChevronRight, Search, Filter, Download, Share2, BarChart3, FileText, Trash2 } from 'lucide-react';
 import HealthcareProviderSearch from './HealthcareProviderSearch';
 import UnifiedFamilyInvitation from './UnifiedFamilyInvitation';
 import FamilyResponsibilityDashboard from './FamilyResponsibilityDashboard';
 import NotificationSystem from './NotificationSystem';
 import CalendarAnalytics from './CalendarAnalytics';
 import AppointmentTemplates from './AppointmentTemplates';
+import DeleteConfirmationDialog from './DeleteConfirmationDialog';
+import { useCalendar } from '@/contexts/CalendarContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import type {
   MedicalEvent,
@@ -13,6 +16,8 @@ import type {
   MedicalEventPriority,
   MedicalEventStatus,
   GooglePlaceResult,
+  UnifiedCalendarEvent,
+  DeleteMedicalEventRequest,
   MEDICAL_EVENT_TYPES,
   MEDICAL_EVENT_PRIORITIES,
   MEDICAL_EVENT_STATUSES
@@ -50,8 +55,9 @@ interface CalendarIntegrationProps {
 }
 
 export default function CalendarIntegration({ patientId }: CalendarIntegrationProps) {
+  const { events: unifiedEvents, loading: isLoading, deleteEvent, refreshEvents } = useCalendar();
+  const { firebaseUser } = useAuth();
   const [events, setEvents] = useState<MedicalEvent[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [savedProviders, setSavedProviders] = useState<any[]>([]);
   const [savedFacilities, setSavedFacilities] = useState<any[]>([]);
@@ -71,6 +77,8 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [conflictWarnings, setConflictWarnings] = useState<string[]>([]);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [eventToDelete, setEventToDelete] = useState<UnifiedCalendarEvent | null>(null);
   const [newEvent, setNewEvent] = useState({
     title: '',
     description: '',
@@ -180,12 +188,19 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
 
     initializeGoogleCalendar();
     
-    // Load calendar events and saved providers when component mounts
+    // Load saved providers when component mounts
     if (patientId) {
-      loadCalendarEvents();
       loadSavedProviders();
     }
   }, [patientId]);
+
+  // Convert unified events to medical events for backward compatibility
+  useEffect(() => {
+    const medicalEvents = unifiedEvents
+      .filter(event => event.type === 'medical' && event.medicalEvent)
+      .map(event => event.medicalEvent!);
+    setEvents(medicalEvents);
+  }, [unifiedEvents]);
 
   // Calendar view utility functions
   const getCalendarDays = (date: Date, view: 'month' | 'week') => {
@@ -365,70 +380,10 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
   };
 
   const loadCalendarEvents = async () => {
-    try {
-      setIsLoading(true);
-      
-      console.log('🔧 CalendarIntegration: Loading calendar events...');
-      console.log('🔧 CalendarIntegration: Patient ID:', patientId);
-      console.log('🔧 CalendarIntegration: Using endpoint:', API_ENDPOINTS.MEDICAL_EVENTS(patientId));
-      
-      // Fetch events from the API (includes medication reminders synced from medication_calendar_events)
-      const response = await apiClient.get<{ success: boolean; data: MedicalEvent[]; message?: string }>(
-        API_ENDPOINTS.MEDICAL_EVENTS(patientId)
-      );
-      
-      console.log('🔧 CalendarIntegration: Medical events response:', response);
-      
-      if (response.success && response.data) {
-        // Convert date strings back to Date objects
-        const events = response.data.map(event => ({
-          ...event,
-          startDateTime: new Date(event.startDateTime),
-          endDateTime: new Date(event.endDateTime),
-          createdAt: new Date(event.createdAt),
-          updatedAt: new Date(event.updatedAt)
-        }));
-        setEvents(events);
-        
-        // Log medication reminder events for debugging
-        const medicationEvents = events.filter(e => e.eventType === 'medication_reminder');
-        console.log('✅ CalendarIntegration: Medical events loaded successfully:', events.length, 'events');
-        console.log('💊 CalendarIntegration: Medication reminders:', medicationEvents.length, 'events');
-        
-        // Show message if API returned a fallback message
-        if (response.message) {
-          console.warn('⚠️ CalendarIntegration:', response.message);
-        }
-      } else {
-        console.error('❌ CalendarIntegration: Failed to load events:', response);
-        setEvents([]);
-      }
-    } catch (error) {
-      console.error('❌ CalendarIntegration: Error loading calendar events:', error);
-      
-      // Try to load from localStorage as final fallback
-      try {
-        const localEvents = localStorage.getItem('kinconnect_medical_events');
-        if (localEvents) {
-          const parsedEvents = JSON.parse(localEvents).map((event: any) => ({
-            ...event,
-            startDateTime: new Date(event.startDateTime),
-            endDateTime: new Date(event.endDateTime),
-            createdAt: new Date(event.createdAt),
-            updatedAt: new Date(event.updatedAt)
-          }));
-          setEvents(parsedEvents);
-          console.log('📱 CalendarIntegration: Loaded events from localStorage:', parsedEvents.length, 'events');
-        } else {
-          setEvents([]);
-        }
-      } catch (localError) {
-        console.error('❌ CalendarIntegration: Error loading from localStorage:', localError);
-        setEvents([]);
-      }
-    } finally {
-      setIsLoading(false);
-    }
+    // Events are now loaded via CalendarContext
+    // This function is kept for backward compatibility but delegates to context
+    console.log('🔧 CalendarIntegration: Refreshing events via context');
+    await refreshEvents();
   };
 
   const handleAddEvent = async () => {
@@ -2131,10 +2086,18 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                     </svg>
                   </button>
-                  <button className="text-gray-400 hover:text-gray-600 p-1" title="More options">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-                    </svg>
+                  <button
+                    onClick={() => {
+                      const unifiedEvent = unifiedEvents.find(e => e.id === event.id);
+                      if (unifiedEvent) {
+                        setEventToDelete(unifiedEvent);
+                        setShowDeleteDialog(true);
+                      }
+                    }}
+                    className="text-red-600 hover:text-red-700 p-1"
+                    title="Delete event"
+                  >
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -2309,6 +2272,33 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
             </div>
           </div>
         </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {showDeleteDialog && eventToDelete && eventToDelete.medicalEvent && (
+        <DeleteConfirmationDialog
+          isOpen={showDeleteDialog}
+          onClose={() => {
+            setShowDeleteDialog(false);
+            setEventToDelete(null);
+          }}
+          onConfirm={async (request: DeleteMedicalEventRequest) => {
+            const response = await deleteEvent(request);
+            if (response.success) {
+              console.log('✅ Event deleted successfully:', response);
+            } else {
+              console.error('❌ Failed to delete event:', response.error);
+              alert(`Failed to delete event: ${response.error}`);
+            }
+            setShowDeleteDialog(false);
+            setEventToDelete(null);
+          }}
+          eventTitle={eventToDelete.title}
+          eventId={eventToDelete.id}
+          patientId={eventToDelete.patientId}
+          isRecurring={eventToDelete.medicalEvent.isRecurring}
+          deletedBy={firebaseUser?.uid || ''}
+        />
       )}
     </div>
   );

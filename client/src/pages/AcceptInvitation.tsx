@@ -241,7 +241,7 @@ export default function AcceptInvitation() {
             onClick={() => navigate('/')}
             className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700"
           >
-            Go to KinConnect
+            Go to FamMedicalCare
           </button>
         </div>
       </div>
@@ -265,7 +265,7 @@ export default function AcceptInvitation() {
             onClick={() => navigate('/')}
             className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700"
           >
-            Go to KinConnect
+            Go to FamMedicalCare
           </button>
         </div>
       </div>
@@ -342,7 +342,7 @@ export default function AcceptInvitation() {
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center space-x-3">
             <Heart className="w-8 h-8 text-primary-600" />
-            <span className="text-2xl font-bold text-gray-900">KinConnect</span>
+            <span className="text-2xl font-bold text-gray-900">FamMedicalCare</span>
           </div>
         </div>
       </header>
@@ -355,7 +355,7 @@ export default function AcceptInvitation() {
               <Heart className="w-8 h-8 text-blue-600" />
             </div>
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              You're Invited to Join KinConnect!
+              You're Invited to Join FamMedicalCare!
             </h1>
             <p className="text-gray-600">
               {invitation?.inviterName} has invited you to join their family care network.

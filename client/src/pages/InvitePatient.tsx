@@ -24,7 +24,7 @@ export default function InvitePatient() {
                 <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
               </Link>
               <Heart className="w-6 h-6 sm:w-8 sm:h-8 text-primary-600" />
-              <span className="text-xl sm:text-2xl font-bold text-gray-900">KinConnect</span>
+              <span className="text-xl sm:text-2xl font-bold text-gray-900">FamMedicalCare</span>
             </div>
           </div>
         </div>

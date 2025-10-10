@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useSearchParams } fro
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { FamilyProvider } from '@/contexts/FamilyContext';
+import { CalendarProvider } from '@/contexts/CalendarContext';
 import Landing from '@/pages/Landing';
 import Dashboard from '@/pages/Dashboard';
 import PatientProfile from '@/pages/PatientProfile';
@@ -178,12 +179,14 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <FamilyProvider>
-          <Router>
-            <div className="min-h-screen bg-gray-50">
-              <AppRoutes />
-              <ServiceWorkerUpdate />
-            </div>
-          </Router>
+          <CalendarProvider>
+            <Router>
+              <div className="min-h-screen bg-gray-50">
+                <AppRoutes />
+                <ServiceWorkerUpdate />
+              </div>
+            </Router>
+          </CalendarProvider>
         </FamilyProvider>
       </AuthProvider>
     </QueryClientProvider>

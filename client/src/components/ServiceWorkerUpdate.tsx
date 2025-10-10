@@ -48,7 +48,7 @@ export default function ServiceWorkerUpdate() {
               App Update Available
             </h3>
             <p className="text-sm text-gray-600 mt-1">
-              A new version of KinConnect is available. Update now to get the latest features and fixes.
+              A new version of FamMedicalCare is available. Update now to get the latest features and fixes.
             </p>
             <div className="flex space-x-2 mt-3">
               <button

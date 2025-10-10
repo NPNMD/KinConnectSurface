@@ -7,6 +7,7 @@ import path from 'path';
 
 // Import routes
 import invitationRoutes from './routes/invitations';
+import medicalEventsRoutes from './routes/medicalEvents';
 
 // Load environment variables
 dotenv.config();
@@ -46,6 +47,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // API routes
 app.use('/api/invitations', invitationRoutes);
+app.use('/api/medical-events', medicalEventsRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

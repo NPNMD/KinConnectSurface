@@ -29,13 +29,13 @@ export default function Landing() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 to-blue-50">
+    <div className="min-h-screen bg-gradient-to-br from-primary-light/20 to-secondary-light/20">
       {/* Navigation */}
       <nav className="px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <Heart className="w-8 h-8 text-primary-600" />
-            <span className="text-2xl font-bold text-gray-900">KinConnect</span>
+            <Heart className="w-8 h-8 text-primary" />
+            <span className="text-2xl font-bold text-gray-900">FamMedicalCare</span>
           </div>
         </div>
       </nav>
@@ -44,9 +44,8 @@ export default function Landing() {
       <div className="max-w-7xl mx-auto px-6 py-20">
         <div className="text-center">
           <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6">
-            Family Care
-            <span className="text-primary-600 block">Coordination</span>
-            Made Simple
+            Care, Connected
+            <span className="text-primary block">for Your Family</span>
           </h1>
           
           <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
@@ -85,32 +84,32 @@ export default function Landing() {
       <div className="max-w-7xl mx-auto px-6 py-20">
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
           <div className="text-center">
-            <div className="bg-white rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4 shadow-lg">
-              <Heart className="w-8 h-8 text-primary-600" />
+            <div className="bg-primary/10 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4 shadow-lg border-2 border-primary">
+              <Heart className="w-8 h-8 text-primary" />
             </div>
             <h3 className="text-xl font-semibold text-gray-900 mb-2">Patient Care</h3>
             <p className="text-gray-600">Comprehensive patient profiles with medical history, conditions, and allergies.</p>
           </div>
 
           <div className="text-center">
-            <div className="bg-white rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4 shadow-lg">
-              <Users className="w-8 h-8 text-primary-600" />
+            <div className="bg-secondary/10 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4 shadow-lg border-2 border-secondary">
+              <Users className="w-8 h-8 text-secondary" />
             </div>
             <h3 className="text-xl font-semibold text-gray-900 mb-2">Family Coordination</h3>
             <p className="text-gray-600">Connect family members and caregivers for seamless care coordination.</p>
           </div>
 
           <div className="text-center">
-            <div className="bg-white rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4 shadow-lg">
-              <Clock className="w-8 h-8 text-primary-600" />
+            <div className="bg-accent/10 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4 shadow-lg border-2 border-accent">
+              <Clock className="w-8 h-8 text-accent" />
             </div>
             <h3 className="text-xl font-semibold text-gray-900 mb-2">Appointment Management</h3>
             <p className="text-gray-600">Track appointments, medications, and care tasks in one centralized location.</p>
           </div>
 
           <div className="text-center">
-            <div className="bg-white rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4 shadow-lg">
-              <Shield className="w-8 h-8 text-primary-600" />
+            <div className="bg-gold/10 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4 shadow-lg border-2 border-gold">
+              <Shield className="w-8 h-8 text-gold" />
             </div>
             <h3 className="text-xl font-semibold text-gray-900 mb-2">Secure & Private</h3>
             <p className="text-gray-600">HIPAA-compliant platform with enterprise-grade security and privacy controls.</p>
@@ -121,7 +120,7 @@ export default function Landing() {
       {/* Footer */}
       <footer className="bg-white border-t border-gray-200 py-8">
         <div className="max-w-7xl mx-auto px-6 text-center text-gray-600">
-          <p>&copy; 2024 KinConnect. All rights reserved.</p>
+          <p>&copy; 2024 FamMedicalCare. All rights reserved.</p>
         </div>
       </footer>
     </div>

@@ -1,0 +1,22 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="FamMedicalCare App Icon">
+  <title>FamMedicalCare App Icon</title>
+  <desc>High-resolution app icon with Family Unity Ring design</desc>
+  
+  <!-- Background (optional - can be transparent) -->
+  <rect width="512" height="512" fill="#FAFAFA" rx="64"/>
+  
+  <!-- Family Unity Ring Icon (centered and scaled) -->
+  <g transform="translate(126, 126)">
+    <!-- Left Circle (Primary Blue) -->
+    <circle cx="90" cy="100" r="80" fill="none" stroke="#4A90E2" stroke-width="8"/>
+    
+    <!-- Right Circle (Nurturing Teal) -->
+    <circle cx="170" cy="100" r="80" fill="none" stroke="#5DBEAA" stroke-width="8"/>
+    
+    <!-- Bottom Circle (Warm Coral) -->
+    <circle cx="130" cy="160" r="80" fill="none" stroke="#FF8B7B" stroke-width="8"/>
+    
+    <!-- Heart at center intersection -->
+    <path d="M 130 95 C 130 85 135 80 142 80 C 147 80 150 83 152 87 C 154 83 157 80 162 80 C 169 85 174 85 174 95 C 174 105 152 125 152 125 C 152 125 130 105 130 95 Z" fill="#FF8B7B"/>
+  </g>
+</svg>
