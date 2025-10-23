@@ -41,10 +41,12 @@ import TimeBucketView from '@/components/TimeBucketView';
 import PatientSwitcher from '@/components/PatientSwitcher';
 import { PermissionGate } from '@/components/PermissionGate';
 import { ViewOnlyBanner } from '@/components/ViewOnlyBanner';
+import Onboarding from '@/components/Onboarding';
+import { showSuccess, showError } from '@/utils/toast';
 import type { VisitSummary, MedicationCalendarEvent, MedicalEvent, Medication, TodayMedicationBuckets } from '@shared/types';
 
 export default function Dashboard() {
-  const { user, firebaseUser } = useAuth();
+  const { user, firebaseUser, refreshUser } = useAuth();
   const {
     userRole,
     activePatientAccess,
@@ -66,6 +68,7 @@ export default function Dashboard() {
   const [takingMedication, setTakingMedication] = useState<string | null>(null);
   const [showVisitRecording, setShowVisitRecording] = useState(false);
   const [actionableEvents, setActionableEvents] = useState<ActionableEvent[]>([]);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   interface ActionableEvent {
     id: string;
@@ -86,6 +89,80 @@ export default function Dashboard() {
       await signOutUser();
     } catch (error) {
       console.error('Sign out error:', error);
+    }
+  };
+
+  const handleOnboardingComplete = async () => {
+    try {
+      console.log('🎉 Onboarding completed');
+      
+      // Mark onboarding as complete in the backend
+      const token = await firebaseUser?.getIdToken();
+      if (!token) {
+        throw new Error('No authentication token available');
+      }
+
+      const response = await fetch('https://us-central1-claritystream-uldp9.cloudfunctions.net/api/auth/complete-onboarding', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          completedAt: new Date().toISOString(),
+          skipped: false,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to mark onboarding as complete');
+      }
+
+      // Refresh user data to get updated onboarding status
+      await refreshUser();
+      
+      setShowOnboarding(false);
+      showSuccess('Welcome to FamMedicalCare! 🎉');
+    } catch (error) {
+      console.error('❌ Error completing onboarding:', error);
+      showError('Failed to save onboarding status. Please try again.');
+    }
+  };
+
+  const handleOnboardingSkip = async () => {
+    try {
+      console.log('⏭️ Onboarding skipped');
+      
+      // Mark onboarding as skipped in the backend
+      const token = await firebaseUser?.getIdToken();
+      if (!token) {
+        throw new Error('No authentication token available');
+      }
+
+      const response = await fetch('https://us-central1-claritystream-uldp9.cloudfunctions.net/api/auth/complete-onboarding', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          completedAt: new Date().toISOString(),
+          skipped: true,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to mark onboarding as skipped');
+      }
+
+      // Refresh user data to get updated onboarding status
+      await refreshUser();
+      
+      setShowOnboarding(false);
+      showSuccess('You can access the tour anytime from settings.');
+    } catch (error) {
+      console.error('❌ Error skipping onboarding:', error);
+      showError('Failed to save onboarding status. Please try again.');
     }
   };
 
@@ -235,7 +312,7 @@ export default function Dashboard() {
   const handleAddToCalendar = async (event: ActionableEvent) => {
     try {
       if (!event.dueDate) {
-        alert('Cannot add event without a due date');
+        showError('Cannot add event without a due date');
         return;
       }
 
@@ -274,7 +351,7 @@ export default function Dashboard() {
       );
       
       if (response.success) {
-        alert('Event added to calendar successfully!');
+        showSuccess('Event added to calendar successfully!');
         
         // Remove the event from actionable events list
         setActionableEvents(prevEvents => prevEvents.filter(e => e.id !== event.id));
@@ -283,7 +360,7 @@ export default function Dashboard() {
       }
     } catch (error) {
       console.error('Error adding event to calendar:', error);
-      alert('Failed to add event to calendar. Please try again.');
+      showError('Failed to add event to calendar. Please try again.');
     }
   };
 
@@ -530,6 +607,23 @@ export default function Dashboard() {
     };
   }, []);
 
+  // Listen for patient switch events and refresh all data
+  useEffect(() => {
+    const handlePatientSwitch = (event: CustomEvent) => {
+      console.log('🔄 Dashboard: Patient switched, refreshing all data...', event.detail);
+      
+      // Note: The PatientSwitcher component already triggers a page reload
+      // This listener is here for future enhancements where we might want
+      // to refresh data without a full page reload
+    };
+
+    window.addEventListener('patientSwitched', handlePatientSwitch as EventListener);
+    
+    return () => {
+      window.removeEventListener('patientSwitched', handlePatientSwitch as EventListener);
+    };
+  }, []);
+
   const formatTime = (date: Date): string => {
     console.log('🔍 DEBUG formatTime called with:', {
       date,
@@ -615,6 +709,18 @@ export default function Dashboard() {
     }
   };
 
+  // Check if user needs to see onboarding (only for new users after authentication)
+  useEffect(() => {
+    if (user && firebaseUser && !familyLoading) {
+      // Only show onboarding for patients who haven't completed it
+      // Don't show for family members as they're accessing someone else's account
+      if (userRole === 'patient' && user.hasCompletedOnboarding === false) {
+        console.log('👋 New user detected, showing onboarding');
+        setShowOnboarding(true);
+      }
+    }
+  }, [user, firebaseUser, familyLoading, userRole]);
+
   // Show loading state for family members waiting for patient context
   if (userRole === 'family_member' && !getEffectivePatientId() && !familyLoading) {
     return (
@@ -638,7 +744,7 @@ export default function Dashboard() {
       <ViewOnlyBanner />
       
       {/* Mobile-First Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
+      <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40" role="banner">
         <div className="px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
@@ -652,7 +758,10 @@ export default function Dashboard() {
             </div>
             
             <div className="flex items-center space-x-2">
-              <button className="p-2 text-gray-400 hover:text-gray-600 transition-colors">
+              <button
+                className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="View notifications"
+              >
                 <Bell className="w-5 h-5" />
               </button>
               
@@ -667,7 +776,7 @@ export default function Dashboard() {
               <button
                 onClick={handleSignOut}
                 className="p-2 text-gray-400 hover:text-red-600 transition-colors"
-                title="Sign out"
+                aria-label="Sign out"
               >
                 <LogOut className="w-4 h-4" />
               </button>
@@ -677,7 +786,7 @@ export default function Dashboard() {
       </header>
 
       {/* Main Content - Mobile Optimized */}
-      <main className="px-4 py-4 pb-20">
+      <main id="main-content" className="px-4 py-4 pb-20">
         {/* Welcome Section */}
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900 mb-1">
@@ -705,6 +814,7 @@ export default function Dashboard() {
                 <button
                   onClick={() => setShowVisitRecording(true)}
                   className="flex items-center space-x-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors"
+                  aria-label="Record a new visit summary"
                 >
                   <Mic className="w-4 h-4" />
                   <span>Record Visit</span>
@@ -798,6 +908,7 @@ export default function Dashboard() {
                         <button
                           onClick={() => handleAddToCalendar(event)}
                           className="flex items-center space-x-1 px-3 py-1 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 transition-colors"
+                          aria-label={`Add ${event.title} to calendar`}
                         >
                           <CalendarPlus className="w-3 h-3" />
                           <span>Add to Calendar</span>
@@ -807,7 +918,7 @@ export default function Dashboard() {
                         <Link
                           to="/medications"
                           className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white text-xs rounded-md hover:bg-blue-700 transition-colors"
-                          title="Manage medications"
+                          aria-label={`Manage ${event.title} medication`}
                         >
                           <ExternalLink className="w-3 h-3" />
                           <span>Manage</span>
@@ -881,6 +992,10 @@ export default function Dashboard() {
                 <button
                   onClick={() => setShowVisitRecording(true)}
                   className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors mx-auto"
+                  aria-label={userRole === 'family_member' && activePatientAccess
+                    ? `Record visit for ${activePatientAccess.patientName}`
+                    : 'Record your first visit'
+                  }
                 >
                   <Mic className="w-4 h-4" />
                   <span>
@@ -915,6 +1030,8 @@ export default function Dashboard() {
                         ? 'bg-primary-600 text-white'
                         : 'bg-white text-gray-600 hover:bg-gray-50'
                     }`}
+                    aria-label={`Filter medications: ${filter.label}`}
+                    aria-pressed={medicationFilter === filter.key}
                   >
                     {filter.label}
                   </button>
@@ -1019,6 +1136,14 @@ export default function Dashboard() {
           )}
         </div>
 
+        {/* Onboarding Modal */}
+        {showOnboarding && (
+          <Onboarding
+            onComplete={handleOnboardingComplete}
+            onSkip={handleOnboardingSkip}
+          />
+        )}
+
         {/* Visit Recording Modal */}
         {showVisitRecording && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[10000]">
@@ -1038,7 +1163,7 @@ export default function Dashboard() {
       </main>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="mobile-nav-container">
+      <nav className="mobile-nav-container" role="navigation" aria-label="Main navigation">
         <div className="flex items-center justify-between">
           <button
             onClick={() => {
@@ -1048,6 +1173,8 @@ export default function Dashboard() {
               setTimeout(() => smartFetchTodaysMedications(true), 200);
             }}
             className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-rose-600 hover:text-rose-700 transition-colors"
+            aria-label="Home - Refresh dashboard"
+            aria-current="page"
           >
             <div className="bg-rose-100 p-1.5 rounded-lg">
               <Heart className="w-5 h-5" />
@@ -1058,6 +1185,7 @@ export default function Dashboard() {
           <Link
             to="/medications"
             className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-blue-600 hover:text-blue-700 transition-colors"
+            aria-label="Go to medications page"
           >
             <div className="bg-blue-100 p-1.5 rounded-lg">
               <Pill className="w-5 h-5" />
@@ -1068,6 +1196,7 @@ export default function Dashboard() {
           <Link
             to="/calendar"
             className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-purple-600 hover:text-purple-700 transition-colors"
+            aria-label="Go to calendar page"
           >
             <div className="bg-purple-100 p-1.5 rounded-lg">
               <Calendar className="w-5 h-5" />
@@ -1078,6 +1207,7 @@ export default function Dashboard() {
           <Link
             to="/profile"
             className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-green-600 hover:text-green-700 transition-colors"
+            aria-label="Go to profile page"
           >
             <div className="bg-green-100 p-1.5 rounded-lg">
               <User className="w-5 h-5" />
@@ -1088,6 +1218,7 @@ export default function Dashboard() {
           <Link
             to={userRole === 'patient' ? "/family-management" : "/family/invite"}
             className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-amber-600 hover:text-amber-700 transition-colors"
+            aria-label="Go to family management page"
           >
             <div className="bg-amber-100 p-1.5 rounded-lg">
               <Users className="w-5 h-5" />

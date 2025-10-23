@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Coffee, 
-  Sun, 
-  Sunset, 
-  Plus, 
-  Clock, 
-  Check, 
+import {
+  Coffee,
+  Sun,
+  Sunset,
+  Plus,
+  Clock,
+  Check,
   X,
   Calendar,
   Edit,
@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import type { MealLog, NewMealLog, MealType } from '@shared/types';
 import { useAuth } from '@/contexts/AuthContext';
+import { showSuccess, showError } from '@/utils/toast';
 
 interface MealLoggerProps {
   patientId: string;
@@ -106,14 +107,15 @@ export default function MealLogger({
         await loadMealLogs();
         onMealLogged?.(result.data);
         handleCancel();
+        showSuccess(editingMealId ? 'Meal time updated!' : 'Meal logged successfully!');
       } else {
         console.error('Failed to save meal log:', result.error);
-        alert(`Failed to save meal log: ${result.error}`);
+        showError(`Failed to save meal log: ${result.error}`);
       }
       
     } catch (error) {
       console.error('Error saving meal log:', error);
-      alert('Failed to save meal log. Please try again.');
+      showError('Failed to save meal log. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -140,13 +142,14 @@ export default function MealLogger({
         if (result.success) {
           // Refresh meal logs
           await loadMealLogs();
+          showSuccess('Meal log deleted');
         } else {
           console.error('Failed to delete meal log:', result.error);
-          alert(`Failed to delete meal log: ${result.error}`);
+          showError(`Failed to delete meal log: ${result.error}`);
         }
       } catch (error) {
         console.error('Error deleting meal log:', error);
-        alert('Failed to delete meal log. Please try again.');
+        showError('Failed to delete meal log. Please try again.');
       }
     }
   };

@@ -6,6 +6,11 @@ export interface User {
   profilePicture?: string;
   userType: 'patient' | 'family_member' | 'caregiver' | 'healthcare_provider';
   
+  // Onboarding
+  hasCompletedOnboarding?: boolean;    // Track if user has completed onboarding flow
+  onboardingCompletedAt?: Date;        // When onboarding was completed
+  onboardingSkipped?: boolean;         // Track if user skipped onboarding
+  
   // Enhanced family member fields
   primaryPatientId?: string;           // Primary patient this family member manages
   familyMemberOf?: string[];           // Array of all patient IDs they have access to

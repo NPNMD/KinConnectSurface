@@ -1,5 +1,18 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, type User } from 'firebase/auth';
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  signOut,
+  onAuthStateChanged,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  type User
+} from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { firebaseConfig } from '@shared/firebase';
@@ -142,6 +155,91 @@ export const signOutUser = async () => {
     console.error('Error signing out:', error);
     return { success: false, error };
   }
+};
+
+// Email/Password Authentication Functions
+export const signUpWithEmail = async (email: string, password: string) => {
+  try {
+    console.log('📧 Starting email sign-up process...');
+    const result = await createUserWithEmailAndPassword(auth, email, password);
+    
+    // Send verification email
+    await sendEmailVerification(result.user);
+    console.log('✅ Sign-up successful, verification email sent to:', email);
+    
+    return {
+      success: true,
+      user: result.user,
+      needsVerification: true
+    };
+  } catch (error: any) {
+    console.error('❌ Email sign-up failed:', error.code, error.message);
+    return { success: false, error };
+  }
+};
+
+export const signInWithEmail = async (email: string, password: string) => {
+  try {
+    console.log('📧 Starting email sign-in process...');
+    const result = await signInWithEmailAndPassword(auth, email, password);
+    
+    // Check if email is verified
+    if (!result.user.emailVerified) {
+      console.warn('⚠️ Email not verified for user:', email);
+      return {
+        success: true,
+        user: result.user,
+        needsVerification: true
+      };
+    }
+    
+    console.log('✅ Email sign-in successful:', email);
+    return { success: true, user: result.user };
+  } catch (error: any) {
+    console.error('❌ Email sign-in failed:', error.code, error.message);
+    return { success: false, error };
+  }
+};
+
+export const sendVerificationEmail = async () => {
+  try {
+    const user = auth.currentUser;
+    if (!user) {
+      return { success: false, error: new Error('No user logged in') };
+    }
+    
+    if (user.emailVerified) {
+      return { success: true, alreadyVerified: true };
+    }
+    
+    await sendEmailVerification(user);
+    console.log('✅ Verification email sent to:', user.email);
+    return { success: true };
+  } catch (error: any) {
+    console.error('❌ Failed to send verification email:', error);
+    return { success: false, error };
+  }
+};
+
+export const resetPassword = async (email: string) => {
+  try {
+    console.log('🔑 Sending password reset email to:', email);
+    await sendPasswordResetEmail(auth, email);
+    console.log('✅ Password reset email sent');
+    return { success: true };
+  } catch (error: any) {
+    console.error('❌ Password reset failed:', error.code, error.message);
+    return { success: false, error };
+  }
+};
+
+export const checkEmailVerification = async (): Promise<boolean> => {
+  const user = auth.currentUser;
+  if (!user) return false;
+  
+  // Reload user to get latest verification status
+  await user.reload();
+  return user.emailVerified;
 };
 
 // Auth state observer

@@ -25,6 +25,7 @@ import {
 import LoadingSpinner from '@/components/LoadingSpinner';
 import VisitSummaryCard from '@/components/VisitSummaryCard';
 import VisitSummaryForm from '@/components/VisitSummaryForm';
+import { showSuccess, showError, showInfo } from '@/utils/toast';
 import type { VisitSummary, VisitType, AIProcessingStatus } from '@shared/types';
 
 export default function VisitSummaries() {
@@ -166,12 +167,13 @@ export default function VisitSummaries() {
       if (response.success) {
         // Remove from local state
         setVisitSummaries(prev => prev.filter(s => s.id !== summaryId));
+        showSuccess('Visit summary deleted');
       } else {
-        alert('Failed to delete visit summary');
+        showError('Failed to delete visit summary');
       }
     } catch (error) {
       console.error('Error deleting visit summary:', error);
-      alert('Failed to delete visit summary');
+      showError('Failed to delete visit summary');
     }
   };
 
@@ -187,12 +189,13 @@ export default function VisitSummaries() {
       if (response.success) {
         // Refresh the summaries to show updated processing status
         await fetchVisitSummaries(true);
+        showInfo('AI processing started - this may take a few minutes');
       } else {
-        alert('Failed to retry AI processing');
+        showError('Failed to retry AI processing');
       }
     } catch (error) {
       console.error('Error retrying AI processing:', error);
-      alert('Failed to retry AI processing');
+      showError('Failed to retry AI processing');
     }
   };
 

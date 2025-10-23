@@ -40,6 +40,7 @@ import HealthcareProvidersManager from '@/components/HealthcareProvidersManager'
 import InsuranceCardViewer from '@/components/insurance/InsuranceCardViewer';
 import InsuranceFormModal from '@/components/insurance/InsuranceFormModal';
 import PharmacyAutocomplete from '@/components/PharmacyAutocomplete';
+import { showSuccess, showError } from '@/utils/toast';
 
 export default function PatientProfile() {
   const { user } = useAuth();
@@ -120,6 +121,7 @@ export default function PatientProfile() {
       
       if (response.success) {
         setIsEditing(false);
+        showSuccess('Profile saved successfully!');
         
         // Update form data with the saved data to ensure consistency
         if (response.data) {
@@ -156,7 +158,7 @@ export default function PatientProfile() {
       }
     } catch (error) {
       console.error('Error saving profile:', error);
-      alert('Failed to save profile. Please try again.');
+      showError('Failed to save profile. Please try again.');
     }
   };
 
@@ -564,9 +566,10 @@ export default function PatientProfile() {
       }
 
       setIsChangingPharmacy(false);
+      showSuccess('Preferred pharmacy updated!');
     } catch (error) {
       console.error('Error selecting pharmacy:', error);
-      alert('Failed to set preferred pharmacy. Please try again.');
+      showError('Failed to set preferred pharmacy. Please try again.');
     }
   };
 

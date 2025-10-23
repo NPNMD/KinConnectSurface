@@ -102,7 +102,7 @@ export default function QuickActionButtons({
   // If user doesn't have edit permissions, show permission message
   if (!canEdit) {
     return (
-      <div className="flex items-center justify-center space-x-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
+      <div className="flex items-center justify-center space-x-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-md min-h-[44px]">
         <Lock className="w-4 h-4 text-gray-400" />
         <span className="text-sm text-gray-600">
           {userRole === 'family_member' ? 'View only access' : 'No edit permissions'}
@@ -145,21 +145,21 @@ export default function QuickActionButtons({
             <button
               onClick={() => setShowMoreOptions(!showMoreOptions)}
               disabled={isProcessing}
-              className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md disabled:opacity-50 transition-colors"
+              className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md disabled:opacity-50 transition-colors"
               title="More options"
             >
-              <MoreHorizontal className="w-4 h-4" />
+              <MoreHorizontal className="w-5 h-5" />
             </button>
             
             {showMoreOptions && (
-              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-28">
+              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-32">
                 <button
                   onClick={() => {
                     setShowSnoozeModal(true);
                     setShowMoreOptions(false);
                   }}
                   disabled={isProcessing}
-                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  className="w-full px-4 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center"
                 >
                   Snooze
                 </button>
@@ -169,7 +169,7 @@ export default function QuickActionButtons({
                     setShowMoreOptions(false);
                   }}
                   disabled={isProcessing}
-                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  className="w-full px-4 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center"
                 >
                   Skip
                 </button>
@@ -223,10 +223,10 @@ export default function QuickActionButtons({
           <button
             onClick={() => setShowSnoozeModal(true)}
             disabled={isProcessing}
-            className="px-3 py-2 bg-orange-100 text-orange-800 hover:bg-orange-200 rounded-md font-medium text-sm transition-colors disabled:opacity-50"
+            className="px-4 py-3 min-h-[44px] bg-orange-100 text-orange-800 hover:bg-orange-200 rounded-md font-medium text-sm transition-colors disabled:opacity-50"
             title="Snooze medication"
           >
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center justify-center space-x-2">
               <Clock className="w-4 h-4" />
               <span>Snooze</span>
             </div>
@@ -239,14 +239,14 @@ export default function QuickActionButtons({
             <button
               onClick={() => setShowMoreOptions(!showMoreOptions)}
               disabled={isProcessing}
-              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors disabled:opacity-50"
+              className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors disabled:opacity-50"
               title="More options"
             >
-              <MoreHorizontal className="w-4 h-4" />
+              <MoreHorizontal className="w-5 h-5" />
             </button>
             
             {showMoreOptions && (
-              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-36">
+              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-40">
                 {!isOverdue && !isDueSoon && (
                   <button
                     onClick={() => {
@@ -254,9 +254,9 @@ export default function QuickActionButtons({
                       setShowMoreOptions(false);
                     }}
                     disabled={isProcessing}
-                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center space-x-2"
+                    className="w-full px-4 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center space-x-2"
                   >
-                    <Clock className="w-3 h-3" />
+                    <Clock className="w-4 h-4" />
                     <span>Snooze</span>
                   </button>
                 )}
@@ -266,9 +266,9 @@ export default function QuickActionButtons({
                     setShowMoreOptions(false);
                   }}
                   disabled={isProcessing}
-                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center space-x-2"
+                  className="w-full px-4 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center space-x-2"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-4 h-4" />
                   <span>Skip dose</span>
                 </button>
                 <button
@@ -277,9 +277,9 @@ export default function QuickActionButtons({
                     setShowMoreOptions(false);
                   }}
                   disabled={isProcessing}
-                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center space-x-2"
+                  className="w-full px-4 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center space-x-2"
                 >
-                  <RotateCcw className="w-3 h-3" />
+                  <RotateCcw className="w-4 h-4" />
                   <span>Reschedule</span>
                 </button>
               </div>
@@ -339,7 +339,7 @@ export default function QuickActionButtons({
         <button
           onClick={handleTake}
           disabled={isProcessing}
-          className={`px-3 py-2 rounded-md font-medium text-sm transition-colors disabled:opacity-50 ${
+          className={`px-4 py-3 min-h-[44px] rounded-md font-medium text-sm transition-colors disabled:opacity-50 ${
             isOverdue || isDueSoon
               ? 'bg-green-600 text-white hover:bg-green-700'
               : 'bg-green-100 text-green-800 hover:bg-green-200'
@@ -364,10 +364,10 @@ export default function QuickActionButtons({
           <button
             onClick={() => setShowSnoozeModal(true)}
             disabled={isProcessing}
-            className="px-3 py-2 bg-orange-100 text-orange-800 hover:bg-orange-200 rounded-md font-medium text-sm transition-colors disabled:opacity-50"
+            className="px-4 py-3 min-h-[44px] bg-orange-100 text-orange-800 hover:bg-orange-200 rounded-md font-medium text-sm transition-colors disabled:opacity-50"
             title="Snooze medication"
           >
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center justify-center space-x-2">
               <Clock className="w-4 h-4" />
               <span>Snooze</span>
             </div>
@@ -380,14 +380,14 @@ export default function QuickActionButtons({
             <button
               onClick={() => setShowMoreOptions(!showMoreOptions)}
               disabled={isProcessing}
-              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors disabled:opacity-50"
+              className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors disabled:opacity-50"
               title="More options"
             >
-              <MoreHorizontal className="w-4 h-4" />
+              <MoreHorizontal className="w-5 h-5" />
             </button>
             
             {showMoreOptions && (
-              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-36">
+              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 min-w-40">
                 {!isOverdue && !isDueSoon && (
                   <button
                     onClick={() => {
@@ -395,9 +395,9 @@ export default function QuickActionButtons({
                       setShowMoreOptions(false);
                     }}
                     disabled={isProcessing}
-                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center space-x-2"
+                    className="w-full px-4 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center space-x-2"
                   >
-                    <Clock className="w-3 h-3" />
+                    <Clock className="w-4 h-4" />
                     <span>Snooze</span>
                   </button>
                 )}
@@ -407,9 +407,9 @@ export default function QuickActionButtons({
                     setShowMoreOptions(false);
                   }}
                   disabled={isProcessing}
-                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center space-x-2"
+                  className="w-full px-4 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center space-x-2"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-4 h-4" />
                   <span>Skip dose</span>
                 </button>
                 <button
@@ -418,9 +418,9 @@ export default function QuickActionButtons({
                     setShowMoreOptions(false);
                   }}
                   disabled={isProcessing}
-                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center space-x-2"
+                  className="w-full px-4 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center space-x-2"
                 >
-                  <RotateCcw className="w-3 h-3" />
+                  <RotateCcw className="w-4 h-4" />
                   <span>Reschedule</span>
                 </button>
               </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Save } from 'lucide-react';
 import { InsuranceInformation, NewInsuranceInformation } from '@shared/types';
 import InsuranceCardUploader from './InsuranceCardUploader';
+import { showSuccess, showError } from '@/utils/toast';
 
 interface InsuranceFormModalProps {
   patientId: string;
@@ -62,7 +63,7 @@ export default function InsuranceFormModal({
     e.preventDefault();
     
     if (!formData.providerName || !formData.policyNumber) {
-      alert('Please fill in required fields: Provider Name and Policy Number');
+      showError('Please fill in required fields: Provider Name and Policy Number');
       return;
     }
 
@@ -97,10 +98,11 @@ export default function InsuranceFormModal({
         };
         await onSave(newInsurance);
       }
+      showSuccess(insurance ? 'Insurance updated successfully!' : 'Insurance added successfully!');
       onClose();
     } catch (error) {
       console.error('Error saving insurance:', error);
-      alert('Failed to save insurance information. Please try again.');
+      showError('Failed to save insurance information. Please try again.');
     } finally {
       setIsSaving(false);
     }

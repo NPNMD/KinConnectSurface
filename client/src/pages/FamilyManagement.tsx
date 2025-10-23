@@ -203,6 +203,7 @@ export default function FamilyManagement() {
           <button
             onClick={() => navigate('/invite-family')}
             className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            aria-label="Invite new family member"
           >
             <UserPlus className="w-5 h-5 mr-2" />
             Invite New Member
@@ -247,7 +248,11 @@ export default function FamilyManagement() {
                     </p>
                   </div>
                   <div className="relative group">
-                    <button className="p-1 hover:bg-gray-100 rounded">
+                    <button
+                      className="p-1 hover:bg-gray-100 rounded"
+                      aria-label={`More options for ${member.familyMemberDetails?.name || member.familyMemberName}`}
+                      aria-haspopup="true"
+                    >
                       <MoreVertical className="w-5 h-5 text-gray-400" />
                     </button>
                     <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 hidden group-hover:block z-10">
@@ -257,6 +262,7 @@ export default function FamilyManagement() {
                           setShowChangeAccessModal(true);
                         }}
                         className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                        aria-label={`Change access level for ${member.familyMemberDetails?.name || member.familyMemberName}`}
                       >
                         <Edit className="w-4 h-4 mr-2" />
                         Change Access Level
@@ -267,6 +273,7 @@ export default function FamilyManagement() {
                           setShowRemoveConfirmation(true);
                         }}
                         className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center"
+                        aria-label={`Remove access for ${member.familyMemberDetails?.name || member.familyMemberName}`}
                       >
                         <Trash2 className="w-4 h-4 mr-2" />
                         Remove Access
@@ -344,6 +351,7 @@ export default function FamilyManagement() {
                         onClick={() => handleResendInvitation(member)}
                         disabled={actionLoading}
                         className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                        aria-label={`Resend invitation to ${member.familyMemberEmail}`}
                       >
                         <RefreshCw className="w-4 h-4 mr-1" />
                         Resend
@@ -355,6 +363,7 @@ export default function FamilyManagement() {
                         }}
                         disabled={actionLoading}
                         className="inline-flex items-center px-3 py-1.5 border border-red-300 rounded-md text-sm font-medium text-red-700 bg-white hover:bg-red-50 disabled:opacity-50"
+                        aria-label={`Cancel invitation to ${member.familyMemberEmail}`}
                       >
                         Cancel
                       </button>
@@ -393,11 +402,12 @@ export default function FamilyManagement() {
       )}
 
       {/* Mobile Bottom Navigation */}
-      <nav className="mobile-nav-container">
+      <nav className="mobile-nav-container" role="navigation" aria-label="Main navigation">
         <div className="flex items-center justify-between">
           <a
             href="/dashboard"
             className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-rose-600 hover:text-rose-700 transition-colors"
+            aria-label="Go to home page"
           >
             <div className="bg-rose-100 p-1.5 rounded-lg">
               <Heart className="w-5 h-5" />
@@ -408,6 +418,7 @@ export default function FamilyManagement() {
           <a
             href="/medications"
             className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-blue-600 hover:text-blue-700 transition-colors"
+            aria-label="Go to medications page"
           >
             <div className="bg-blue-100 p-1.5 rounded-lg">
               <Pill className="w-5 h-5" />
@@ -418,6 +429,7 @@ export default function FamilyManagement() {
           <a
             href="/calendar"
             className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-purple-600 hover:text-purple-700 transition-colors"
+            aria-label="Go to calendar page"
           >
             <div className="bg-purple-100 p-1.5 rounded-lg">
               <Calendar className="w-5 h-5" />
@@ -428,6 +440,7 @@ export default function FamilyManagement() {
           <a
             href="/profile"
             className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-green-600 hover:text-green-700 transition-colors"
+            aria-label="Go to profile page"
           >
             <div className="bg-green-100 p-1.5 rounded-lg">
               <User className="w-5 h-5" />
@@ -438,6 +451,8 @@ export default function FamilyManagement() {
           <a
             href="/family-management"
             className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-amber-600 hover:text-amber-700 transition-colors"
+            aria-label="Family management page"
+            aria-current="page"
           >
             <div className="bg-amber-100 p-1.5 rounded-lg">
               <Users className="w-5 h-5" />

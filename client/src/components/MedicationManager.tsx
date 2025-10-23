@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Plus, 
-  Edit, 
-  Trash2, 
-  Pill, 
-  Save, 
-  X, 
-  CheckCircle, 
-  Bell, 
+import {
+  Plus,
+  Edit,
+  Trash2,
+  Pill,
+  Save,
+  X,
+  CheckCircle,
+  Bell,
   BellOff,
   AlertTriangle,
   Clock,
@@ -25,6 +25,7 @@ import { useFamily } from '@/contexts/FamilyContext';
 import { parseFrequencyToScheduleType, generateDefaultTimesForFrequency, validateFrequencyParsing } from '@/utils/medicationFrequencyUtils';
 import MedicationSearch from './MedicationSearch';
 import LoadingSpinner from './LoadingSpinner';
+import { showSuccess, showError } from '@/utils/toast';
 
 interface MedicationManagerProps {
   patientId: string;
@@ -213,13 +214,14 @@ export default function MedicationManager({
       
       if (result.success) {
         await loadMedicationsWithStatus();
+        showSuccess('Medication marked as taken!');
       } else {
         console.error('Failed to mark medication as taken:', result.error);
-        alert(`Failed to mark medication as taken: ${result.error}`);
+        showError(`Failed to mark medication as taken: ${result.error}`);
       }
     } catch (error) {
       console.error('Error marking medication as taken:', error);
-      alert('An unexpected error occurred. Please try again.');
+      showError('An unexpected error occurred. Please try again.');
     } finally {
       setTakingMedication(null);
     }
@@ -251,13 +253,14 @@ export default function MedicationManager({
       if (result.success) {
         await loadMedicationsWithStatus();
         window.dispatchEvent(new CustomEvent('medicationScheduleUpdated'));
+        showSuccess('Medication schedule created successfully!');
       } else {
         console.error('Failed to create schedule:', result.error);
-        alert(`Failed to create schedule: ${result.error}`);
+        showError(`Failed to create schedule: ${result.error}`);
       }
     } catch (error) {
       console.error('Error creating schedule:', error);
-      alert('Failed to create medication schedule. Please try again.');
+      showError('Failed to create medication schedule. Please try again.');
     } finally {
       setCreatingSchedule(null);
     }

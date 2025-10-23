@@ -35,6 +35,7 @@ import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import { useFamily } from '@/contexts/FamilyContext';
 import LoadingSpinner from './LoadingSpinner';
 import { parseFrequencyToScheduleType, generateDefaultTimesForFrequency, validateFrequencyParsing } from '@/utils/medicationFrequencyUtils';
+import { showSuccess, showError } from '@/utils/toast';
 
 /**
  * @deprecated Use MedicationManager instead
@@ -182,13 +183,14 @@ export default function UnifiedMedicationView({
       
       if (result.success) {
         await loadMedicationsWithStatus(); // Refresh the data
+        showSuccess('Medication marked as taken!');
       } else {
         console.error('Failed to mark medication as taken:', result.error);
-        alert(`Failed to mark medication as taken: ${result.error}`);
+        showError(`Failed to mark medication as taken: ${result.error}`);
       }
     } catch (error) {
       console.error('Error marking medication as taken:', error);
-      alert('An unexpected error occurred. Please try again.');
+      showError('An unexpected error occurred. Please try again.');
     } finally {
       setTakingMedication(null);
     }
@@ -223,15 +225,17 @@ export default function UnifiedMedicationView({
         await loadMedicationsWithStatus(); // Refresh the data
         onScheduleCreated?.();
         
+        showSuccess('Medication schedule created successfully!');
+        
         // Dispatch event to notify other components
         window.dispatchEvent(new CustomEvent('medicationScheduleUpdated'));
       } else {
         console.error('Failed to create schedule:', result.error);
-        alert(`Failed to create schedule: ${result.error}`);
+        showError(`Failed to create schedule: ${result.error}`);
       }
     } catch (error) {
       console.error('Error creating schedule:', error);
-      alert('Failed to create medication schedule. Please try again.');
+      showError('Failed to create medication schedule. Please try again.');
     } finally {
       setCreatingSchedule(null);
     }

@@ -13,7 +13,11 @@ import {
   AlertCircle,
   Wifi,
   WifiOff,
-  Lock
+  Lock,
+  Utensils,
+  HelpCircle,
+  X,
+  Info
 } from 'lucide-react';
 import type {
   EnhancedMedicationCalendarEvent,
@@ -57,6 +61,7 @@ export default function TimeBucketView({
   const [processingAction, setProcessingAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [showHelp, setShowHelp] = useState(false);
   
   // Add family context for permission checks
   const { hasPermission, userRole, activePatientAccess } = useFamily();
@@ -80,16 +85,19 @@ export default function TimeBucketView({
           return;
         }
 
+        // Filter out PRN medications from all buckets (they have their own section)
+        const filterPRN = (events: any[]) => events.filter((event: any) => !event.isPRN);
+
         // Map unified API response to legacy format for compatibility
         const mappedData: LegacyTodayMedicationBuckets = {
-          now: bucketsResult.data.now as any || [],
-          dueSoon: bucketsResult.data.dueSoon as any || [],
-          morning: bucketsResult.data.morning as any || [],
-          noon: bucketsResult.data.lunch as any || [],
-          evening: bucketsResult.data.evening as any || [],
-          bedtime: bucketsResult.data.beforeBed as any || [],
-          overdue: bucketsResult.data.overdue as any || [],
-          completed: bucketsResult.data.completed as any || [],
+          now: filterPRN(bucketsResult.data.now as any || []),
+          dueSoon: filterPRN(bucketsResult.data.dueSoon as any || []),
+          morning: filterPRN(bucketsResult.data.morning as any || []),
+          noon: filterPRN(bucketsResult.data.lunch as any || []),
+          evening: filterPRN(bucketsResult.data.evening as any || []),
+          bedtime: filterPRN(bucketsResult.data.beforeBed as any || []),
+          overdue: filterPRN(bucketsResult.data.overdue as any || []),
+          completed: filterPRN(bucketsResult.data.completed as any || []),
           patientPreferences: {
             timeSlots: {
               morning: { start: '06:00', end: '10:00', defaultTime: '08:00', label: 'Morning' },
@@ -298,16 +306,19 @@ export default function TimeBucketView({
               patientId: patientId || undefined
             });
             if (bucketsResult.success && bucketsResult.data) {
+              // Filter out PRN medications from all buckets
+              const filterPRN = (events: any[]) => events.filter((event: any) => !event.isPRN);
+              
               // Map unified API response to legacy format for compatibility
               const mappedData: LegacyTodayMedicationBuckets = {
-                now: bucketsResult.data.now as any || [],
-                dueSoon: bucketsResult.data.dueSoon as any || [],
-                morning: bucketsResult.data.morning as any || [],
-                noon: bucketsResult.data.lunch as any || [],
-                evening: bucketsResult.data.evening as any || [],
-                bedtime: bucketsResult.data.beforeBed as any || [],
-                overdue: bucketsResult.data.overdue as any || [],
-                completed: bucketsResult.data.completed as any || [],
+                now: filterPRN(bucketsResult.data.now as any || []),
+                dueSoon: filterPRN(bucketsResult.data.dueSoon as any || []),
+                morning: filterPRN(bucketsResult.data.morning as any || []),
+                noon: filterPRN(bucketsResult.data.lunch as any || []),
+                evening: filterPRN(bucketsResult.data.evening as any || []),
+                bedtime: filterPRN(bucketsResult.data.beforeBed as any || []),
+                overdue: filterPRN(bucketsResult.data.overdue as any || []),
+                completed: filterPRN(bucketsResult.data.completed as any || []),
                 patientPreferences: {
                   timeSlots: {
                     morning: { start: '06:00', end: '10:00', defaultTime: '08:00', label: 'Morning' },
@@ -388,44 +399,44 @@ export default function TimeBucketView({
   const getBucketIcon = (bucketKey: string) => {
     switch (bucketKey) {
       case 'now':
-        return <Bell className="w-5 h-5 text-red-600" />;
+        return <Bell className="w-6 h-6 text-red-600" />;
       case 'dueSoon':
-        return <Clock className="w-5 h-5 text-orange-600" />;
+        return <Clock className="w-6 h-6 text-orange-600" />;
       case 'morning':
-        return <Sun className="w-5 h-5 text-yellow-600" />;
+        return <Sun className="w-6 h-6 text-yellow-500" />;
       case 'noon':
-        return <Sun className="w-5 h-5 text-orange-500" />;
+        return <Utensils className="w-6 h-6 text-orange-500" />;
       case 'evening':
-        return <Sunset className="w-5 h-5 text-purple-600" />;
+        return <Sunset className="w-6 h-6 text-purple-500" />;
       case 'bedtime':
-        return <Moon className="w-5 h-5 text-indigo-600" />;
+        return <Moon className="w-6 h-6 text-indigo-500" />;
       case 'overdue':
-        return <AlertTriangle className="w-5 h-5 text-red-700" />;
+        return <AlertTriangle className="w-6 h-6 text-red-700" />;
       case 'completed':
-        return <CheckCircle className="w-5 h-5 text-green-600" />;
+        return <CheckCircle className="w-6 h-6 text-green-600" />;
       default:
-        return <Clock className="w-5 h-5 text-gray-600" />;
+        return <Clock className="w-6 h-6 text-gray-600" />;
     }
   };
 
   const getBucketColor = (bucketKey: string) => {
     switch (bucketKey) {
       case 'now':
-        return 'border-red-200 bg-red-50';
+        return 'border-red-300 bg-red-50 shadow-sm';
       case 'dueSoon':
-        return 'border-orange-200 bg-orange-50';
+        return 'border-orange-300 bg-orange-50';
       case 'morning':
-        return 'border-yellow-200 bg-yellow-50';
+        return 'border-yellow-300 bg-yellow-50';
       case 'noon':
-        return 'border-orange-200 bg-orange-50';
+        return 'border-orange-300 bg-orange-50';
       case 'evening':
-        return 'border-purple-200 bg-purple-50';
+        return 'border-purple-300 bg-purple-50';
       case 'bedtime':
-        return 'border-indigo-200 bg-indigo-50';
+        return 'border-indigo-300 bg-indigo-50';
       case 'overdue':
-        return 'border-red-300 bg-red-100';
+        return 'border-red-400 bg-red-100 shadow-md ring-2 ring-red-200';
       case 'completed':
-        return 'border-green-200 bg-green-50';
+        return 'border-green-300 bg-green-50';
       default:
         return 'border-gray-200 bg-gray-50';
     }
@@ -470,6 +481,18 @@ export default function TimeBucketView({
       const hours = Math.floor(mins / 60);
       const remainingMins = mins % 60;
       return remainingMins > 0 ? `in ${hours}h ${remainingMins}m` : `in ${hours}h`;
+    }
+  };
+
+  const formatTimeRange = (time: string): string => {
+    try {
+      const [hours, minutes] = time.split(':');
+      const hour = parseInt(hours);
+      const ampm = hour >= 12 ? 'PM' : 'AM';
+      const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+      return `${displayHour}:${minutes} ${ampm}`;
+    } catch {
+      return time;
     }
   };
 
@@ -521,77 +544,79 @@ export default function TimeBucketView({
     );
   }
 
-  // Create ordered buckets for display
+  // Create ordered buckets for display with enhanced visual indicators
   const orderedBuckets: TimeBucket[] = [
     {
       key: 'overdue',
-      label: 'Overdue',
-      icon: <AlertTriangle className="w-5 h-5 text-red-700" />,
+      label: '⚠️ Overdue',
+      icon: <AlertTriangle className="w-6 h-6 text-red-700" />,
       events: buckets.overdue,
+      timeRange: 'Past due time',
       priority: 1,
-      color: 'border-red-300 bg-red-100'
+      color: 'border-red-400 bg-red-100 shadow-md ring-2 ring-red-200'
     },
     {
       key: 'now',
-      label: 'Take Now',
-      icon: <Bell className="w-5 h-5 text-red-600" />,
+      label: '🔔 Take Now',
+      icon: <Bell className="w-6 h-6 text-red-600" />,
       events: buckets.now,
+      timeRange: 'Due within 15 minutes',
       priority: 2,
-      color: 'border-red-200 bg-red-50'
+      color: 'border-red-300 bg-red-50 shadow-sm'
     },
     {
       key: 'dueSoon',
-      label: 'Due Soon',
-      icon: <Clock className="w-5 h-5 text-orange-600" />,
+      label: '⏰ Due Soon',
+      icon: <Clock className="w-6 h-6 text-orange-600" />,
       events: buckets.dueSoon,
-      timeRange: 'Next hour',
+      timeRange: 'Due in the next hour',
       priority: 3,
-      color: 'border-orange-200 bg-orange-50'
+      color: 'border-orange-300 bg-orange-50'
     },
     {
       key: 'morning',
-      label: buckets.patientPreferences.timeSlots.morning.label,
-      icon: <Sun className="w-5 h-5 text-yellow-600" />,
+      label: `☀️ ${buckets.patientPreferences.timeSlots.morning.label}`,
+      icon: <Sun className="w-6 h-6 text-yellow-500" />,
       events: buckets.morning,
-      timeRange: `${buckets.patientPreferences.timeSlots.morning.start} - ${buckets.patientPreferences.timeSlots.morning.end}`,
+      timeRange: `${formatTimeRange(buckets.patientPreferences.timeSlots.morning.start)} - ${formatTimeRange(buckets.patientPreferences.timeSlots.morning.end)}`,
       priority: 4,
-      color: 'border-yellow-200 bg-yellow-50'
+      color: 'border-yellow-300 bg-yellow-50'
     },
     {
       key: 'noon',
-      label: buckets.patientPreferences.timeSlots.noon.label,
-      icon: <Sun className="w-5 h-5 text-orange-500" />,
+      label: `🍽️ ${buckets.patientPreferences.timeSlots.noon.label}`,
+      icon: <Utensils className="w-6 h-6 text-orange-500" />,
       events: buckets.noon,
-      timeRange: `${buckets.patientPreferences.timeSlots.noon.start} - ${buckets.patientPreferences.timeSlots.noon.end}`,
+      timeRange: `${formatTimeRange(buckets.patientPreferences.timeSlots.noon.start)} - ${formatTimeRange(buckets.patientPreferences.timeSlots.noon.end)}`,
       priority: 5,
-      color: 'border-orange-200 bg-orange-50'
+      color: 'border-orange-300 bg-orange-50'
     },
     {
       key: 'evening',
-      label: buckets.patientPreferences.timeSlots.evening.label,
-      icon: <Sunset className="w-5 h-5 text-purple-600" />,
+      label: `🌆 ${buckets.patientPreferences.timeSlots.evening.label}`,
+      icon: <Sunset className="w-6 h-6 text-purple-500" />,
       events: buckets.evening,
-      timeRange: `${buckets.patientPreferences.timeSlots.evening.start} - ${buckets.patientPreferences.timeSlots.evening.end}`,
+      timeRange: `${formatTimeRange(buckets.patientPreferences.timeSlots.evening.start)} - ${formatTimeRange(buckets.patientPreferences.timeSlots.evening.end)}`,
       priority: 6,
-      color: 'border-purple-200 bg-purple-50'
+      color: 'border-purple-300 bg-purple-50'
     },
     {
       key: 'bedtime',
-      label: buckets.patientPreferences.timeSlots.bedtime.label,
-      icon: <Moon className="w-5 h-5 text-indigo-600" />,
+      label: `🌙 ${buckets.patientPreferences.timeSlots.bedtime.label}`,
+      icon: <Moon className="w-6 h-6 text-indigo-500" />,
       events: buckets.bedtime,
-      timeRange: `${buckets.patientPreferences.timeSlots.bedtime.start} - ${buckets.patientPreferences.timeSlots.bedtime.end}`,
+      timeRange: `${formatTimeRange(buckets.patientPreferences.timeSlots.bedtime.start)} - ${formatTimeRange(buckets.patientPreferences.timeSlots.bedtime.end)}`,
       priority: 7,
-      color: 'border-indigo-200 bg-indigo-50'
+      color: 'border-indigo-300 bg-indigo-50'
     },
     {
       key: 'completed',
-      label: 'Completed Today',
-      icon: <CheckCircle className="w-5 h-5 text-green-600" />,
+      label: '✅ Completed Today',
+      icon: <CheckCircle className="w-6 h-6 text-green-600" />,
       events: buckets.completed || [],
       timeRange: 'Taken, missed, or skipped',
       priority: 8,
-      color: 'border-green-200 bg-green-50'
+      color: 'border-green-300 bg-green-50'
     }
   ].filter(bucket => bucket.events.length > 0); // Only show buckets with medications
 
@@ -600,34 +625,116 @@ export default function TimeBucketView({
   const nowMedications = buckets.now.length;
 
   return (
-    <div className="space-y-4">
-      {/* Simplified Summary Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
+    <div className="space-y-4 pb-4">
+      {/* Enhanced Summary Header with Help Button */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-2">
+        <div className="flex items-center space-x-2 sm:space-x-3 flex-wrap gap-2">
           {overdueMedications > 0 && (
-            <span className="flex items-center space-x-1 px-2 py-1 bg-red-100 text-red-800 rounded-md text-sm">
+            <span className="flex items-center space-x-1 px-3 py-1.5 bg-red-100 text-red-800 rounded-lg text-sm font-medium animate-pulse">
               <AlertTriangle className="w-4 h-4" />
               <span>{overdueMedications} overdue</span>
             </span>
           )}
           {nowMedications > 0 && (
-            <span className="flex items-center space-x-1 px-2 py-1 bg-orange-100 text-orange-800 rounded-md text-sm">
+            <span className="flex items-center space-x-1 px-3 py-1.5 bg-orange-100 text-orange-800 rounded-lg text-sm font-medium">
               <Bell className="w-4 h-4" />
               <span>{nowMedications} due now</span>
             </span>
           )}
           {overdueMedications === 0 && nowMedications === 0 && totalMedications > 0 && (
-            <span className="flex items-center space-x-1 px-2 py-1 bg-green-100 text-green-800 rounded-md text-sm">
+            <span className="flex items-center space-x-1 px-3 py-1.5 bg-green-100 text-green-800 rounded-lg text-sm font-medium">
               <CheckCircle className="w-4 h-4" />
               <span>All caught up!</span>
             </span>
           )}
         </div>
         
-        <div className="text-xs text-gray-500">
-          {totalMedications} medication{totalMedications !== 1 ? 's' : ''} today
-        </div>
+        <button
+          onClick={() => setShowHelp(!showHelp)}
+          className="flex items-center space-x-1 px-4 py-2.5 min-h-[44px] text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors text-sm font-medium whitespace-nowrap"
+          aria-label="What are time buckets?"
+        >
+          <HelpCircle className="w-5 h-5" />
+          <span>What are time buckets?</span>
+        </button>
       </div>
+
+      {/* Help Section */}
+      {showHelp && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 animate-in slide-in-from-top duration-200">
+          <div className="flex items-start justify-between mb-3">
+            <div className="flex items-center space-x-2">
+              <Info className="w-5 h-5 text-blue-600 flex-shrink-0" />
+              <h3 className="font-semibold text-blue-900">What are Time Buckets?</h3>
+            </div>
+            <button
+              onClick={() => setShowHelp(false)}
+              className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded-md transition-colors"
+              aria-label="Close help"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          
+          <div className="space-y-3 text-sm text-blue-800">
+            <p>
+              Time buckets organize your medications by when they should be taken throughout the day, making it easier to stay on track.
+            </p>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+              <div className="flex items-start space-x-2">
+                <Sun className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-blue-900">Morning</p>
+                  <p className="text-xs text-blue-700">Medications to take when you wake up</p>
+                </div>
+              </div>
+              
+              <div className="flex items-start space-x-2">
+                <Utensils className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-blue-900">Lunch</p>
+                  <p className="text-xs text-blue-700">Midday medications with or after meals</p>
+                </div>
+              </div>
+              
+              <div className="flex items-start space-x-2">
+                <Sunset className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-blue-900">Evening</p>
+                  <p className="text-xs text-blue-700">Medications for dinner time</p>
+                </div>
+              </div>
+              
+              <div className="flex items-start space-x-2">
+                <Moon className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-blue-900">Before Bed</p>
+                  <p className="text-xs text-blue-700">Medications to take at bedtime</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="mt-4 pt-3 border-t border-blue-200">
+              <p className="font-medium text-blue-900 mb-2">Special Buckets:</p>
+              <div className="space-y-2">
+                <div className="flex items-start space-x-2">
+                  <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs"><span className="font-medium">Overdue:</span> Medications past their scheduled time</p>
+                </div>
+                <div className="flex items-start space-x-2">
+                  <Bell className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs"><span className="font-medium">Take Now:</span> Due within the next 15 minutes</p>
+                </div>
+                <div className="flex items-start space-x-2">
+                  <Clock className="w-4 h-4 text-orange-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs"><span className="font-medium">Due Soon:</span> Coming up in the next hour</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Error Banner */}
       {error && (
@@ -641,7 +748,7 @@ export default function TimeBucketView({
                   setError(null);
                   loadTodaysBuckets();
                 }}
-                className="mt-2 text-red-600 hover:text-red-800 text-sm underline"
+                className="mt-2 px-4 py-2 min-h-[44px] bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors text-sm font-medium"
               >
                 Try again
               </button>
@@ -663,85 +770,97 @@ export default function TimeBucketView({
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {orderedBuckets.map((bucket) => (
+        <div className="space-y-4">
+          {orderedBuckets.map((bucket, index) => (
             <div
               key={bucket.key}
-              className={`rounded-lg border ${bucket.color} transition-all duration-200`}
+              className={`rounded-lg border ${bucket.color} transition-all duration-300 hover:shadow-md ${
+                bucket.key === 'overdue' ? 'animate-pulse' : ''
+              }`}
+              style={{ animationDelay: `${index * 50}ms` }}
             >
-              {/* Simplified Bucket Header */}
+              {/* Enhanced Bucket Header */}
               <div
-                className="flex items-center justify-between p-3 cursor-pointer"
+                className="flex items-center justify-between p-4 min-h-[60px] cursor-pointer hover:bg-opacity-80 transition-colors active:bg-opacity-70"
                 onClick={() => toggleBucketExpansion(bucket.key)}
               >
-                <div className="flex items-center space-x-3">
-                  {bucket.icon}
-                  <div>
-                    <h4 className="font-medium text-gray-900">
+                <div className="flex items-center space-x-3 flex-1 min-w-0">
+                  <div className="flex-shrink-0">
+                    {bucket.icon}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-semibold text-gray-900 text-base">
                       {bucket.label}
                     </h4>
                     {bucket.timeRange && (
-                      <p className="text-xs text-gray-600">{bucket.timeRange}</p>
+                      <p className="text-xs text-gray-600 mt-0.5 font-medium">{bucket.timeRange}</p>
                     )}
                   </div>
                 </div>
                 
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm font-medium text-gray-700">
+                <div className="flex items-center space-x-3 flex-shrink-0">
+                  <span className={`px-2.5 py-1 rounded-full text-sm font-bold ${
+                    bucket.key === 'overdue' ? 'bg-red-200 text-red-900' :
+                    bucket.key === 'now' ? 'bg-red-100 text-red-800' :
+                    bucket.key === 'completed' ? 'bg-green-200 text-green-900' :
+                    'bg-gray-200 text-gray-700'
+                  }`}>
                     {bucket.events.length}
                   </span>
                   {expandedBuckets.has(bucket.key) ? (
-                    <ChevronUp className="w-4 h-4 text-gray-400" />
+                    <ChevronUp className="w-5 h-5 text-gray-500 transition-transform" />
                   ) : (
-                    <ChevronDown className="w-4 h-4 text-gray-400" />
+                    <ChevronDown className="w-5 h-5 text-gray-500 transition-transform" />
                   )}
                 </div>
               </div>
 
-              {/* Simplified Bucket Content */}
+              {/* Enhanced Bucket Content with Animation */}
               {expandedBuckets.has(bucket.key) && (
-                <div className="px-3 pb-3 space-y-2">
-                  {bucket.events.map((event) => (
+                <div className="px-4 pb-4 space-y-3 animate-in slide-in-from-top duration-200">
+                  {bucket.events.map((event, eventIndex) => (
                     <div
                       key={event.id}
-                      className="bg-white rounded-lg border border-gray-200 p-3"
+                      className={`bg-white rounded-lg border p-4 transition-all duration-200 hover:shadow-sm ${
+                        event.isOverdue ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                      }`}
+                      style={{ animationDelay: `${eventIndex * 30}ms` }}
                     >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center space-x-2 mb-1">
-                            <h5 className="font-medium text-gray-900">
-                              {event.medicationName}
-                            </h5>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center space-x-2 mb-2 flex-wrap gap-1">
+                          <h5 className="font-semibold text-gray-900 text-base leading-tight">
+                            {event.medicationName}
+                          </h5>
                             {event.isPartOfPack && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                Pack
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                📦 Pack
+                              </span>
+                            )}
+                            {event.isOverdue && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-200 text-red-900 animate-pulse">
+                                ⚠️ OVERDUE
                               </span>
                             )}
                           </div>
                           
-                          <p className="text-sm text-gray-600 mb-1">
+                          <p className="text-sm text-gray-700 mb-3 font-medium">
                             {event.dosageAmount}
                           </p>
                           
-                          <div className="flex items-center space-x-3 text-sm">
-                            <span className="flex items-center space-x-1 text-blue-600">
-                              <Clock className="w-3 h-3" />
-                              <span>{(() => {
+                          <div className="flex items-center space-x-3 text-sm flex-wrap gap-2 mb-1">
+                            <span className={`flex items-center space-x-1 px-2 py-1 rounded ${
+                              event.isOverdue ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
+                            }`}>
+                              <Clock className="w-3.5 h-3.5" />
+                              <span className="font-medium">{(() => {
                                 const scheduledDate = new Date(event.scheduledDateTime);
-                                console.log('🔍 TIMEZONE DEBUG - Event scheduled time:', {
-                                  eventId: event.id,
-                                  medicationName: event.medicationName,
-                                  scheduledDateTimeRaw: event.scheduledDateTime,
-                                  scheduledDateTimeParsed: scheduledDate.toISOString(),
-                                  scheduledDateTimeLocal: scheduledDate.toLocaleString(),
-                                  userTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-                                });
                                 return formatTime(scheduledDate);
                               })()}</span>
                             </span>
                             
-                            <span className={`text-xs ${
-                              event.isOverdue ? 'text-red-500' : 'text-gray-500'
+                            <span className={`text-xs font-semibold px-2 py-1 rounded ${
+                              event.isOverdue ? 'bg-red-200 text-red-900' : 'bg-gray-100 text-gray-700'
                             }`}>
                               {getTimeUntil(new Date(event.scheduledDateTime))}
                             </span>
@@ -784,9 +903,9 @@ export default function TimeBucketView({
                           } else {
                             // Show permission message for family members without edit access
                             return (
-                              <div className="flex items-center space-x-2 text-xs text-gray-500">
-                                <Lock className="w-3 h-3" />
-                                <span>View only access</span>
+                              <div className="flex items-center space-x-2 px-3 py-2 min-h-[44px] text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-md">
+                                <Lock className="w-4 h-4" />
+                                <span>View only</span>
                               </div>
                             );
                           }

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Plus, Copy, Edit, Trash2, Calendar, Clock, User, MapPin } from 'lucide-react';
 import type { MedicalEventType, MedicalEventPriority } from '@shared/types';
+import { showSuccess, showError } from '@/utils/toast';
 
 interface AppointmentTemplate {
   id: string;
@@ -133,7 +134,7 @@ export default function AppointmentTemplates({ patientId, onUseTemplate, onClose
 
   const handleCreateTemplate = () => {
     if (!newTemplate.name.trim()) {
-      alert('Please enter a template name');
+      showError('Please enter a template name');
       return;
     }
 
@@ -146,11 +147,12 @@ export default function AppointmentTemplates({ patientId, onUseTemplate, onClose
 
     setTemplates(prev => [...prev, template]);
     resetForm();
+    showSuccess('Template created successfully!');
   };
 
   const handleUpdateTemplate = () => {
     if (!editingTemplate || !newTemplate.name.trim()) {
-      alert('Please enter a template name');
+      showError('Please enter a template name');
       return;
     }
 
@@ -161,6 +163,7 @@ export default function AppointmentTemplates({ patientId, onUseTemplate, onClose
 
     setTemplates(prev => prev.map(t => t.id === editingTemplate.id ? updatedTemplate : t));
     resetForm();
+    showSuccess('Template updated successfully!');
   };
 
   const handleEditTemplate = (template: AppointmentTemplate) => {

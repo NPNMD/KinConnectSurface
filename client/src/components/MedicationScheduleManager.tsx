@@ -23,6 +23,7 @@ import type {
 import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
 import { parseFrequencyToScheduleType, generateDefaultTimesForFrequency, validateFrequencyParsing } from '@/utils/medicationFrequencyUtils';
 import { convertLocalTimesToUTC, convertUTCTimesToLocal, logTimezoneConversion } from '@/utils/timezoneUtils';
+import { showSuccess, showError } from '@/utils/toast';
 
 interface MedicationScheduleManagerProps {
   medication: Medication;
@@ -375,13 +376,14 @@ export default function MedicationScheduleManager({
         await loadRecentEvents();
         handleCancel();
         onScheduleChange?.();
+        showSuccess(editingScheduleId ? 'Schedule updated successfully!' : 'Schedule created successfully!');
       } else {
         console.error('❌ MedicationScheduleManager: Failed to save schedule:', result.error);
-        alert(`Failed to save schedule: ${result.error || 'Unknown error'}`);
+        showError(`Failed to save schedule: ${result.error || 'Unknown error'}`);
       }
     } catch (error) {
       console.error('❌ MedicationScheduleManager: Error saving schedule:', error);
-      alert(`Error saving schedule: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      showError(`Error saving schedule: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsSubmitting(false);
     }

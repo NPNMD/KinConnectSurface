@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { FamilyProvider } from '@/contexts/FamilyContext';
 import { CalendarProvider } from '@/contexts/CalendarContext';
@@ -16,8 +17,12 @@ import FamilyMemberAuth from '@/pages/FamilyMemberAuth';
 import TestFamilyInviteFlow from '@/pages/TestFamilyInviteFlow';
 import VisitSummaryDetail from '@/pages/VisitSummaryDetail';
 import VisitSummaries from '@/pages/VisitSummaries';
+import PrivacyPolicy from '@/pages/PrivacyPolicy';
+import TermsOfService from '@/pages/TermsOfService';
+import ForgotPassword from '@/pages/ForgotPassword';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import ServiceWorkerUpdate from '@/components/ServiceWorkerUpdate';
+import SkipNavigation from '@/components/SkipNavigation';
 import { registerServiceWorker } from '@/utils/serviceWorker';
 import '@/utils/clearCache'; // Import for development helpers
 
@@ -100,6 +105,11 @@ function AppRoutes() {
         </PublicRoute>
       } />
       
+      {/* Legal pages and password reset - accessible to everyone */}
+      <Route path="/privacy" element={<PrivacyPolicy />} />
+      <Route path="/terms" element={<TermsOfService />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      
       {/* Development test routes - bypass authentication */}
       <Route path="/test-dashboard" element={<Dashboard />} />
       <Route path="/test-medications" element={<Medications />} />
@@ -181,9 +191,25 @@ function App() {
         <FamilyProvider>
           <CalendarProvider>
             <Router>
+              <SkipNavigation />
               <div className="min-h-screen bg-gray-50">
                 <AppRoutes />
                 <ServiceWorkerUpdate />
+                <Toaster
+                  position="top-right"
+                  reverseOrder={false}
+                  gutter={8}
+                  toastOptions={{
+                    className: '',
+                    duration: 4000,
+                    style: {
+                      borderRadius: '8px',
+                      padding: '12px 16px',
+                      fontSize: '14px',
+                      maxWidth: '500px',
+                    },
+                  }}
+                />
               </div>
             </Router>
           </CalendarProvider>

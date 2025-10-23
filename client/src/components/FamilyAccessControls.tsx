@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Users, Shield, Mail, Phone, Settings, Plus, Edit, Trash2, Check, X, AlertCircle } from 'lucide-react';
 import type { FamilyMember, FamilyAccessLevel, FamilyPermission } from '@shared/types';
 import { apiClient, API_ENDPOINTS } from '../lib/api';
+import { showSuccess, showError } from '@/utils/toast';
 
 interface FamilyAccessControlsProps {
   patientId: string;
@@ -144,7 +145,7 @@ export default function FamilyAccessControls({ patientId, onClose, hideInviteBut
 
   const handleSendInvite = async () => {
     if (!newInvite.name || !newInvite.email) {
-      alert('Please fill in all required fields');
+      showError('Please fill in all required fields');
       return;
     }
 
@@ -171,13 +172,13 @@ export default function FamilyAccessControls({ patientId, onClose, hideInviteBut
         // Reload family members to show the new invitation
         await loadFamilyMembers();
         
-        alert('Invitation sent successfully!');
+        showSuccess('Invitation sent successfully!');
       } else {
-        alert('Failed to send invitation. Please try again.');
+        showError('Failed to send invitation. Please try again.');
       }
     } catch (err) {
       console.error('Error sending invitation:', err);
-      alert('Failed to send invitation. Please try again.');
+      showError('Failed to send invitation. Please try again.');
     }
   };
 

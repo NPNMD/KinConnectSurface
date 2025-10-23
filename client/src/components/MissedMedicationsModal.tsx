@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Clock,
@@ -15,6 +15,7 @@ import { MedicationCalendarEvent, SkipReason, EnhancedMedicationCalendarEvent } 
 import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
 import { useFamily } from '@/contexts/FamilyContext';
 import LoadingSpinner from './LoadingSpinner';
+import { showSuccess, showError } from '@/utils/toast';
 
 interface MissedMedicationsModalProps {
   isOpen: boolean;
@@ -48,13 +49,53 @@ export default function MissedMedicationsModal({
   const [showSkipModal, setShowSkipModal] = useState<string | null>(null);
   const [skipReason, setSkipReason] = useState<SkipReason>('forgot');
   const [skipNotes, setSkipNotes] = useState('');
+  const modalRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Load missed medications when modal opens
+  // Load missed medications when modal opens and manage focus
   useEffect(() => {
     if (isOpen) {
       loadMissedMedications();
+      // Focus the close button when modal opens for keyboard accessibility
+      setTimeout(() => {
+        closeButtonRef.current?.focus();
+      }, 100);
     }
   }, [isOpen]);
+
+  // Trap focus within modal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+
+      // Trap focus within modal
+      if (e.key === 'Tab') {
+        const focusableElements = modalRef.current?.querySelectorAll(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        
+        if (!focusableElements || focusableElements.length === 0) return;
+
+        const firstElement = focusableElements[0] as HTMLElement;
+        const lastElement = focusableElements[focusableElements.length - 1] as HTMLElement;
+
+        if (e.shiftKey && document.activeElement === firstElement) {
+          e.preventDefault();
+          lastElement.focus();
+        } else if (!e.shiftKey && document.activeElement === lastElement) {
+          e.preventDefault();
+          firstElement.focus();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   const loadMissedMedications = async () => {
     try {
@@ -119,12 +160,13 @@ export default function MissedMedicationsModal({
         // Remove from missed medications list
         setMissedMedications(prev => prev.filter(med => med.id !== eventId));
         onMedicationAction?.(eventId, 'take');
+        showSuccess('Medication marked as taken!');
       } else {
-        alert(`Failed to mark medication as taken: ${result.error}`);
+        showError(`Failed to mark medication as taken: ${result.error}`);
       }
     } catch (error) {
       console.error('Error marking medication as taken late:', error);
-      alert('Failed to mark medication as taken. Please try again.');
+      showError('Failed to mark medication as taken. Please try again.');
     } finally {
       setProcessingEventId(null);
     }
@@ -147,12 +189,13 @@ export default function MissedMedicationsModal({
         setShowSkipModal(null);
         setSkipNotes('');
         setSkipReason('forgot');
+        showSuccess('Medication skipped and recorded');
       } else {
-        alert(`Failed to skip medication: ${result.error}`);
+        showError(`Failed to skip medication: ${result.error}`);
       }
     } catch (error) {
       console.error('Error skipping medication:', error);
-      alert('Failed to skip medication. Please try again.');
+      showError('Failed to skip medication. Please try again.');
     } finally {
       setProcessingEventId(null);
     }
@@ -212,8 +255,16 @@ export default function MissedMedicationsModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="missed-medications-title"
+    >
+      <div
+        ref={modalRef}
+        className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[85vh] sm:max-h-[90vh] overflow-hidden"
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <div className="flex items-center space-x-3">
@@ -221,22 +272,24 @@ export default function MissedMedicationsModal({
               <AlertTriangle className="w-6 h-6 text-red-600" />
             </div>
             <div>
-              <h2 className="text-xl font-semibold text-gray-900">Missed Medications</h2>
-              <p className="text-sm text-gray-600">
+              <h2 id="missed-medications-title" className="text-xl font-semibold text-gray-900">Missed Medications</h2>
+              <p id="missed-medications-description" className="text-sm text-gray-600">
                 {missedMedications.length} missed medication{missedMedications.length !== 1 ? 's' : ''} from the last 7 days
               </p>
             </div>
           </div>
           <button
+            ref={closeButtonRef}
             onClick={onClose}
-            className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+            className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
+            aria-label="Close missed medications dialog"
           >
             <X className="w-6 h-6" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="overflow-y-auto max-h-[calc(90vh-140px)]">
+        <div className="overflow-y-auto max-h-[calc(85vh-140px)] sm:max-h-[calc(90vh-140px)]">
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
               <LoadingSpinner size="sm" />
@@ -257,7 +310,7 @@ export default function MissedMedicationsModal({
                   {/* Date Header */}
                   <button
                     onClick={() => toggleDateExpansion(date)}
-                    className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors"
+                    className="w-full flex items-center justify-between p-4 min-h-[60px] hover:bg-gray-50 active:bg-gray-100 transition-colors"
                   >
                     <div className="flex items-center space-x-3">
                       <Calendar className="w-5 h-5 text-gray-500" />
@@ -283,7 +336,7 @@ export default function MissedMedicationsModal({
                           key={medication.id}
                           className="bg-gray-50 rounded-lg p-4 border border-gray-200"
                         >
-                          <div className="flex items-start justify-between">
+                          <div className="flex flex-col sm:flex-row items-start justify-between gap-3">
                             <div className="flex-1">
                               <div className="flex items-center space-x-2 mb-2">
                                 <Pill className="w-5 h-5 text-red-600" />
@@ -322,7 +375,7 @@ export default function MissedMedicationsModal({
                             </div>
                             
                             {/* Permission-based Action Buttons */}
-                            <div className="flex flex-col space-y-2 ml-4">
+                            <div className="flex flex-col sm:flex-row sm:space-x-2 space-y-2 sm:space-y-0 w-full sm:w-auto sm:ml-4">
                               {(() => {
                                 const canEdit = hasPermission('canEdit');
                                 
@@ -341,8 +394,8 @@ export default function MissedMedicationsModal({
                                 
                                 if (!canEdit) {
                                   return (
-                                    <div className="flex items-center space-x-2 text-xs text-gray-500 px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
-                                      <Lock className="w-3 h-3" />
+                                    <div className="flex items-center justify-center space-x-2 text-xs text-gray-500 px-4 py-3 min-h-[44px] bg-gray-50 border border-gray-200 rounded-md">
+                                      <Lock className="w-4 h-4" />
                                       <span>View only access</span>
                                     </div>
                                   );
@@ -353,7 +406,8 @@ export default function MissedMedicationsModal({
                                     <button
                                       onClick={() => handleMarkAsTakenLate(medication.id)}
                                       disabled={processingEventId === medication.id}
-                                      className="px-3 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                      className="px-4 py-3 min-h-[44px] bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
+                                      aria-label={`Mark ${medication.medicationName} as taken late`}
                                     >
                                       {processingEventId === medication.id ? (
                                         <div className="flex items-center space-x-1">
@@ -368,7 +422,8 @@ export default function MissedMedicationsModal({
                                     <button
                                       onClick={() => setShowSkipModal(medication.id)}
                                       disabled={processingEventId === medication.id}
-                                      className="px-3 py-1.5 bg-gray-600 text-white text-sm rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                      className="px-4 py-3 min-h-[44px] bg-gray-600 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
+                                      aria-label={`Skip ${medication.medicationName} with reason`}
                                     >
                                       Skip with Reason
                                     </button>
@@ -395,7 +450,8 @@ export default function MissedMedicationsModal({
             </p>
             <button
               onClick={onClose}
-              className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
+              className="px-4 py-3 min-h-[44px] bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors font-medium"
+              aria-label="Close dialog"
             >
               Close
             </button>
@@ -405,10 +461,15 @@ export default function MissedMedicationsModal({
 
       {/* Skip Reason Modal */}
       {showSkipModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-60 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="skip-reason-title"
+        >
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[85vh] overflow-y-auto">
             <div className="p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              <h3 id="skip-reason-title" className="text-lg font-semibold text-gray-900 mb-4">
                 Why are you skipping this medication?
               </h3>
               
@@ -416,7 +477,7 @@ export default function MissedMedicationsModal({
                 {SKIP_REASONS.map((reason) => (
                   <label
                     key={reason.value}
-                    className="flex items-center space-x-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer"
+                    className="flex items-center space-x-3 p-3 min-h-[52px] border border-gray-200 rounded-lg hover:bg-gray-50 active:bg-gray-100 cursor-pointer transition-colors"
                   >
                     <input
                       type="radio"
@@ -425,24 +486,28 @@ export default function MissedMedicationsModal({
                       checked={skipReason === reason.value}
                       onChange={(e) => setSkipReason(e.target.value as SkipReason)}
                       className="text-primary-600 focus:ring-primary-500"
+                      aria-label={reason.label}
                     />
-                    <span className="text-lg">{reason.icon}</span>
+                    <span className="text-lg" aria-hidden="true">{reason.icon}</span>
                     <span className="text-sm font-medium text-gray-900">{reason.label}</span>
                   </label>
                 ))}
               </div>
               
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label htmlFor="skip-notes" className="block text-sm font-medium text-gray-700 mb-2">
                   Additional notes (optional)
                 </label>
                 <textarea
+                  id="skip-notes"
                   value={skipNotes}
                   onChange={(e) => setSkipNotes(e.target.value)}
                   placeholder="Any additional details..."
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                   rows={3}
+                  aria-describedby="skip-notes-hint"
                 />
+                <span id="skip-notes-hint" className="sr-only">Provide any additional details about why you're skipping this medication</span>
               </div>
               
               <div className="flex justify-end space-x-3">
@@ -452,14 +517,16 @@ export default function MissedMedicationsModal({
                     setSkipNotes('');
                     setSkipReason('forgot');
                   }}
-                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                  className="px-4 py-3 min-h-[44px] text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors font-medium"
+                  aria-label="Cancel skipping medication"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => showSkipModal && handleSkipMedication(showSkipModal)}
                   disabled={processingEventId === showSkipModal}
-                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-3 min-h-[44px] bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                  aria-label="Confirm skip medication"
                 >
                   {processingEventId === showSkipModal ? (
                     <div className="flex items-center space-x-2">

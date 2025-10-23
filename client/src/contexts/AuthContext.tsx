@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
-import { onAuthStateChange, handleRedirectResult } from '@/lib/firebase';
+import { onAuthStateChange, handleRedirectResult, checkEmailVerification } from '@/lib/firebase';
+import EmailVerificationPrompt from '@/components/EmailVerificationPrompt';
 import type { User } from '@shared/types';
 
 interface AuthContextType {
@@ -8,6 +9,7 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  needsEmailVerification: boolean;
   refreshUser: () => Promise<void>;
 }
 
@@ -21,9 +23,37 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [needsEmailVerification, setNeedsEmailVerification] = useState(false);
 
   // Debug: Log initial state
   console.log('🔍 AuthContext initialized:', { isLoading, hasFirebaseUser: !!firebaseUser });
+
+  // Check email verification status
+  const checkVerification = async (fbUser: FirebaseUser) => {
+    // Only check verification for email/password users (not OAuth)
+    const isEmailPasswordUser = fbUser.providerData.some(
+      provider => provider.providerId === 'password'
+    );
+
+    if (isEmailPasswordUser && !fbUser.emailVerified) {
+      console.log('⚠️ Email not verified for user:', fbUser.email);
+      setNeedsEmailVerification(true);
+      return false;
+    }
+
+    setNeedsEmailVerification(false);
+    return true;
+  };
+
+  const handleVerificationComplete = async () => {
+    if (firebaseUser) {
+      const isVerified = await checkEmailVerification();
+      if (isVerified) {
+        setNeedsEmailVerification(false);
+        await refreshUser();
+      }
+    }
+  };
 
   const refreshUser = async () => {
     if (!firebaseUser) {
@@ -93,10 +123,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
         email: firebaseUser?.email,
         uid: firebaseUser?.uid,
         displayName: firebaseUser?.displayName,
+        emailVerified: firebaseUser?.emailVerified,
         timestamp: new Date().toISOString()
       });
 
       setFirebaseUser(firebaseUser);
+      
+      // Check email verification status
+      if (firebaseUser) {
+        await checkVerification(firebaseUser);
+      } else {
+        setNeedsEmailVerification(false);
+      }
+      
       setIsLoading(false);
     });
 
@@ -115,14 +154,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [firebaseUser]);
 
-  // Fix: Consider user authenticated if Firebase user exists, even if API call failed
-  const isAuthenticated = !!firebaseUser;
+  // Fix: Consider user authenticated if Firebase user exists and email is verified (for email/password users)
+  const isAuthenticated = !!firebaseUser && !needsEmailVerification;
 
   const value: AuthContextType = {
     firebaseUser,
     user,
     isLoading,
     isAuthenticated,
+    needsEmailVerification,
     refreshUser,
   };
 
@@ -136,6 +176,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
     firebaseUserUid: firebaseUser?.uid,
     timestamp: new Date().toISOString()
   });
+
+  // Show verification prompt if user needs to verify email
+  if (needsEmailVerification && firebaseUser?.email) {
+    return (
+      <AuthContext.Provider value={value}>
+        <EmailVerificationPrompt
+          email={firebaseUser.email}
+          onVerified={handleVerificationComplete}
+        />
+      </AuthContext.Provider>
+    );
+  }
 
   return (
     <AuthContext.Provider value={value}>

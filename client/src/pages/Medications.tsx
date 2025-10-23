@@ -23,6 +23,9 @@ import UnscheduledMedicationsAlert from '@/components/UnscheduledMedicationsAler
 import AdherenceDashboard from '@/components/AdherenceDashboard';
 import MedicationMigrationTrigger from '@/components/MedicationMigrationTrigger';
 import { ViewOnlyBanner } from '@/components/ViewOnlyBanner';
+import PRNQuickAccess from '@/components/PRNQuickAccess';
+import PRNFloatingButton from '@/components/PRNFloatingButton';
+import { showSuccess, showError } from '@/utils/toast';
 
 export default function Medications() {
   const {
@@ -43,6 +46,11 @@ export default function Medications() {
     totalTakenDoses: number;
     totalMissedDoses: number;
   } | null>(null);
+  const [scheduleCreationStatus, setScheduleCreationStatus] = useState<{
+    isCreating: boolean;
+    success: boolean | null;
+    message: string | null;
+  }>({ isCreating: false, success: null, message: null });
   
 
   // Create smart refresh function for medications
@@ -302,6 +310,8 @@ export default function Medications() {
               message: '✅ Medication added and reminders scheduled successfully!'
             });
             
+            showSuccess('Medication added and reminders scheduled successfully!');
+            
             // Clear success message after 5 seconds
             setTimeout(() => {
               setScheduleCreationStatus({ isCreating: false, success: null, message: null });
@@ -340,6 +350,11 @@ export default function Medications() {
       
       // Step 3: Update local state
       setMedications(prev => [...prev, createdMedication!]);
+      
+      // Show success toast if no schedule was created (PRN or no reminders)
+      if (!scheduleCreated && !medication.hasReminders) {
+        showSuccess(`${medication.name} added successfully!`);
+      }
       
       // Step 4: Refresh related data
       if (scheduleCreated) {
@@ -388,6 +403,7 @@ export default function Medications() {
             med.id === id ? medicationWithDates : med
           )
         );
+        showSuccess('Medication updated successfully!');
       }
     } catch (error) {
       console.error('Error updating medication:', error);
@@ -412,6 +428,8 @@ export default function Medications() {
         // Update local state immediately
         setMedications(prev => prev.filter(med => med.id !== id));
 
+        showSuccess('Medication deleted successfully!');
+
         // Force immediate refresh to ensure UI is in sync
         await loadMedications();
 
@@ -426,7 +444,7 @@ export default function Medications() {
     } catch (error) {
       console.error('Error deleting medication:', error);
       // Show user-friendly error message
-      alert('Failed to delete medication. Please try again or contact support if the problem persists.');
+      showError('Failed to delete medication. Please try again or contact support if the problem persists.');
       throw error;
     } finally {
       setIsLoadingMedications(false);
@@ -451,7 +469,7 @@ export default function Medications() {
   const activeMedications = medications.filter(med => med.isActive);
 
   return (
-    <div className="min-h-screen bg-gray-50 overflow-x-hidden">
+    <div className="min-h-screen bg-gray-50 overflow-x-hidden pb-safe">
       {/* View-Only Banner */}
       <ViewOnlyBanner />
       
@@ -480,7 +498,7 @@ export default function Medications() {
       </header>
 
       {/* Main Content */}
-      <main className="px-4 py-4 pb-20 max-w-full overflow-x-hidden">
+      <main className="px-4 py-4 pb-24 sm:pb-20 max-w-full overflow-x-hidden">
         {/* Simplified Alert Section */}
         {missedMedicationsCount > 0 && (
           <div className="mb-6">
@@ -502,7 +520,7 @@ export default function Medications() {
                 </div>
                 <button
                   onClick={() => setShowMissedModal(true)}
-                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors w-full sm:w-auto flex-shrink-0"
+                  className="px-4 py-3 min-h-[44px] bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors w-full sm:w-auto flex-shrink-0 font-medium"
                 >
                   View
                 </button>
@@ -522,7 +540,7 @@ export default function Medications() {
                 </h3>
                 <button
                   onClick={() => setShowAdherenceDashboard(!showAdherenceDashboard)}
-                  className="text-sm text-blue-600 hover:text-blue-800 font-medium w-full sm:w-auto text-left sm:text-right"
+                  className="px-3 py-2 min-h-[44px] text-sm text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md font-medium w-full sm:w-auto text-left sm:text-right transition-colors"
                 >
                   {showAdherenceDashboard ? 'Show Summary' : 'View Details'}
                 </button>
@@ -596,6 +614,22 @@ export default function Medications() {
           }}
         />
 
+        {/* PRN (As Needed) Medications Section - Always at top */}
+        <div className="mb-6">
+          <PRNQuickAccess
+            medications={medications}
+            onMedicationAction={(medId, action) => {
+              console.log('PRN medication action:', { medId, action });
+              // Refresh data after PRN action
+              loadMedications();
+              setRefreshTrigger(prev => prev + 1);
+              loadMissedMedicationsCount();
+              loadAdherenceStats();
+            }}
+            compactMode={false}
+          />
+        </div>
+
         {/* Today's Medications Section */}
         <div className="mb-6">
           <div className="flex items-center justify-between gap-2 mb-3">
@@ -603,7 +637,7 @@ export default function Medications() {
             {missedMedicationsCount > 0 && (
               <button
                 onClick={() => setShowMissedModal(true)}
-                className="text-xs px-3 py-1.5 bg-red-100 text-red-800 rounded-md hover:bg-red-200 transition-colors flex-shrink-0"
+                className="text-xs px-3 py-2 min-h-[36px] bg-red-100 text-red-800 rounded-md hover:bg-red-200 transition-colors flex-shrink-0 font-medium"
               >
                 {missedMedicationsCount} Missed
               </button>
@@ -655,55 +689,68 @@ export default function Medications() {
         <div className="flex items-center justify-between">
           <Link
             to="/dashboard"
-            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-rose-600 hover:text-rose-700 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-1 py-2 px-1 min-h-[56px] text-rose-600 hover:text-rose-700 transition-colors active:bg-rose-50 rounded-lg"
           >
-            <div className="bg-rose-100 p-1.5 rounded-lg">
+            <div className="bg-rose-100 p-2 rounded-lg">
               <Heart className="w-5 h-5" />
             </div>
-            <span className="text-xs">Home</span>
+            <span className="text-xs font-medium">Home</span>
           </Link>
           
           <Link
             to="/medications"
-            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-blue-600 hover:text-blue-700 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-1 py-2 px-1 min-h-[56px] text-blue-600 hover:text-blue-700 transition-colors active:bg-blue-50 rounded-lg"
           >
-            <div className="bg-blue-100 p-1.5 rounded-lg">
+            <div className="bg-blue-100 p-2 rounded-lg">
               <Pill className="w-5 h-5" />
             </div>
-            <span className="text-xs font-medium">Medications</span>
+            <span className="text-xs font-medium">Meds</span>
           </Link>
           
           <Link
             to="/calendar"
-            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-purple-600 hover:text-purple-700 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-1 py-2 px-1 min-h-[56px] text-purple-600 hover:text-purple-700 transition-colors active:bg-purple-50 rounded-lg"
           >
-            <div className="bg-purple-100 p-1.5 rounded-lg">
+            <div className="bg-purple-100 p-2 rounded-lg">
               <Calendar className="w-5 h-5" />
             </div>
-            <span className="text-xs">Calendar</span>
+            <span className="text-xs font-medium">Calendar</span>
           </Link>
           
           <Link
             to="/profile"
-            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-green-600 hover:text-green-700 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-1 py-2 px-1 min-h-[56px] text-green-600 hover:text-green-700 transition-colors active:bg-green-50 rounded-lg"
           >
-            <div className="bg-green-100 p-1.5 rounded-lg">
+            <div className="bg-green-100 p-2 rounded-lg">
               <User className="w-5 h-5" />
             </div>
-            <span className="text-xs">Profile</span>
+            <span className="text-xs font-medium">Profile</span>
           </Link>
           
           <Link
             to="/family/invite"
-            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-amber-600 hover:text-amber-700 transition-colors"
+            className="flex-1 flex flex-col items-center space-y-1 py-2 px-1 min-h-[56px] text-amber-600 hover:text-amber-700 transition-colors active:bg-amber-50 rounded-lg"
           >
-            <div className="bg-amber-100 p-1.5 rounded-lg">
+            <div className="bg-amber-100 p-2 rounded-lg">
               <Users className="w-5 h-5" />
             </div>
-            <span className="text-xs">Family</span>
+            <span className="text-xs font-medium">Family</span>
           </Link>
         </div>
       </nav>
+
+      {/* PRN Floating Action Button */}
+      <PRNFloatingButton
+        medications={medications}
+        onMedicationAction={(medId, action) => {
+          console.log('PRN FAB action:', { medId, action });
+          // Refresh data after PRN action
+          loadMedications();
+          setRefreshTrigger(prev => prev + 1);
+          loadMissedMedicationsCount();
+          loadAdherenceStats();
+        }}
+      />
 
       {/* Missed Medications Modal */}
       <MissedMedicationsModal

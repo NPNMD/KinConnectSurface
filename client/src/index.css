@@ -2,6 +2,37 @@
 @tailwind components;
 @tailwind utilities;
 
+/* PRN Medication Styles */
+@layer components {
+  .prn-badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800;
+  }
+  
+  .prn-section {
+    @apply bg-gradient-to-br from-purple-50 to-blue-50 rounded-lg border-2 border-purple-200 shadow-sm;
+  }
+  
+  .prn-card {
+    @apply bg-white rounded-lg border border-gray-200 hover:border-purple-300 transition-all;
+  }
+  
+  .prn-card-warning {
+    @apply border-orange-300 bg-orange-50;
+  }
+  
+  .prn-button {
+    @apply px-4 py-3 min-h-[44px] bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors disabled:opacity-50 font-medium text-sm;
+  }
+  
+  .prn-fab {
+    @apply fixed bottom-24 right-6 z-50 p-4 bg-purple-600 text-white rounded-full shadow-lg hover:bg-purple-700 transition-all duration-200 hover:scale-110 active:scale-95;
+  }
+  
+  .prn-badge-count {
+    @apply absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center;
+  }
+}
+
 @layer base {
   html {
     font-family: 'Inter', system-ui, sans-serif;
@@ -90,6 +121,76 @@
     will-change: transform;
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
+  }
+  
+  /* Enhanced touch targets for critical actions */
+  .touch-target-lg {
+    min-height: 48px;
+    min-width: 48px;
+  }
+  
+  /* Mobile medication card - optimized for touch */
+  .mobile-med-card {
+    @apply bg-white rounded-lg border border-gray-200 p-4 shadow-sm;
+    min-height: 80px;
+  }
+  
+  /* Mobile button spacing - prevent accidental taps */
+  .mobile-button-group {
+    @apply flex flex-col sm:flex-row gap-3;
+  }
+  
+  .mobile-button-group > button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Mobile modal optimizations */
+  @media (max-width: 640px) {
+    .mobile-modal {
+      max-height: 85vh;
+      border-radius: 1rem 1rem 0 0;
+    }
+    
+    .mobile-modal-content {
+      max-height: calc(85vh - 140px);
+    }
+  }
+  
+  /* Prevent text selection on buttons for better mobile UX */
+  button, .touch-target, .mobile-nav-item {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  
+  /* Active state feedback for mobile */
+  .mobile-active-feedback:active {
+    transform: scale(0.98);
+    transition: transform 0.1s ease;
+  }
+  
+  /* Safe area padding utilities */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  
+  /* Improved scrolling on mobile */
+  .mobile-scroll {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+  
+  /* Medication list spacing for mobile */
+  @media (max-width: 640px) {
+    .medication-list-mobile {
+      padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+    }
   }
   
   /* Mobile touch targets */

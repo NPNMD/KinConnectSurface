@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import SimpleVisitRecorder from './SimpleVisitRecorder';
+import { showSuccess, showError, showInfo } from '@/utils/toast';
 import type {
   NewVisitSummary,
   VisitType,
@@ -178,7 +179,7 @@ export default function VisitSummaryForm({
     const finalDoctorSummary = formData.doctorSummary || '';
     
     if (!finalDoctorSummary.trim()) {
-      alert('Please provide a visit summary or record audio');
+      showError('Please provide a visit summary or record audio');
       return;
     }
 
@@ -209,13 +210,15 @@ export default function VisitSummaryForm({
       );
 
       if (response.success) {
+        showSuccess('Visit summary saved successfully!');
+        showInfo('AI is processing your visit summary - this may take a few minutes');
         onSubmit?.(response.data);
       } else {
         throw new Error('Failed to create visit summary');
       }
     } catch (error) {
       console.error('Error creating visit summary:', error);
-      alert('Failed to save visit summary. Please try again.');
+      showError('Failed to save visit summary. Please try again.');
     } finally {
       setIsSubmitting(false);
     }

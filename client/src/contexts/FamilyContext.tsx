@@ -296,19 +296,29 @@ export function FamilyProvider({ children }: FamilyProviderProps) {
     const patientAccess = patientsWithAccess.find(p => p.patientId === patientId);
     if (!patientAccess || patientAccess.status !== 'active') {
       console.warn('⚠️ Enhanced FamilyContext: Cannot switch to inactive patient:', patientId);
-      return;
+      throw new Error('Cannot switch to inactive or non-existent patient');
     }
 
     try {
+      console.log('🔄 Enhanced FamilyContext: Switching to patient:', patientAccess.patientName);
+      
+      // Update active patient ID
       setActivePatientId(patientId);
-      console.log('🔄 Enhanced FamilyContext: Switched to patient:', patientAccess.patientName);
       
       // Update preferences and access time
       localStorage.setItem('lastActivePatientId', patientId);
       await updateLastAccessTime(patientAccess.id);
       
+      console.log('✅ Enhanced FamilyContext: Successfully switched to patient:', patientAccess.patientName);
+      
     } catch (error) {
       console.error('❌ Enhanced FamilyContext: Failed to switch patient:', error);
+      // Revert to previous patient on error
+      const previousPatientId = localStorage.getItem('lastActivePatientId');
+      if (previousPatientId && previousPatientId !== patientId) {
+        setActivePatientId(previousPatientId);
+      }
+      throw error;
     }
   };
 

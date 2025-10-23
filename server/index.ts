@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 
 // Import routes
+import authRoutes from './routes/auth';
 import invitationRoutes from './routes/invitations';
 import medicalEventsRoutes from './routes/medicalEvents';
 
@@ -46,6 +47,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // API routes
+app.use('/api/auth', authRoutes);
 app.use('/api/invitations', invitationRoutes);
 app.use('/api/medical-events', medicalEventsRoutes);
 

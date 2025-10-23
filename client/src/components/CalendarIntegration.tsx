@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, Plus, Clock, MapPin, User, Stethoscope, AlertCircle, CheckCircle, Users, Car, Settings, ChevronLeft, ChevronRight, Search, Filter, Download, Share2, BarChart3, FileText, Trash2 } from 'lucide-react';
+import { Calendar, Plus, Clock, MapPin, User, Stethoscope, AlertCircle, CheckCircle, Users, Car, Settings, ChevronLeft, ChevronRight, Search, Filter, Download, Share2, BarChart3, FileText, Trash2, Bell, X } from 'lucide-react';
 import HealthcareProviderSearch from './HealthcareProviderSearch';
 import UnifiedFamilyInvitation from './UnifiedFamilyInvitation';
 import FamilyResponsibilityDashboard from './FamilyResponsibilityDashboard';
@@ -10,6 +10,7 @@ import DeleteConfirmationDialog from './DeleteConfirmationDialog';
 import { useCalendar } from '@/contexts/CalendarContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
+import { showSuccess, showError, showInfo } from '@/utils/toast';
 import type {
   MedicalEvent,
   MedicalEventType,
@@ -115,7 +116,13 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
     preAuthRequired: false,
     preAuthNumber: '',
     notes: '',
-    tags: [] as string[]
+    tags: [] as string[],
+    reminders: [] as Array<{
+      id: string;
+      type: 'email' | 'sms' | 'push' | 'phone';
+      minutesBefore: number;
+      isActive: boolean;
+    }>
   });
 
   // Load saved providers and facilities
@@ -389,7 +396,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
   const handleAddEvent = async () => {
     try {
       if (!newEvent.title || !newEvent.date || !newEvent.time) {
-        alert('Please fill in all required fields');
+        showError('Please fill in all required fields');
         return;
       }
 
@@ -502,7 +509,8 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
           preAuthRequired: false,
           preAuthNumber: '',
           notes: '',
-          tags: []
+          tags: [],
+          reminders: []
         });
         setShowAddEvent(false);
         
@@ -510,7 +518,9 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
         
         // Show success message if event was saved locally
         if (response.message && response.message.includes('locally')) {
-          alert('Appointment saved locally. It will sync when connection is restored.');
+          showInfo('Appointment saved locally. It will sync when connection is restored.');
+        } else {
+          showSuccess('Appointment scheduled successfully!');
         }
       } else {
         throw new Error('Failed to save event');
@@ -530,7 +540,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
         }
       }
       
-      alert(errorMessage);
+      showError(errorMessage);
     }
   };
 
@@ -572,7 +582,8 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
       preAuthRequired: event.preAuthRequired || false,
       preAuthNumber: event.preAuthNumber || '',
       notes: event.notes || '',
-      tags: event.tags || []
+      tags: event.tags || [],
+      reminders: event.reminders || []
     });
     setEditingEvent(event);
     setShowAddEvent(true);
@@ -581,7 +592,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
   const handleUpdateEvent = async () => {
     try {
       if (!editingEvent || !newEvent.title || !newEvent.date || !newEvent.time) {
-        alert('Please fill in all required fields');
+        showError('Please fill in all required fields');
         return;
       }
 
@@ -627,6 +638,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
         transportationNotes: newEvent.transportationNotes,
         accompanimentRequired: newEvent.accompanimentRequired,
         isRecurring: newEvent.isRecurring,
+        reminders: newEvent.reminders,
         insuranceRequired: newEvent.insuranceRequired,
         copayAmount: newEvent.copayAmount,
         preAuthRequired: newEvent.preAuthRequired,
@@ -691,10 +703,13 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
           preAuthRequired: false,
           preAuthNumber: '',
           notes: '',
-          tags: []
+          tags: [],
+          reminders: []
         });
         setEditingEvent(null);
         setShowAddEvent(false);
+        
+        showSuccess('Appointment updated successfully!');
         
         console.log('Medical event updated successfully:', updatedEvent);
       } else {
@@ -702,7 +717,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
       }
     } catch (error) {
       console.error('Error updating medical event:', error);
-      alert('Failed to update appointment. Please try again.');
+      showError('Failed to update appointment. Please try again.');
     }
   };
 
@@ -746,7 +761,8 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
       preAuthRequired: false,
       preAuthNumber: '',
       notes: '',
-      tags: []
+      tags: [],
+      reminders: []
     });
   };
 
@@ -905,7 +921,8 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
       preAuthRequired: template.preAuthRequired,
       preAuthNumber: '',
       notes: '',
-      tags: template.tags || []
+      tags: template.tags || [],
+      reminders: []
     });
     setShowAddEvent(true);
   };
@@ -1967,6 +1984,194 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
               </div>
             </div>
 
+            {/* Reminder Configuration Section */}
+            <div className="md:col-span-2 border-t border-gray-200 pt-4">
+              <div className="flex items-center justify-between mb-3">
+                <h5 className="text-sm font-medium text-gray-900 flex items-center space-x-2">
+                  <Bell className="w-4 h-4" />
+                  <span>Appointment Reminders</span>
+                </h5>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newReminder = {
+                      id: `reminder-${Date.now()}`,
+                      type: 'email' as const,
+                      minutesBefore: 1440, // 24 hours default
+                      isActive: true
+                    };
+                    setNewEvent(prev => ({
+                      ...prev,
+                      reminders: [...prev.reminders, newReminder]
+                    }));
+                  }}
+                  className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center space-x-1"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add Reminder</span>
+                </button>
+              </div>
+
+              {/* Preset Reminder Buttons */}
+              <div className="mb-4">
+                <label className="text-xs text-gray-600 mb-2 block">Quick Add:</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { label: '24 hours before', minutes: 1440 },
+                    { label: '2 hours before', minutes: 120 },
+                    { label: '1 hour before', minutes: 60 },
+                    { label: '30 min before', minutes: 30 },
+                    { label: '15 min before', minutes: 15 }
+                  ].map((preset) => (
+                    <button
+                      key={preset.minutes}
+                      type="button"
+                      onClick={() => {
+                        // Check if this reminder time already exists
+                        const exists = newEvent.reminders.some(r => r.minutesBefore === preset.minutes);
+                        if (!exists) {
+                          const newReminder = {
+                            id: `reminder-${Date.now()}`,
+                            type: 'email' as const,
+                            minutesBefore: preset.minutes,
+                            isActive: true
+                          };
+                          setNewEvent(prev => ({
+                            ...prev,
+                            reminders: [...prev.reminders, newReminder]
+                          }));
+                        }
+                      }}
+                      className="px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 rounded-md hover:bg-blue-100 transition-colors"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Configured Reminders List */}
+              {newEvent.reminders.length > 0 ? (
+                <div className="space-y-2">
+                  <label className="text-xs text-gray-600 block">Configured Reminders:</label>
+                  {newEvent.reminders.map((reminder, index) => (
+                    <div
+                      key={reminder.id}
+                      className="flex items-center space-x-3 p-3 bg-gray-50 rounded-md border border-gray-200"
+                    >
+                      {/* Reminder Time */}
+                      <div className="flex-1">
+                        <select
+                          value={reminder.minutesBefore}
+                          onChange={(e) => {
+                            const updatedReminders = [...newEvent.reminders];
+                            updatedReminders[index] = {
+                              ...updatedReminders[index],
+                              minutesBefore: parseInt(e.target.value)
+                            };
+                            setNewEvent(prev => ({ ...prev, reminders: updatedReminders }));
+                          }}
+                          className="input text-sm"
+                        >
+                          <option value={15}>15 minutes before</option>
+                          <option value={30}>30 minutes before</option>
+                          <option value={60}>1 hour before</option>
+                          <option value={120}>2 hours before</option>
+                          <option value={1440}>24 hours before</option>
+                          <option value={2880}>2 days before</option>
+                          <option value={10080}>1 week before</option>
+                        </select>
+                      </div>
+
+                      {/* Notification Method */}
+                      <div className="flex-1">
+                        <select
+                          value={reminder.type}
+                          onChange={(e) => {
+                            const updatedReminders = [...newEvent.reminders];
+                            updatedReminders[index] = {
+                              ...updatedReminders[index],
+                              type: e.target.value as 'email' | 'sms' | 'push' | 'phone'
+                            };
+                            setNewEvent(prev => ({ ...prev, reminders: updatedReminders }));
+                          }}
+                          className="input text-sm"
+                        >
+                          <option value="email">📧 Email</option>
+                          <option value="sms">📱 SMS</option>
+                          <option value="push">🔔 Push</option>
+                          <option value="phone">📞 Phone</option>
+                        </select>
+                      </div>
+
+                      {/* Active Toggle */}
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          checked={reminder.isActive}
+                          onChange={(e) => {
+                            const updatedReminders = [...newEvent.reminders];
+                            updatedReminders[index] = {
+                              ...updatedReminders[index],
+                              isActive: e.target.checked
+                            };
+                            setNewEvent(prev => ({ ...prev, reminders: updatedReminders }));
+                          }}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-xs text-gray-600">Active</span>
+                      </div>
+
+                      {/* Delete Button */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updatedReminders = newEvent.reminders.filter((_, i) => i !== index);
+                          setNewEvent(prev => ({ ...prev, reminders: updatedReminders }));
+                        }}
+                        className="text-red-600 hover:text-red-700 p-1"
+                        title="Remove reminder"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-gray-500 bg-gray-50 rounded-md p-3 border border-gray-200">
+                  <p className="flex items-center space-x-2">
+                    <Bell className="w-4 h-4" />
+                    <span>No reminders configured. Add a reminder to receive notifications before this appointment.</span>
+                  </p>
+                </div>
+              )}
+
+              {/* Default Reminder Suggestion */}
+              {newEvent.reminders.length === 0 && (
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const defaultReminder = {
+                        id: `reminder-${Date.now()}`,
+                        type: 'email' as const,
+                        minutesBefore: 1440, // 24 hours
+                        isActive: true
+                      };
+                      setNewEvent(prev => ({
+                        ...prev,
+                        reminders: [defaultReminder]
+                      }));
+                    }}
+                    className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center space-x-1"
+                  >
+                    <Bell className="w-4 h-4" />
+                    <span>Add default reminder (24h before via email)</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div className="md:col-span-2">
               <label className="label">Additional Notes</label>
               <textarea
@@ -2288,7 +2493,7 @@ export default function CalendarIntegration({ patientId }: CalendarIntegrationPr
               console.log('✅ Event deleted successfully:', response);
             } else {
               console.error('❌ Failed to delete event:', response.error);
-              alert(`Failed to delete event: ${response.error}`);
+              showError(`Failed to delete event: ${response.error}`);
             }
             setShowDeleteDialog(false);
             setEventToDelete(null);

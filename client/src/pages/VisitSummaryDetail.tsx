@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import VisitSummaryCard from '@/components/VisitSummaryCard';
+import { showSuccess, showError, showInfo } from '@/utils/toast';
 import type { VisitSummary } from '@shared/types';
 
 export default function VisitSummaryDetail() {
@@ -107,13 +108,14 @@ export default function VisitSummaryDetail() {
       );
 
       if (response.success) {
+        showSuccess('Visit summary deleted');
         navigate('/dashboard');
       } else {
-        alert('Failed to delete visit summary');
+        showError('Failed to delete visit summary');
       }
     } catch (error) {
       console.error('Error deleting visit summary:', error);
-      alert('Failed to delete visit summary');
+      showError('Failed to delete visit summary');
     }
   };
 
@@ -129,12 +131,13 @@ export default function VisitSummaryDetail() {
       if (response.success) {
         // Refresh the summary to show updated processing status
         await fetchVisitSummary();
+        showInfo('AI processing started - this may take a few minutes');
       } else {
-        alert('Failed to retry AI processing');
+        showError('Failed to retry AI processing');
       }
     } catch (error) {
       console.error('Error retrying AI processing:', error);
-      alert('Failed to retry AI processing');
+      showError('Failed to retry AI processing');
     }
   };
 
