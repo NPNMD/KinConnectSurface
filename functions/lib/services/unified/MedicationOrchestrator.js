@@ -728,7 +728,19 @@ class MedicationOrchestrator {
             while (currentDate <= endDate && events.length < 100) { // Limit to prevent excessive events
                 if (this.shouldCreateEventForDate(currentDate, command.schedule)) {
                     for (const time of command.schedule.times) {
-                        const [hours, minutes] = time.split(':').map(Number);
+                        // Parse time string with validation
+                        const timeParts = time.split(':');
+                        if (timeParts.length !== 2) {
+                            console.warn(`⚠️ Invalid time format: ${time}, skipping`);
+                            continue;
+                        }
+                        const hours = parseInt(timeParts[0], 10);
+                        const minutes = parseInt(timeParts[1], 10);
+                        // Validate parsed values
+                        if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+                            console.warn(`⚠️ Invalid time values: ${time} (hours: ${hours}, minutes: ${minutes}), skipping`);
+                            continue;
+                        }
                         const eventDateTime = new Date(currentDate);
                         eventDateTime.setHours(hours, minutes, 0, 0);
                         // Only create future events

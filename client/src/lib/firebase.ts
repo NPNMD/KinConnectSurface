@@ -13,7 +13,7 @@ import {
   sendPasswordResetEmail,
   type User
 } from 'firebase/auth';
-import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator, initializeFirestore } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { firebaseConfig } from '@shared/firebase';
 
@@ -23,8 +23,11 @@ const app = initializeApp(firebaseConfig);
 // Initialize Firebase services
 export const auth = getAuth(app);
 
-// Initialize Firestore - use default database since we're using "(default)"
-export const db = getFirestore(app);
+// Initialize Firestore with ignoreUndefinedProperties setting
+// This prevents errors when undefined values are accidentally sent to Firestore
+export const db = initializeFirestore(app, {
+  ignoreUndefinedProperties: true
+});
 
 // Initialize Firebase Storage
 export const storage = getStorage(app);

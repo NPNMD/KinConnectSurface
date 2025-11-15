@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { Medication, NewMedication, MedicationCalendarEvent, MedicationSchedule } from '@shared/types';
 import { DrugConcept } from '@/lib/drugApi';
-import { medicationCalendarApi } from '@/lib/medicationCalendarApi';
+import { unifiedMedicationApi } from '@/lib/unifiedMedicationApi';
 import { useFamily } from '@/contexts/FamilyContext';
 import { parseFrequencyToScheduleType, generateDefaultTimesForFrequency, validateFrequencyParsing } from '@/utils/medicationFrequencyUtils';
 import MedicationSearch from './MedicationSearch';
@@ -71,11 +71,44 @@ const initialFormData: MedicationFormData = {
 // Simplified frequency options
 const FREQUENCY_OPTIONS = [
   'Once daily',
-  'Twice daily', 
+  'Twice daily',
   'Three times daily',
   'Four times daily',
   'As needed'
 ];
+
+// Frequency normalization function - maps display values to API values
+const normalizeFrequency = (displayFrequency: string): string => {
+  const freq = displayFrequency.toLowerCase().trim();
+  
+  // Map common display formats to unified API format
+  const mappings: Record<string, string> = {
+    'once daily': 'daily',
+    'once a day': 'daily',
+    'daily': 'daily',
+    'twice daily': 'twice_daily',
+    'twice a day': 'twice_daily',
+    'bid': 'twice_daily',
+    'three times daily': 'three_times_daily',
+    'three times a day': 'three_times_daily',
+    'tid': 'three_times_daily',
+    'four times daily': 'four_times_daily',
+    'four times a day': 'four_times_daily',
+    'qid': 'four_times_daily',
+    'as needed': 'as_needed',
+    'prn': 'as_needed'
+  };
+  
+  const normalized = mappings[freq];
+  if (normalized) {
+    console.log(`🔄 Frequency normalized: "${displayFrequency}" → "${normalized}"`);
+    return normalized;
+  }
+  
+  // Fallback with warning
+  console.warn(`⚠️ Unknown frequency "${displayFrequency}", defaulting to "daily"`);
+  return 'daily';
+};
 
 // Simple reminder time presets
 const REMINDER_PRESETS = [
@@ -127,19 +160,81 @@ export default function MedicationManager({
       endOfDay.setHours(23, 59, 59, 999);
 
       // Get all medication schedules for this patient
-      const schedulesResult = await medicationCalendarApi.getMedicationSchedules();
-      const allSchedules = schedulesResult.success ? schedulesResult.data || [] : [];
+      const schedulesResult = await unifiedMedicationApi.getTodayMedicationBuckets(new Date(), { patientId });
+      const allSchedules = schedulesResult.success && schedulesResult.data ? [
+        // Map the bucket data to schedule format
+        ...schedulesResult.data.now.map(event => ({
+          medicationId: event.commandId,
+          frequency: 'daily' as const,
+          times: [event.scheduledTime],
+          isActive: true,
+          isPaused: false
+        })),
+        ...schedulesResult.data.morning.map(event => ({
+          medicationId: event.commandId,
+          frequency: 'daily' as const,
+          times: [event.scheduledTime],
+          isActive: true,
+          isPaused: false
+        })),
+        // Add other time buckets as needed
+      ] : [];
       
       if (!schedulesResult.success) {
         console.warn('⚠️ Failed to fetch medication schedules:', schedulesResult.error);
       }
 
-      // Get today's medication events
-      const eventsResult = await medicationCalendarApi.getMedicationCalendarEvents({
-        startDate: startOfDay,
-        endDate: endOfDay
-      });
-      const todaysEvents = eventsResult.success ? eventsResult.data || [] : [];
+      // Get today's medication events using unified API
+      const todaysEvents = schedulesResult.success && schedulesResult.data ? [
+        ...schedulesResult.data.now.map(event => ({
+          id: event.eventId,
+          medicationId: event.commandId,
+          status: 'scheduled' as const,
+          scheduledDateTime: new Date(event.scheduledTime),
+        })),
+        ...schedulesResult.data.dueSoon.map(event => ({
+          id: event.eventId,
+          medicationId: event.commandId,
+          status: 'scheduled' as const,
+          scheduledDateTime: new Date(event.scheduledTime),
+        })),
+        ...schedulesResult.data.morning.map(event => ({
+          id: event.eventId,
+          medicationId: event.commandId,
+          status: 'scheduled' as const,
+          scheduledDateTime: new Date(event.scheduledTime),
+        })),
+        ...schedulesResult.data.lunch.map(event => ({
+          id: event.eventId,
+          medicationId: event.commandId,
+          status: 'scheduled' as const,
+          scheduledDateTime: new Date(event.scheduledTime),
+        })),
+        ...schedulesResult.data.evening.map(event => ({
+          id: event.eventId,
+          medicationId: event.commandId,
+          status: 'scheduled' as const,
+          scheduledDateTime: new Date(event.scheduledTime),
+        })),
+        ...schedulesResult.data.beforeBed.map(event => ({
+          id: event.eventId,
+          medicationId: event.commandId,
+          status: 'scheduled' as const,
+          scheduledDateTime: new Date(event.scheduledTime),
+        })),
+        ...schedulesResult.data.overdue.map(event => ({
+          id: event.eventId,
+          medicationId: event.commandId,
+          status: 'scheduled' as const,
+          scheduledDateTime: new Date(event.scheduledTime),
+        })),
+        ...schedulesResult.data.completed.map(event => ({
+          id: event.eventId,
+          medicationId: event.commandId,
+          status: 'taken' as const,
+          scheduledDateTime: new Date(event.scheduledTime),
+        })),
+      ] : [];
 
       // Process each active medication to determine its status
       const activeMeds = medications.filter(med => med.isActive);
@@ -176,9 +271,9 @@ export default function MedicationManager({
         return {
           ...medication,
           scheduleStatus,
-          todaysEvents: medicationTodaysEvents,
-          nextDose,
-          schedules: medicationSchedules,
+          todaysEvents: [], // Simplified - main CRUD handled by parent component
+          nextDose: undefined,
+          schedules: [], // Simplified
           hasActiveSchedule
         };
       });
@@ -210,7 +305,22 @@ export default function MedicationManager({
     try {
       setTakingMedication(eventId);
       
-      const result = await medicationCalendarApi.markMedicationTaken(eventId, new Date());
+      // Find the medication for this event to get the scheduled time
+      const medication = medicationsWithStatus.find(med => 
+        med.todaysEvents.some(event => event.id === eventId)
+      );
+      const event = medication?.todaysEvents.find(e => e.id === eventId);
+      
+      if (!event) {
+        throw new Error('Event not found');
+      }
+
+      const result = await unifiedMedicationApi.markMedicationTaken(
+        medication!.id, // commandId
+        {
+          scheduledDateTime: event.scheduledDateTime
+        }
+      );
       
       if (result.success) {
         await loadMedicationsWithStatus();
@@ -229,37 +339,82 @@ export default function MedicationManager({
 
   const handleCreateSchedule = async (medication: Medication) => {
     try {
+      console.log('🔔 [MedicationManager] handleCreateSchedule called:', {
+        medicationId: medication.id,
+        medicationName: medication.name,
+        currentFrequency: medication.frequency,
+        currentHasReminders: medication.hasReminders,
+        currentReminderTimes: medication.reminderTimes
+      });
+
       setCreatingSchedule(medication.id);
       
       const frequency = getScheduleFrequency(medication.frequency);
       const times = getDefaultTimes(frequency);
       
-      const scheduleData = {
-        medicationId: medication.id,
-        patientId: medication.patientId,
+      console.log('🔔 [MedicationManager] Generated schedule data:', {
         frequency,
         times,
-        startDate: new Date(),
-        isIndefinite: true,
-        dosageAmount: medication.dosage,
-        instructions: medication.instructions || '',
-        generateCalendarEvents: true,
-        reminderMinutesBefore: [15, 5],
-        isActive: true
+        startDate: medication.startDate || new Date(),
+        endDate: medication.endDate,
+        isIndefinite: !medication.endDate,
+        dosageAmount: medication.dosage
+      });
+
+      const updatePayload = {
+        scheduleData: {
+          frequency,
+          times,
+          startDate: medication.startDate || new Date(),
+          endDate: medication.endDate,
+          isIndefinite: !medication.endDate,
+          dosageAmount: medication.dosage,
+          scheduleInstructions: medication.instructions
+        },
+        reminderSettings: {
+          enabled: medication.hasReminders !== false, // Default to true if not explicitly false
+          minutesBefore: [15, 5],
+          notificationMethods: ['browser', 'push']
+        },
+        status: {
+          isActive: medication.isActive ?? true
+        }
       };
 
-      const result = await medicationCalendarApi.createMedicationSchedule(scheduleData);
+      console.log('🔔 [MedicationManager] Sending update payload to API:', JSON.stringify(updatePayload, null, 2));
+
+      // Use unified medication API - schedules are embedded in medications
+      // Update the medication with schedule data instead of creating separate schedule
+      const result = await unifiedMedicationApi.updateMedication(
+        medication.id,
+        updatePayload,
+        {
+          reason: 'Creating schedule for existing medication',
+          notifyFamily: false
+        }
+      );
       
+      console.log('🔔 [MedicationManager] API response received:', {
+        success: result.success,
+        hasData: !!result.data,
+        hasCommand: !!result.data?.command,
+        hasWorkflow: !!result.data?.workflow,
+        error: result.error,
+        fullResponse: JSON.stringify(result, null, 2)
+      });
+
       if (result.success) {
+        console.log('✅ [MedicationManager] Schedule update successful, refreshing medications...');
+        // Refresh medications and trigger update event
         await loadMedicationsWithStatus();
         window.dispatchEvent(new CustomEvent('medicationScheduleUpdated'));
         showSuccess('Medication schedule created successfully!');
       } else {
-        console.error('Failed to create schedule:', result.error);
+        console.error('❌ [MedicationManager] Failed to create schedule:', result.error);
         showError(`Failed to create schedule: ${result.error}`);
       }
     } catch (error) {
-      console.error('Error creating schedule:', error);
+      console.error('❌ [MedicationManager] Error creating schedule:', error);
       showError('Failed to create medication schedule. Please try again.');
     } finally {
       setCreatingSchedule(null);
@@ -274,7 +429,7 @@ export default function MedicationManager({
   };
 
   const getDefaultTimes = (frequency: string): string[] => {
-    return medicationCalendarApi.generateDefaultTimes(frequency);
+    return generateDefaultTimesForFrequency(frequency as any);
   };
 
   const formatTime = (date: Date): string => {
@@ -378,12 +533,49 @@ export default function MedicationManager({
     }
   };
   
+  // Enhanced validation with dosage format checking
+  const validateDosageFormat = (dosage: string): boolean => {
+    // Common dosage formats: "10mg", "1 tablet", "5ml", "2.5mg", "100mcg", "1-2 tablets"
+    const dosagePattern = /^(\d+(?:\.\d+)?(?:-\d+(?:\.\d+)?)?)\s*(mg|mcg|g|ml|tablet|tablets|capsule|capsules|unit|units|iu|drop|drops|spray|sprays|patch|patches|puff|puffs)$/i;
+    return dosagePattern.test(dosage.trim());
+  };
+
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
     
-    if (!formData.name.trim()) errors.name = 'Medication name is required';
-    if (!formData.dosage.trim()) errors.dosage = 'Dosage is required';
-    if (!formData.frequency.trim()) errors.frequency = 'Frequency is required';
+    // Required field validation
+    if (!formData.name.trim()) {
+      errors.name = 'Medication name is required';
+    }
+    
+    if (!formData.dosage.trim()) {
+      errors.dosage = 'Dosage is required';
+    } else if (!validateDosageFormat(formData.dosage)) {
+      errors.dosage = 'Invalid dosage format. Use formats like "10mg", "1 tablet", "5ml"';
+    }
+    
+    if (!formData.frequency.trim()) {
+      errors.frequency = 'Frequency is required';
+    }
+    
+    // PRN medications cannot have scheduled reminder times
+    if (formData.isPRN && formData.hasReminders && formData.reminderTimes.length > 0) {
+      errors.reminderTimes = 'PRN (as needed) medications cannot have scheduled reminder times';
+    }
+    
+    // Check for duplicate medication - BLOCK submission instead of just warning
+    const existingMed = medications.find(med =>
+      med.name.toLowerCase() === formData.name.trim().toLowerCase() &&
+      med.isActive &&
+      (!editingMedicationId || med.id !== editingMedicationId)
+    );
+    
+    if (existingMed) {
+      errors.name = `This medication is already in the active medication list`;
+      setDuplicateWarning(`Duplicate detected: ${existingMed.name} is already active`);
+    } else {
+      setDuplicateWarning(null);
+    }
     
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
@@ -399,11 +591,14 @@ export default function MedicationManager({
     setIsSubmitting(true);
 
     try {
+      // Normalize frequency before creating medication data
+      const normalizedFrequency = normalizeFrequency(formData.frequency);
+      
       const medicationData: NewMedication = {
         patientId,
         name: formData.name.trim(),
         dosage: formData.dosage.trim(),
-        frequency: formData.frequency,
+        frequency: normalizedFrequency, // Use normalized frequency
         instructions: formData.instructions?.trim() || undefined,
         prescribedBy: formData.prescribedBy?.trim() || undefined,
         prescribedDate: new Date(),
@@ -412,6 +607,19 @@ export default function MedicationManager({
         hasReminders: formData.hasReminders,
         reminderTimes: formData.reminderTimes.length > 0 ? formData.reminderTimes : undefined,
       };
+
+      console.log('🔍 DEBUG [MedicationManager Form]: Form submission data:', {
+        name: medicationData.name,
+        dosage: medicationData.dosage,
+        frequency: medicationData.frequency,
+        frequencyRaw: formData.frequency,
+        frequencyNormalized: normalizedFrequency,
+        isPRN: medicationData.isPRN,
+        hasReminders: medicationData.hasReminders,
+        reminderTimes: medicationData.reminderTimes,
+        reminderTimesLength: medicationData.reminderTimes?.length || 0,
+        fullMedicationData: JSON.stringify(medicationData, null, 2)
+      });
 
       if (editingMedicationId) {
         await onUpdateMedication(editingMedicationId, medicationData);

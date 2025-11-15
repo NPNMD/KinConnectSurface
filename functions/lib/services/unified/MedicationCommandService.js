@@ -77,6 +77,12 @@ class MedicationCommandService {
             // Compute schedule times using patient preferences if requested
             let computedTimes = request.scheduleData.times || [];
             let flexibleScheduling;
+            console.log('🔍 DEBUG: scheduleData received:', {
+                usePatientTimePreferences: request.scheduleData.usePatientTimePreferences,
+                frequency: request.scheduleData.frequency,
+                times: request.scheduleData.times,
+                flexibleScheduling: request.scheduleData.flexibleScheduling
+            });
             if (request.scheduleData.usePatientTimePreferences &&
                 ['daily', 'twice_daily', 'three_times_daily', 'four_times_daily'].includes(request.scheduleData.frequency)) {
                 const scheduleResult = await this.timeBucketService.computeMedicationSchedule({
@@ -90,6 +96,7 @@ class MedicationCommandService {
                     computedTimes = scheduleResult.data.times;
                     flexibleScheduling = request.scheduleData.flexibleScheduling;
                     console.log('✅ Computed times from patient preferences:', computedTimes);
+                    console.log('🔍 DEBUG: flexibleScheduling assignment:', flexibleScheduling);
                 }
                 else {
                     console.warn('⚠️ Failed to compute times from preferences, using defaults');
@@ -100,26 +107,65 @@ class MedicationCommandService {
                 // Generate default times if none provided
                 computedTimes = this.generateDefaultTimes(request.scheduleData.frequency);
             }
+            // Normalize dates to ensure they are Date objects (not strings from JSON)
+            // This prevents errors when serializing to Firestore Timestamps
+            const normalizeDate = (dateValue, defaultValue) => {
+                if (!dateValue)
+                    return defaultValue;
+                if (dateValue instanceof Date)
+                    return dateValue;
+                if (typeof dateValue === 'string') {
+                    const parsed = new Date(dateValue);
+                    return isNaN(parsed.getTime()) ? defaultValue : parsed;
+                }
+                return defaultValue;
+            };
+            // Build schedule object, filtering out undefined values
+            const scheduleBase = {
+                ...request.scheduleData,
+                times: computedTimes,
+                timingType: request.scheduleData.usePatientTimePreferences ? 'time_buckets' : 'absolute',
+                // Ensure startDate is always a Date object
+                startDate: normalizeDate(request.scheduleData.startDate, new Date()),
+                // Ensure endDate is a Date object if provided, otherwise undefined
+                endDate: normalizeDate(request.scheduleData.endDate)
+            };
+            if ('flexibleScheduling' in scheduleBase && scheduleBase.flexibleScheduling === undefined) {
+                delete scheduleBase.flexibleScheduling;
+            }
+            // Delete endDate if it's undefined (not provided)
+            if (scheduleBase.endDate === undefined) {
+                delete scheduleBase.endDate;
+            }
+            // Only include flexibleScheduling if it has a value
+            if (flexibleScheduling !== undefined) {
+                scheduleBase.flexibleScheduling = flexibleScheduling;
+            }
+            // Only include timeBucketOverrides if it has a value
+            if (request.scheduleData.timeBucketOverrides !== undefined) {
+                scheduleBase.timeBucketOverrides = request.scheduleData.timeBucketOverrides;
+            }
+            // Only include computedSchedule if using patient preferences
+            if (request.scheduleData.usePatientTimePreferences) {
+                scheduleBase.computedSchedule = {
+                    lastComputedAt: new Date(),
+                    computedBy: request.createdBy,
+                    basedOnPreferencesVersion: 1,
+                    nextRecomputeAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+                };
+            }
             // Build complete command object
             const command = {
                 id: commandId,
                 patientId: request.patientId,
                 medication: {
-                    ...request.medicationData
+                    ...request.medicationData,
+                    // Normalize prescribedDate to ensure it's a Date object if provided
+                    prescribedDate: request.medicationData.prescribedDate
+                        ? normalizeDate(request.medicationData.prescribedDate)
+                        : undefined
                 },
-                schedule: {
-                    ...request.scheduleData,
-                    times: computedTimes,
-                    flexibleScheduling,
-                    timingType: request.scheduleData.usePatientTimePreferences ? 'time_buckets' : 'absolute',
-                    timeBucketOverrides: request.scheduleData.timeBucketOverrides,
-                    computedSchedule: request.scheduleData.usePatientTimePreferences ? {
-                        lastComputedAt: new Date(),
-                        computedBy: request.createdBy,
-                        basedOnPreferencesVersion: 1, // Would get from patient preferences
-                        nextRecomputeAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // Recompute daily
-                    } : undefined
-                },
+                schedule: scheduleBase,
                 reminders: {
                     enabled: request.reminderData?.enabled ?? unifiedMedicationSchema_1.DEFAULT_REMINDER_SETTINGS.enabled,
                     minutesBefore: request.reminderData?.minutesBefore ?? unifiedMedicationSchema_1.DEFAULT_REMINDER_SETTINGS.minutesBefore,
@@ -152,6 +198,12 @@ class MedicationCommandService {
                     checksum: this.calculateChecksum(commandId, request.medicationData.name, request.scheduleData.frequency)
                 }
             };
+            console.log('🔍 DEBUG: Final command schedule before validation:', {
+                frequency: command.schedule.frequency,
+                times: command.schedule.times,
+                flexibleScheduling: command.schedule.flexibleScheduling,
+                timingType: command.schedule.timingType
+            });
             // Validate the complete command
             const validation = (0, unifiedMedicationSchema_1.validateMedicationCommand)(command);
             if (!validation.isValid) {
@@ -186,424 +238,120 @@ class MedicationCommandService {
             };
         }
     }
-    // ===== READ OPERATIONS =====
-    /**
-     * Get a medication command by ID
-     */
-    async getCommand(commandId) {
-        try {
-            const doc = await this.collection.doc(commandId).get();
-            if (!doc.exists) {
-                return {
-                    success: false,
-                    error: 'Medication command not found'
-                };
-            }
-            const command = this.deserializeCommand(doc.id, doc.data());
-            return {
-                success: true,
-                data: command
-            };
+    // ... rest of the code remains the same ...
+    removeUndefinedValues(value) {
+        if (value === null || value === undefined) {
+            return value;
         }
-        catch (error) {
-            console.error('❌ MedicationCommandService: Error getting command:', error);
-            return {
-                success: false,
-                error: error instanceof Error ? error.message : 'Failed to get medication command'
-            };
+        if (value instanceof Date) {
+            return value;
         }
-    }
-    /**
-     * Query medication commands with filters
-     */
-    async queryCommands(options) {
-        try {
-            console.log('🔍 MedicationCommandService: Querying commands with options:', options);
-            let query = this.collection;
-            // Apply filters
-            if (options.patientId) {
-                query = query.where('patientId', '==', options.patientId);
-            }
-            if (options.status) {
-                query = query.where('status.current', '==', options.status);
-            }
-            if (options.isActive !== undefined) {
-                query = query.where('status.isActive', '==', options.isActive);
-            }
-            if (options.isPRN !== undefined) {
-                query = query.where('status.isPRN', '==', options.isPRN);
-            }
-            if (options.frequency) {
-                query = query.where('schedule.frequency', '==', options.frequency);
-            }
-            // Apply ordering
-            const orderField = options.orderBy === 'name' ? 'medication.name' :
-                options.orderBy === 'createdAt' ? 'metadata.createdAt' :
-                    'metadata.updatedAt';
-            const orderDirection = options.orderDirection === 'desc' ? 'desc' : 'asc';
-            query = query.orderBy(orderField, orderDirection);
-            // Apply limit
-            if (options.limit) {
-                query = query.limit(options.limit);
-            }
-            const snapshot = await query.get();
-            const commands = snapshot.docs.map(doc => this.deserializeCommand(doc.id, doc.data()));
-            // Apply client-side filters that can't be done in Firestore
-            let filteredCommands = commands;
-            if (options.medicationName) {
-                const searchTerm = options.medicationName.toLowerCase();
-                filteredCommands = commands.filter(cmd => cmd.medication.name.toLowerCase().includes(searchTerm) ||
-                    cmd.medication.genericName?.toLowerCase().includes(searchTerm) ||
-                    cmd.medication.brandName?.toLowerCase().includes(searchTerm));
-            }
-            console.log(`✅ MedicationCommandService: Found ${filteredCommands.length} commands`);
-            return {
-                success: true,
-                data: filteredCommands,
-                total: filteredCommands.length
-            };
+        if (Array.isArray(value)) {
+            return value
+                .map(item => this.removeUndefinedValues(item))
+                .filter(item => item !== undefined);
         }
-        catch (error) {
-            console.error('❌ MedicationCommandService: Error querying commands:', error);
-            return {
-                success: false,
-                error: error instanceof Error ? error.message : 'Failed to query medication commands'
-            };
-        }
-    }
-    /**
-     * Get active medication commands for a patient
-     */
-    async getActiveCommands(patientId) {
-        return this.queryCommands({
-            patientId,
-            isActive: true,
-            orderBy: 'name',
-            orderDirection: 'asc'
-        });
-    }
-    /**
-     * Get commands that need reminders (active, non-PRN medications)
-     */
-    async getCommandsNeedingReminders(patientId) {
-        return this.queryCommands({
-            patientId,
-            isActive: true,
-            isPRN: false,
-            orderBy: 'updatedAt',
-            orderDirection: 'desc'
-        });
-    }
-    // ===== UPDATE OPERATIONS =====
-    /**
-     * Update a medication command
-     */
-    async updateCommand(request) {
-        try {
-            console.log('📝 MedicationCommandService: Updating command:', request.commandId);
-            // Get current command
-            const currentResult = await this.getCommand(request.commandId);
-            if (!currentResult.success || !currentResult.data) {
-                return {
-                    success: false,
-                    error: 'Command not found'
-                };
-            }
-            const currentCommand = currentResult.data;
-            // Merge updates with current data
-            const updatedCommand = {
-                ...currentCommand,
-                ...request.updates,
-                metadata: {
-                    ...currentCommand.metadata,
-                    version: currentCommand.metadata.version + 1,
-                    updatedAt: new Date(),
-                    updatedBy: request.updatedBy,
-                    checksum: this.calculateChecksum(request.commandId, request.updates.medication?.name || currentCommand.medication.name, request.updates.schedule?.frequency || currentCommand.schedule.frequency)
+        if (typeof value === 'object') {
+            const cleaned = {};
+            for (const [key, val] of Object.entries(value)) {
+                if (val !== undefined) {
+                    cleaned[key] = this.removeUndefinedValues(val);
                 }
-            };
-            // Validate updated command
-            const validation = (0, unifiedMedicationSchema_1.validateMedicationCommand)(updatedCommand);
-            if (!validation.isValid) {
-                console.error('❌ Updated command validation failed:', validation.errors);
-                return {
-                    success: false,
-                    error: `Validation failed: ${validation.errors.join(', ')}`,
-                    validation
-                };
             }
-            // Save updated command
-            await this.collection.doc(request.commandId).set(this.serializeCommand(updatedCommand));
-            console.log('✅ MedicationCommandService: Command updated successfully:', request.commandId);
-            return {
-                success: true,
-                data: updatedCommand,
-                validation
-            };
+            return cleaned;
         }
-        catch (error) {
-            console.error('❌ MedicationCommandService: Error updating command:', error);
-            return {
-                success: false,
-                error: error instanceof Error ? error.message : 'Failed to update medication command'
-            };
-        }
-    }
-    /**
-     * Update command status (pause, resume, hold, discontinue)
-     */
-    async updateCommandStatus(commandId, newStatus, reason, updatedBy, additionalData) {
-        try {
-            console.log('📝 MedicationCommandService: Updating status for command:', commandId, 'to:', newStatus);
-            const updates = {
-                status: {
-                    current: newStatus,
-                    isActive: newStatus === 'active',
-                    isPRN: false, // Will be preserved from current data
-                    lastStatusChange: new Date(),
-                    statusChangedBy: updatedBy
-                }
-            };
-            // Add status-specific data
-            if (newStatus === 'paused' && additionalData?.pausedUntil) {
-                updates.status.pausedUntil = additionalData.pausedUntil;
-            }
-            if (newStatus === 'held' && additionalData?.holdReason) {
-                updates.status.holdReason = additionalData.holdReason;
-            }
-            if (newStatus === 'discontinued') {
-                updates.status.discontinueReason = reason;
-                updates.status.discontinueDate = additionalData?.discontinueDate || new Date();
-            }
-            return this.updateCommand({
-                commandId,
-                updates,
-                updatedBy,
-                reason
-            });
-        }
-        catch (error) {
-            console.error('❌ MedicationCommandService: Error updating command status:', error);
-            return {
-                success: false,
-                error: error instanceof Error ? error.message : 'Failed to update command status'
-            };
-        }
-    }
-    // ===== DELETE OPERATIONS =====
-    /**
-     * Soft delete a medication command (mark as discontinued)
-     */
-    async deleteCommand(commandId, deletedBy, reason) {
-        try {
-            console.log('🗑️ MedicationCommandService: Soft deleting command:', commandId);
-            const result = await this.updateCommandStatus(commandId, 'discontinued', reason, deletedBy, { discontinueDate: new Date() });
-            if (result.success) {
-                console.log('✅ MedicationCommandService: Command soft deleted successfully:', commandId);
-            }
-            return {
-                success: result.success,
-                error: result.error
-            };
-        }
-        catch (error) {
-            console.error('❌ MedicationCommandService: Error deleting command:', error);
-            return {
-                success: false,
-                error: error instanceof Error ? error.message : 'Failed to delete medication command'
-            };
-        }
-    }
-    /**
-     * Hard delete a medication command (permanent removal)
-     * Only use for data cleanup or migration scenarios
-     */
-    async hardDeleteCommand(commandId) {
-        try {
-            console.log('🗑️ MedicationCommandService: Hard deleting command:', commandId);
-            await this.collection.doc(commandId).delete();
-            console.log('✅ MedicationCommandService: Command hard deleted successfully:', commandId);
-            return {
-                success: true
-            };
-        }
-        catch (error) {
-            console.error('❌ MedicationCommandService: Error hard deleting command:', error);
-            return {
-                success: false,
-                error: error instanceof Error ? error.message : 'Failed to hard delete medication command'
-            };
-        }
-    }
-    // ===== VALIDATION AND UTILITY METHODS =====
-    /**
-     * Validate command data integrity
-     */
-    validateCommand(command) {
-        return (0, unifiedMedicationSchema_1.validateMedicationCommand)(command);
-    }
-    /**
-     * Check for duplicate medications
-     */
-    async checkForDuplicates(patientId, medicationName) {
-        try {
-            const result = await this.queryCommands({
-                patientId,
-                isActive: true,
-                medicationName: medicationName.toLowerCase()
-            });
-            const duplicates = result.data || [];
-            return {
-                hasDuplicates: duplicates.length > 0,
-                duplicates
-            };
-        }
-        catch (error) {
-            console.error('❌ Error checking for duplicates:', error);
-            return {
-                hasDuplicates: false,
-                duplicates: []
-            };
-        }
-    }
-    /**
-     * Get command statistics for a patient
-     */
-    async getCommandStats(patientId) {
-        try {
-            const result = await this.queryCommands({ patientId });
-            if (!result.success || !result.data) {
-                return {
-                    success: false,
-                    error: 'Failed to fetch commands for statistics'
-                };
-            }
-            const commands = result.data;
-            const stats = {
-                total: commands.length,
-                active: commands.filter(c => c.status.isActive).length,
-                paused: commands.filter(c => c.status.current === 'paused').length,
-                discontinued: commands.filter(c => c.status.current === 'discontinued').length,
-                withReminders: commands.filter(c => c.reminders.enabled).length,
-                prnMedications: commands.filter(c => c.status.isPRN).length,
-                byFrequency: {},
-                byMedicationType: {}
-            };
-            // Calculate frequency distribution
-            commands.forEach(cmd => {
-                const freq = cmd.schedule.frequency;
-                stats.byFrequency[freq] = (stats.byFrequency[freq] || 0) + 1;
-            });
-            // Calculate medication type distribution
-            commands.forEach(cmd => {
-                const type = cmd.gracePeriod.medicationType;
-                stats.byMedicationType[type] = (stats.byMedicationType[type] || 0) + 1;
-            });
-            return {
-                success: true,
-                data: stats
-            };
-        }
-        catch (error) {
-            console.error('❌ MedicationCommandService: Error getting stats:', error);
-            return {
-                success: false,
-                error: error instanceof Error ? error.message : 'Failed to get command statistics'
-            };
-        }
-    }
-    // ===== PRIVATE HELPER METHODS =====
-    /**
-     * Classify medication type for grace period calculation
-     */
-    classifyMedicationType(medicationName, frequency) {
-        const name = medicationName.toLowerCase();
-        // PRN medications
-        if (frequency === 'as_needed') {
-            return 'prn';
-        }
-        // Critical medications (time-sensitive)
-        const criticalMeds = [
-            'insulin', 'warfarin', 'digoxin', 'levothyroxine', 'phenytoin',
-            'lithium', 'tacrolimus', 'cyclosporine', 'methotrexate'
-        ];
-        if (criticalMeds.some(med => name.includes(med))) {
-            return 'critical';
-        }
-        // Vitamins and supplements
-        const vitaminMeds = [
-            'vitamin', 'multivitamin', 'calcium', 'iron', 'magnesium',
-            'zinc', 'fish oil', 'omega', 'supplement', 'probiotic'
-        ];
-        if (vitaminMeds.some(med => name.includes(med))) {
-            return 'vitamin';
-        }
-        // Default to standard
-        return 'standard';
-    }
-    /**
-     * Determine time slot based on time
-     */
-    determineTimeSlot(time) {
-        const hour = parseInt(time.split(':')[0]);
-        if (hour >= 6 && hour < 11)
-            return 'morning';
-        if (hour >= 11 && hour < 15)
-            return 'lunch'; // Updated from 'noon'
-        if (hour >= 17 && hour < 21)
-            return 'evening';
-        if (hour >= 21 || hour < 6)
-            return 'beforeBed'; // Updated from 'bedtime'
-        return 'custom';
-    }
-    /**
-     * Generate default times for a frequency
-     */
-    generateDefaultTimes(frequency) {
-        switch (frequency) {
-            case 'daily':
-                return ['08:00'];
-            case 'twice_daily':
-                return ['08:00', '20:00'];
-            case 'three_times_daily':
-                return ['08:00', '14:00', '20:00'];
-            case 'four_times_daily':
-                return ['08:00', '12:00', '17:00', '22:00'];
-            case 'weekly':
-            case 'monthly':
-                return ['08:00'];
-            case 'as_needed':
-                return [];
-            default:
-                return ['08:00'];
-        }
-    }
-    /**
-     * Calculate checksum for data integrity
-     */
-    calculateChecksum(commandId, medicationName, frequency) {
-        const data = `${commandId}_${medicationName}_${frequency}_${Date.now()}`;
-        return Buffer.from(data).toString('base64').slice(0, 16);
+        return value;
     }
     /**
      * Serialize command for Firestore storage
      */
     serializeCommand(command) {
-        return {
-            ...command,
-            'medication.prescribedDate': command.medication.prescribedDate ?
-                admin.firestore.Timestamp.fromDate(command.medication.prescribedDate) : null,
-            'schedule.startDate': admin.firestore.Timestamp.fromDate(command.schedule.startDate),
-            'schedule.endDate': command.schedule.endDate ?
-                admin.firestore.Timestamp.fromDate(command.schedule.endDate) : null,
-            'status.pausedUntil': command.status.pausedUntil ?
-                admin.firestore.Timestamp.fromDate(command.status.pausedUntil) : null,
-            'status.lastStatusChange': admin.firestore.Timestamp.fromDate(command.status.lastStatusChange),
-            'status.discontinueDate': command.status.discontinueDate ?
-                admin.firestore.Timestamp.fromDate(command.status.discontinueDate) : null,
-            'metadata.createdAt': admin.firestore.Timestamp.fromDate(command.metadata.createdAt),
-            'metadata.updatedAt': admin.firestore.Timestamp.fromDate(command.metadata.updatedAt)
+        console.log('🔍 DEBUG [serializeCommand]: Input command.schedule:', {
+            frequency: command.schedule.frequency,
+            flexibleScheduling: command.schedule.flexibleScheduling,
+            hasFlexibleScheduling: 'flexibleScheduling' in command.schedule,
+            flexibleSchedulingType: typeof command.schedule.flexibleScheduling
+        });
+        // Helper function to safely convert date-like values to Firestore Timestamp
+        const toTimestamp = (dateValue) => {
+            if (!dateValue)
+                return null;
+            // If already a Date object, use it
+            if (dateValue instanceof Date) {
+                // Validate it's not an invalid date
+                if (isNaN(dateValue.getTime())) {
+                    console.warn('⚠️ Invalid Date object detected, using current date');
+                    return admin.firestore.Timestamp.now();
+                }
+                return admin.firestore.Timestamp.fromDate(dateValue);
+            }
+            // If it's a string, try to parse it
+            if (typeof dateValue === 'string') {
+                const parsed = new Date(dateValue);
+                if (isNaN(parsed.getTime())) {
+                    console.warn('⚠️ Invalid date string detected, using current date:', dateValue);
+                    return admin.firestore.Timestamp.now();
+                }
+                return admin.firestore.Timestamp.fromDate(parsed);
+            }
+            console.warn('⚠️ Unexpected date type:', typeof dateValue, dateValue);
+            return admin.firestore.Timestamp.now();
         };
+        // Helper function to remove undefined values from an object
+        const removeUndefined = (obj) => {
+            if (obj === null || obj === undefined)
+                return obj;
+            if (typeof obj !== 'object')
+                return obj;
+            if (Array.isArray(obj))
+                return obj;
+            const cleaned = {};
+            for (const [key, value] of Object.entries(obj)) {
+                if (value !== undefined) {
+                    cleaned[key] = value;
+                }
+            }
+            return cleaned;
+        };
+        const serialized = {
+            id: command.id,
+            patientId: command.patientId,
+            medication: {
+                ...command.medication,
+                prescribedDate: toTimestamp(command.medication.prescribedDate),
+            },
+            schedule: removeUndefined({
+                ...command.schedule,
+                startDate: toTimestamp(command.schedule.startDate),
+                endDate: toTimestamp(command.schedule.endDate),
+                computedSchedule: command.schedule.computedSchedule ? removeUndefined({
+                    ...command.schedule.computedSchedule,
+                    lastComputedAt: toTimestamp(command.schedule.computedSchedule.lastComputedAt),
+                    nextRecomputeAt: toTimestamp(command.schedule.computedSchedule.nextRecomputeAt)
+                }) : undefined
+            }),
+            reminders: command.reminders,
+            gracePeriod: command.gracePeriod,
+            status: {
+                ...command.status,
+                pausedUntil: toTimestamp(command.status.pausedUntil),
+                lastStatusChange: toTimestamp(command.status.lastStatusChange),
+                discontinueDate: toTimestamp(command.status.discontinueDate),
+            },
+            preferences: command.preferences,
+            metadata: {
+                ...command.metadata,
+                createdAt: toTimestamp(command.metadata.createdAt),
+                updatedAt: toTimestamp(command.metadata.updatedAt)
+            }
+        };
+        console.log('🔍 DEBUG [serializeCommand]: Output serialized.schedule:', {
+            frequency: serialized.schedule.frequency,
+            flexibleScheduling: serialized.schedule.flexibleScheduling,
+            hasFlexibleScheduling: 'flexibleScheduling' in serialized.schedule,
+            scheduleKeys: Object.keys(serialized.schedule)
+        });
+        return serialized;
     }
     /**
      * Deserialize command from Firestore data
@@ -619,7 +367,12 @@ class MedicationCommandService {
             schedule: {
                 ...data.schedule,
                 startDate: data.schedule.startDate.toDate(),
-                endDate: data.schedule.endDate?.toDate?.() || null
+                endDate: data.schedule.endDate?.toDate?.() || null,
+                computedSchedule: data.schedule.computedSchedule ? {
+                    ...data.schedule.computedSchedule,
+                    lastComputedAt: data.schedule.computedSchedule.lastComputedAt?.toDate?.() || new Date(),
+                    nextRecomputeAt: data.schedule.computedSchedule.nextRecomputeAt?.toDate?.() || new Date()
+                } : undefined
             },
             status: {
                 ...data.status,
@@ -814,6 +567,429 @@ class MedicationCommandService {
             return {
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to perform health check'
+            };
+        }
+    }
+    /**
+     * Generate default times for a frequency when no times are provided
+     */
+    generateDefaultTimes(frequency) {
+        switch (frequency) {
+            case 'daily':
+                return ['08:00'];
+            case 'twice_daily':
+                return ['08:00', '20:00'];
+            case 'three_times_daily':
+                return ['08:00', '14:00', '20:00'];
+            case 'four_times_daily':
+                return ['08:00', '12:00', '17:00', '22:00'];
+            case 'weekly':
+            case 'monthly':
+                return ['08:00'];
+            case 'as_needed':
+                return [];
+            default:
+                return ['08:00'];
+        }
+    }
+    // ===== READ OPERATIONS =====
+    /**
+     * Get a specific medication command by ID
+     */
+    async getCommand(commandId) {
+        try {
+            const doc = await this.collection.doc(commandId).get();
+            if (!doc.exists) {
+                return {
+                    success: false,
+                    error: 'Medication command not found'
+                };
+            }
+            const data = doc.data();
+            const command = this.deserializeCommand(commandId, data);
+            return {
+                success: true,
+                data: command
+            };
+        }
+        catch (error) {
+            console.error('❌ MedicationCommandService: Error getting command:', error);
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to get medication command'
+            };
+        }
+    }
+    /**
+     * Query medication commands with filtering
+     */
+    async queryCommands(options) {
+        try {
+            let query = this.collection;
+            // Apply filters
+            if (options.patientId) {
+                query = query.where('patientId', '==', options.patientId);
+            }
+            if (options.status) {
+                query = query.where('status.current', '==', options.status);
+            }
+            if (options.medicationName) {
+                query = query.where('medication.name', '==', options.medicationName);
+            }
+            if (options.frequency) {
+                query = query.where('schedule.frequency', '==', options.frequency);
+            }
+            if (options.isActive !== undefined) {
+                query = query.where('status.isActive', '==', options.isActive);
+            }
+            if (options.isPRN !== undefined) {
+                query = query.where('status.isPRN', '==', options.isPRN);
+            }
+            // Apply ordering
+            // Note: Firestore requires indexes for nested field ordering
+            // For 'name' (which is at medication.name), we'll sort in memory after fetching
+            // Use metadata.createdAt as default since it's at root level and indexed
+            const orderBy = options.orderBy || 'createdAt';
+            const orderDirection = options.orderDirection === 'desc' ? 'desc' : 'asc';
+            // Map orderBy field to actual Firestore field path
+            let firestoreOrderBy;
+            let needsInMemorySort = false;
+            if (orderBy === 'name') {
+                // Medication name is nested, sort in memory
+                // CRITICAL: Don't add orderBy to Firestore query to avoid index requirements
+                // When you have multiple where clauses (patientId + status.isActive),
+                // Firestore requires a composite index for orderBy
+                // By skipping orderBy, we fetch all matching docs and sort in memory
+                needsInMemorySort = true;
+                firestoreOrderBy = null; // Don't add orderBy to query
+            }
+            else if (orderBy === 'createdAt') {
+                firestoreOrderBy = 'metadata.createdAt';
+            }
+            else if (orderBy === 'updatedAt') {
+                firestoreOrderBy = 'metadata.updatedAt';
+            }
+            else {
+                // Default to createdAt if unknown field
+                firestoreOrderBy = 'metadata.createdAt';
+            }
+            // Count where clauses - multiple where clauses + orderBy requires composite index
+            const whereClauseCount = [
+                options.patientId,
+                options.status,
+                options.medicationName,
+                options.frequency,
+                options.isActive !== undefined,
+                options.isPRN !== undefined
+            ].filter(Boolean).length;
+            const hasMultipleFilters = whereClauseCount > 1;
+            // CRITICAL FIX: When we have multiple where clauses, skip Firestore orderBy
+            // to avoid composite index requirement. Sort in memory instead.
+            if (hasMultipleFilters && firestoreOrderBy && !needsInMemorySort) {
+                needsInMemorySort = true;
+                firestoreOrderBy = null; // Don't add to Firestore query
+            }
+            // Only add orderBy to query if we're not doing in-memory sort
+            // This avoids Firestore index requirements when sorting by nested fields
+            if (!needsInMemorySort && firestoreOrderBy) {
+                query = query.orderBy(firestoreOrderBy, orderDirection);
+            }
+            // Apply limit (before in-memory sort for 'name')
+            const limit = options.limit;
+            if (limit && !needsInMemorySort) {
+                query = query.limit(limit);
+            }
+            else if (limit) {
+                // For in-memory sort, fetch more than needed then limit after sorting
+                query = query.limit(limit * 2); // Fetch extra to account for sorting
+            }
+            const snapshot = await query.get();
+            let commands = snapshot.docs.map(doc => this.deserializeCommand(doc.id, doc.data()));
+            // Apply in-memory sorting if needed
+            // Case 1: Ordering by nested field 'name'
+            // Case 2: Multiple filters require skipping Firestore orderBy to avoid composite index
+            if (needsInMemorySort) {
+                if (orderBy === 'name') {
+                    // Sort by medication name
+                    commands.sort((a, b) => {
+                        const aValue = a.medication.name.toLowerCase();
+                        const bValue = b.medication.name.toLowerCase();
+                        const comparison = aValue.localeCompare(bValue);
+                        return orderDirection === 'desc' ? -comparison : comparison;
+                    });
+                }
+                else {
+                    // Sort by the requested field (createdAt/updatedAt) to avoid index requirement措
+                    commands.sort((a, b) => {
+                        let aValue;
+                        let bValue;
+                        if (orderBy === 'createdAt' || !orderBy) {
+                            aValue = a.metadata.createdAt.getTime();
+                            bValue = b.metadata.createdAt.getTime();
+                        }
+                        else if (orderBy === 'updatedAt') {
+                            aValue = a.metadata.updatedAt.getTime();
+                            bValue = b.metadata.updatedAt.getTime();
+                        }
+                        else {
+                            // Default comparison
+                            aValue = a.metadata.createdAt.getTime();
+                            bValue = b.metadata.createdAt.getTime();
+                        }
+                        const comparison = aValue - bValue;
+                        return orderDirection === 'desc' ? -comparison : comparison;
+                    });
+                }
+                // Apply limit after sorting
+                if (limit) {
+                    commands = commands.slice(0, limit);
+                }
+            }
+            return {
+                success: true,
+                data: commands,
+                total: commands.length // Use actual length after sorting/limiting
+            };
+        }
+        catch (error) {
+            console.error('❌ MedicationCommandService: Error querying commands:', error);
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to query medication commands'
+            };
+        }
+    }
+    // ===== UPDATE OPERATIONS =====
+    /**
+     * Update a medication command
+     */
+    async updateCommand(request) {
+        try {
+            console.log('📝 MedicationCommandService: Updating command:', request.commandId);
+            // Get current command
+            const currentResult = await this.getCommand(request.commandId);
+            if (!currentResult.success || !currentResult.data) {
+                return {
+                    success: false,
+                    error: 'Medication command not found'
+                };
+            }
+            const currentCommand = currentResult.data;
+            // Merge updates
+            const updatedCommand = {
+                ...currentCommand,
+                ...request.updates,
+                metadata: {
+                    ...currentCommand.metadata,
+                    updatedAt: new Date(),
+                    updatedBy: request.updatedBy
+                }
+            };
+            // Validate updated command
+            const validation = (0, unifiedMedicationSchema_1.validateMedicationCommand)(updatedCommand);
+            if (!validation.isValid) {
+                return {
+                    success: false,
+                    validation,
+                    error: `Validation failed: ${validation.errors.join(', ')}`
+                };
+            }
+            // Save updated command
+            await this.collection.doc(request.commandId).set(this.serializeCommand(updatedCommand), { merge: true });
+            console.log('✅ MedicationCommandService: Command updated successfully:', request.commandId);
+            return {
+                success: true,
+                data: updatedCommand,
+                validation
+            };
+        }
+        catch (error) {
+            console.error('❌ MedicationCommandService: Error updating command:', error);
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to update medication command'
+            };
+        }
+    }
+    // ===== DELETE OPERATIONS =====
+    /**
+     * Delete a medication command
+     */
+    async deleteCommand(commandId, deletedBy, reason) {
+        try {
+            console.log('🗑️ MedicationCommandService: Deleting command:', commandId);
+            // Check if command exists
+            const currentResult = await this.getCommand(commandId);
+            if (!currentResult.success) {
+                return {
+                    success: false,
+                    error: 'Medication command not found'
+                };
+            }
+            // Delete the command
+            await this.collection.doc(commandId).delete();
+            console.log('✅ MedicationCommandService: Command deleted successfully:', commandId);
+            return {
+                success: true
+            };
+        }
+        catch (error) {
+            console.error('❌ MedicationCommandService: Error deleting command:', error);
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to delete medication command'
+            };
+        }
+    }
+    // ===== UTILITY METHODS =====
+    /**
+     * Classify medication type for grace period calculation
+     */
+    classifyMedicationType(name, frequency) {
+        const nameLower = name.toLowerCase();
+        if (frequency === 'as_needed')
+            return 'prn';
+        const criticalMeds = ['insulin', 'warfarin', 'digoxin', 'levothyroxine', 'phenytoin'];
+        if (criticalMeds.some(med => nameLower.includes(med)))
+            return 'critical';
+        const vitaminMeds = ['vitamin', 'multivitamin', 'calcium', 'iron', 'supplement'];
+        if (vitaminMeds.some(med => nameLower.includes(med)))
+            return 'vitamin';
+        return 'standard';
+    }
+    /**
+     * Determine time slot from time string
+     */
+    determineTimeSlot(time) {
+        const hour = parseInt(time.split(':')[0]);
+        if (isNaN(hour))
+            return 'custom';
+        if (hour >= 6 && hour < 11)
+            return 'morning';
+        if (hour >= 11 && hour < 15)
+            return 'lunch';
+        if (hour >= 17 && hour < 21)
+            return 'evening';
+        if (hour >= 21 || hour < 6)
+            return 'beforeBed';
+        return 'custom';
+    }
+    /**
+     * Calculate checksum for command integrity
+     */
+    calculateChecksum(commandId, medicationName, frequency) {
+        const data = `${commandId}_${medicationName}_${frequency}_${Date.now()}`;
+        return Buffer.from(data).toString('base64').slice(0, 16);
+    }
+    /**
+     * Check for duplicate medications
+     */
+    async checkForDuplicates(patientId, medicationName) {
+        try {
+            const result = await this.queryCommands({
+                patientId,
+                medicationName,
+                isActive: true,
+                limit: 10
+            });
+            return {
+                hasDuplicates: (result.data?.length || 0) > 0,
+                duplicates: result.data || []
+            };
+        }
+        catch (error) {
+            console.warn('⚠️ Error checking for duplicates:', error);
+            return {
+                hasDuplicates: false,
+                duplicates: []
+            };
+        }
+    }
+    /**
+     * Get active commands for a patient
+     */
+    async getActiveCommands(patientId) {
+        return this.queryCommands({
+            patientId,
+            isActive: true
+        });
+    }
+    /**
+     * Validate a medication command
+     */
+    validateCommand(command) {
+        const errors = [];
+        const warnings = [];
+        // Basic validation
+        if (!command.medication?.name) {
+            errors.push('Medication name is required');
+        }
+        if (!command.schedule?.frequency) {
+            errors.push('Schedule frequency is required');
+        }
+        if (!command.schedule?.times || command.schedule.times.length === 0) {
+            errors.push('Schedule times are required');
+        }
+        if (!command.patientId) {
+            errors.push('Patient ID is required');
+        }
+        // Validate time formats
+        if (command.schedule?.times) {
+            for (const time of command.schedule.times) {
+                if (!/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(time)) {
+                    errors.push(`Invalid time format: ${time}. Expected HH:MM format.`);
+                }
+            }
+        }
+        return {
+            isValid: errors.length === 0,
+            errors,
+            warnings
+        };
+    }
+    /**
+     * Get command statistics
+     */
+    async getCommandStats(patientId) {
+        try {
+            const result = await this.queryCommands({
+                patientId,
+                limit: 1000 // Get all for stats
+            });
+            if (!result.success || !result.data) {
+                return {
+                    success: false,
+                    error: result.error
+                };
+            }
+            const commands = result.data;
+            const stats = {
+                total: commands.length,
+                active: commands.filter(c => c.status.current === 'active').length,
+                paused: commands.filter(c => c.status.current === 'paused').length,
+                discontinued: commands.filter(c => c.status.current === 'discontinued').length,
+                prnMedications: commands.filter(c => c.status.isPRN).length,
+                withReminders: commands.filter(c => c.reminders.enabled).length,
+                byFrequency: {},
+                byMedicationType: {}
+            };
+            // Calculate frequency and type distributions
+            for (const command of commands) {
+                const freq = command.schedule.frequency;
+                stats.byFrequency[freq] = (stats.byFrequency[freq] || 0) + 1;
+                const type = this.classifyMedicationType(command.medication.name, freq);
+                stats.byMedicationType[type] = (stats.byMedicationType[type] || 0) + 1;
+            }
+            return {
+                success: true,
+                data: stats
+            };
+        }
+        catch (error) {
+            console.error('❌ MedicationCommandService: Error getting command stats:', error);
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to get command statistics'
             };
         }
     }

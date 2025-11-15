@@ -411,9 +411,81 @@ service cloud.firestore {
       );
     }
     
-    // Allow authenticated users to read/write their own data by default (fallback)
+    // Unified Medication Commands - comprehensive validation
+    match /unified_medication_commands/{commandId} {
+      allow read: if request.auth != null && (
+        // Patient owns the medication
+        resource.data.patientId == request.auth.uid ||
+        // Family member has access
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active'
+      );
+      
+      allow create: if request.auth != null && (
+        request.resource.data.patientId == request.auth.uid ||
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + request.resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + request.resource.data.patientId)).data.permissions.canCreate == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + request.resource.data.patientId)).data.status == 'active'
+      ) &&
+      // Validate required top-level fields
+      request.resource.data.keys().hasAll(['patientId', 'medication', 'schedule', 'reminders', 'status']) &&
+      // Validate medication object
+      request.resource.data.medication.keys().hasAll(['name', 'dosage']) &&
+      request.resource.data.medication.name is string &&
+      request.resource.data.medication.name.size() > 0 &&
+      request.resource.data.medication.dosage is string &&
+      request.resource.data.medication.dosage.size() > 0 &&
+      // Validate schedule object
+      request.resource.data.schedule.keys().hasAll(['frequency', 'times', 'startDate', 'dosageAmount']) &&
+      request.resource.data.schedule.frequency in ['daily', 'twice_daily', 'three_times_daily', 'four_times_daily', 'weekly', 'monthly', 'as_needed'] &&
+      request.resource.data.schedule.times is list &&
+      request.resource.data.schedule.dosageAmount is string &&
+      // Validate reminders object
+      request.resource.data.reminders.keys().hasAll(['enabled', 'minutesBefore', 'notificationMethods']) &&
+      request.resource.data.reminders.enabled is bool &&
+      request.resource.data.reminders.minutesBefore is list &&
+      request.resource.data.reminders.notificationMethods is list &&
+      // Validate status object
+      request.resource.data.status.keys().hasAll(['current', 'isActive']) &&
+      request.resource.data.status.current in ['active', 'paused', 'held', 'discontinued', 'completed'] &&
+      request.resource.data.status.isActive is bool;
+      
+      allow update: if request.auth != null && (
+        resource.data.patientId == request.auth.uid ||
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canEdit == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active'
+      );
+      
+      allow delete: if request.auth != null && (
+        resource.data.patientId == request.auth.uid ||
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.permissions.canDelete == true &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active'
+      );
+    }
+    
+    // Unified Medication Events - validation for event sourcing
+    match /unified_medication_events/{eventId} {
+      allow read: if request.auth != null && (
+        resource.data.patientId == request.auth.uid ||
+        exists(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)) &&
+        get(/databases/$(database)/documents/family_calendar_access/$(request.auth.uid + '_' + resource.data.patientId)).data.status == 'active'
+      );
+      
+      allow create: if request.auth != null &&
+        request.resource.data.keys().hasAll(['commandId', 'patientId', 'eventType', 'eventData', 'timing']) &&
+        request.resource.data.patientId is string &&
+        request.resource.data.eventType is string;
+      
+      allow update, delete: if false; // Events are immutable
+    }
+    
+    // RESTRICTED: Fallback rule - only allow read for authenticated users
+    // Write operations must go through specific collection rules above
     match /{document=**} {
-      allow read, write: if request.auth != null;
+      allow read: if request.auth != null;
+      allow write: if false; // Force all writes through specific rules
     }
   }
 }

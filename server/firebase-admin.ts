@@ -71,7 +71,10 @@ let adminStorage: any;
 
 try {
   adminDb = getFirestore();
+  // Enable ignoreUndefinedProperties to prevent Firestore errors
+  adminDb.settings({ ignoreUndefinedProperties: true });
   adminStorage = getStorage();
+  console.log('✅ Firestore settings configured: ignoreUndefinedProperties enabled');
 } catch (error) {
   console.log('⚠️  Firestore connection failed, using mock database for development');
   // Create a mock database service for development

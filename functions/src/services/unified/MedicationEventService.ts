@@ -1077,4 +1077,77 @@ export class MedicationEventService {
       };
     }
   }
+
+  /**
+   * Delete future scheduled events for a medication command
+   * Used when schedule times are updated to remove old events before regenerating
+   */
+  async deleteFutureScheduledEvents(commandId: string): Promise<{
+    success: boolean;
+    data?: {
+      deleted: number;
+    };
+    error?: string;
+  }> {
+    try {
+      console.log('🗑️ MedicationEventService: Deleting future scheduled events for command:', commandId);
+
+      const now = new Date();
+      
+      // Query for future scheduled dose events for this command
+      const futureEventsQuery = await this.collection
+        .where('commandId', '==', commandId)
+        .where('eventType', '==', MEDICATION_EVENT_TYPES.DOSE_SCHEDULED)
+        .where('timing.scheduledFor', '>', admin.firestore.Timestamp.fromDate(now))
+        .get();
+
+      if (futureEventsQuery.empty) {
+        console.log('✅ No future scheduled events to delete');
+        return {
+          success: true,
+          data: { deleted: 0 }
+        };
+      }
+
+      // Delete in batches (Firestore limit is 500 per batch)
+      const batches: admin.firestore.WriteBatch[] = [];
+      let currentBatch = this.firestore.batch();
+      let batchCount = 0;
+
+      futureEventsQuery.docs.forEach((doc, index) => {
+        if (batchCount >= 500) {
+          batches.push(currentBatch);
+          currentBatch = this.firestore.batch();
+          batchCount = 0;
+        }
+        currentBatch.delete(doc.ref);
+        batchCount++;
+      });
+
+      if (batchCount > 0) {
+        batches.push(currentBatch);
+      }
+
+      // Execute all batches
+      for (const batch of batches) {
+        await batch.commit();
+      }
+
+      console.log(`✅ Deleted ${futureEventsQuery.docs.length} future scheduled events`);
+
+      return {
+        success: true,
+        data: {
+          deleted: futureEventsQuery.docs.length
+        }
+      };
+
+    } catch (error) {
+      console.error('❌ MedicationEventService: Error deleting future scheduled events:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to delete future scheduled events'
+      };
+    }
+  }
 }

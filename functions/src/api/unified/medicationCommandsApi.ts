@@ -1,17 +1,23 @@
 /**
  * Unified Medication Commands API
- * 
+ *
  * Consolidates medication CRUD operations into single-purpose endpoints:
  * - POST /medication-commands - Create medication
- * - GET /medication-commands - List medications  
+ * - GET /medication-commands - List medications
  * - GET /medication-commands/:id - Get specific medication
  * - PUT /medication-commands/:id - Update medication
  * - DELETE /medication-commands/:id - Delete medication
- * 
+ *
  * Replaces fragmented endpoints:
  * - /medications, /medication-schedules, /medication-reminders
  * - /medications/bulk-create-schedules, /medication-calendar/schedules
  * - Multiple medication status endpoints
+ *
+ * Enhanced with:
+ * - Structured error responses with error codes
+ * - Comprehensive logging with context
+ * - Field-specific validation errors
+ * - Performance timing and monitoring
  */
 
 import express from 'express';
@@ -27,8 +33,86 @@ import {
   UndoMedicationRequest,
   ENHANCED_ADHERENCE_EVENT_TYPES
 } from '../../schemas/unifiedMedicationSchema';
+import { PerformanceTimer, trackMedicationOperation } from '../../utils/medicationMonitoring';
+import { deepStripUndefined } from '../../utils/serialization';
 
 const router = express.Router();
+
+// ===== ERROR HANDLING UTILITIES =====
+
+interface StructuredError {
+  code: string;
+  message: string;
+  details?: any;
+  fieldErrors?: Record<string, string>;
+  timestamp: string;
+  requestId?: string;
+}
+
+/**
+ * Create structured error response
+ */
+function createErrorResponse(
+  code: string,
+  message: string,
+  details?: any,
+  fieldErrors?: Record<string, string>
+): StructuredError {
+  return {
+    code,
+    message,
+    details,
+    fieldErrors,
+    timestamp: new Date().toISOString(),
+    requestId: `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  };
+}
+
+/**
+ * Log request with context
+ */
+function logRequest(req: express.Request, context: any = {}) {
+  console.log('📥 [API Request]', {
+    method: req.method,
+    path: req.path,
+    userId: (req as any).user?.uid,
+    timestamp: new Date().toISOString(),
+    ...context
+  });
+}
+
+/**
+ * Log response with context
+ */
+function logResponse(statusCode: number, context: any = {}) {
+  const emoji = statusCode >= 500 ? '❌' : statusCode >= 400 ? '⚠️' : '✅';
+  console.log(`${emoji} [API Response]`, {
+    statusCode,
+    timestamp: new Date().toISOString(),
+    ...context
+  });
+}
+
+/**
+ * Validate required fields
+ */
+function validateRequiredFields(
+  data: any,
+  requiredFields: string[]
+): { isValid: boolean; fieldErrors?: Record<string, string> } {
+  const fieldErrors: Record<string, string> = {};
+  
+  for (const field of requiredFields) {
+    if (!data[field]) {
+      fieldErrors[field] = `${field} is required`;
+    }
+  }
+  
+  return {
+    isValid: Object.keys(fieldErrors).length === 0,
+    fieldErrors: Object.keys(fieldErrors).length > 0 ? fieldErrors : undefined
+  };
+}
 
 // Lazy initialization to avoid Firebase Admin initialization order issues
 let orchestrator: MedicationOrchestrator;
@@ -69,16 +153,32 @@ function getUndoService(): MedicationUndoService {
 /**
  * POST /medication-commands
  * Create a new medication with complete workflow
+ * Enhanced with performance monitoring
  */
 router.post('/', async (req, res) => {
+  const startTime = Date.now();
+  const requestId = `req_${startTime}_${Math.random().toString(36).substr(2, 9)}`;
+  const performanceTimer = new PerformanceTimer('create', {
+    patientId: (req as any).user?.uid,
+    endpoint: 'POST /medication-commands'
+  });
+  
   try {
-    console.log('🚀 POST /medication-commands - Creating medication');
+    logRequest(req, { requestId, endpoint: 'POST /medication-commands' });
     
     const userId = (req as any).user?.uid;
     if (!userId) {
+      const error = createErrorResponse(
+        'AUTH_REQUIRED',
+        'Authentication required',
+        'User must be authenticated to create medications'
+      );
+      logResponse(401, { requestId, error: error.code });
       return res.status(401).json({
         success: false,
-        error: 'Authentication required'
+        error: error.message,
+        errorCode: error.code,
+        timestamp: error.timestamp
       });
     }
 
@@ -89,40 +189,170 @@ router.post('/', async (req, res) => {
       notifyFamily = false
     } = req.body;
 
-    // Validation
-    if (!medicationData?.name || !scheduleData?.frequency) {
+    console.log('🔍 [Backend] Request payload:', {
+      requestId,
+      userId,
+      medicationName: medicationData?.name,
+      scheduleFrequency: scheduleData?.frequency,
+      hasFlexibleScheduling: !!scheduleData?.flexibleScheduling,
+      timestamp: new Date().toISOString()
+    });
+
+    // Enhanced validation with field-specific errors
+    const validation = validateRequiredFields(
+      { medicationData, scheduleData },
+      ['medicationData', 'scheduleData']
+    );
+    
+    if (!validation.isValid) {
+      const error = createErrorResponse(
+        'VALIDATION_ERROR',
+        'Required fields are missing',
+        'Request must include medicationData and scheduleData',
+        validation.fieldErrors
+      );
+      logResponse(400, { requestId, error: error.code, fieldErrors: error.fieldErrors });
       return res.status(400).json({
         success: false,
-        error: 'Medication name and schedule frequency are required'
+        error: error.message,
+        errorCode: error.code,
+        fieldErrors: error.fieldErrors,
+        timestamp: error.timestamp
       });
     }
 
-    // Execute complete medication creation workflow
-    const workflowResult = await getOrchestrator().createMedicationWorkflow({
-      patientId: userId,
+    // Validate medication data fields
+    const medicationValidation = validateRequiredFields(
       medicationData,
-      scheduleData: {
-        ...scheduleData,
-        times: scheduleData.times || ['07:00'], // Default time if not provided
-        startDate: scheduleData.startDate ? new Date(scheduleData.startDate) : new Date(),
-        endDate: scheduleData.endDate ? new Date(scheduleData.endDate) : undefined,
-        dosageAmount: scheduleData.dosageAmount || medicationData.dosage || '1 tablet'
+      ['name']
+    );
+    
+    const scheduleValidation = validateRequiredFields(
+      scheduleData,
+      ['frequency']
+    );
+    
+    if (!medicationValidation.isValid || !scheduleValidation.isValid) {
+      const fieldErrors = {
+        ...medicationValidation.fieldErrors,
+        ...scheduleValidation.fieldErrors
+      };
+      const error = createErrorResponse(
+        'VALIDATION_ERROR',
+        'Medication name and schedule frequency are required',
+        'Missing required fields in medication or schedule data',
+        fieldErrors
+      );
+      logResponse(400, { requestId, error: error.code, fieldErrors });
+      return res.status(400).json({
+        success: false,
+        error: error.message,
+        errorCode: error.code,
+        fieldErrors,
+        timestamp: error.timestamp
+      });
+    }
+
+    // Build scheduleData, filtering out undefined values for Firestore
+    const processedScheduleData: any = {
+      ...scheduleData,
+      times: scheduleData.times || ['07:00'], // Default time if not provided
+      startDate: scheduleData.startDate ? new Date(scheduleData.startDate) : new Date(),
+      dosageAmount: scheduleData.dosageAmount || medicationData.dosage || '1 tablet',
+      flexibleScheduling: scheduleData.flexibleScheduling ?? false // Explicitly set default to prevent undefined
+    };
+
+    // Only include optional fields if they have values
+    if (scheduleData.endDate) {
+      processedScheduleData.endDate = new Date(scheduleData.endDate);
+    }
+
+    if (scheduleData.computedSchedule) {
+      processedScheduleData.computedSchedule = {
+        ...scheduleData.computedSchedule,
+        lastComputedAt: scheduleData.computedSchedule.lastComputedAt
+          ? new Date(scheduleData.computedSchedule.lastComputedAt)
+          : undefined,
+        nextRecomputeAt: scheduleData.computedSchedule.nextRecomputeAt
+          ? new Date(scheduleData.computedSchedule.nextRecomputeAt)
+          : undefined
+      };
+    }
+
+    // Build the workflow request and strip undefined values
+    const workflowRequest = {
+      patientId: userId,
+      medicationData: {
+        ...medicationData,
+        // Convert prescribedDate string to Date object if present
+        prescribedDate: medicationData.prescribedDate
+          ? new Date(medicationData.prescribedDate)
+          : undefined
       },
+      scheduleData: processedScheduleData,
       reminderSettings,
       createdBy: userId,
       notifyFamily
-    });
+    };
+
+    // Strip undefined values before sending to Firestore
+    const cleanedWorkflowRequest = deepStripUndefined(workflowRequest);
+
+    // Execute complete medication creation workflow
+    const workflowResult = await getOrchestrator().createMedicationWorkflow(cleanedWorkflowRequest);
 
     if (!workflowResult.success) {
+      const error = createErrorResponse(
+        'WORKFLOW_ERROR',
+        workflowResult.error || 'Failed to create medication workflow',
+        { workflowId: workflowResult.workflowId }
+      );
+      logResponse(500, {
+        requestId,
+        error: error.code,
+        workflowId: workflowResult.workflowId,
+        executionTime: Date.now() - startTime
+      });
       return res.status(500).json({
         success: false,
-        error: workflowResult.error,
-        workflowId: workflowResult.workflowId
+        error: error.message,
+        errorCode: error.code,
+        details: error.details,
+        timestamp: error.timestamp
       });
     }
 
     // Get the created command for response
     const commandResult = await getCommandService().getCommand(workflowResult.commandId!);
+    
+    const executionTime = Date.now() - startTime;
+    
+    logResponse(201, {
+      requestId,
+      commandId: commandResult.data?.id,
+      workflowId: workflowResult.workflowId,
+      eventsCreated: workflowResult.eventIds.length,
+      executionTime
+    });
+    
+    // Track performance metrics
+    await performanceTimer.end(true);
+    
+    // Track medication creation specifically
+    await trackMedicationOperation(
+      'create',
+      userId,
+      true,
+      executionTime,
+      commandResult.data?.id,
+      medicationData.name,
+      undefined,
+      undefined,
+      {
+        workflowId: workflowResult.workflowId,
+        eventsCreated: workflowResult.eventIds.length
+      }
+    );
     
     res.status(201).json({
       success: true,
@@ -134,15 +364,53 @@ router.post('/', async (req, res) => {
         notificationsSent: workflowResult.notificationsSent,
         executionTimeMs: workflowResult.executionTimeMs
       },
-      message: 'Medication created successfully'
+      message: 'Medication created successfully',
+      requestId,
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
-    console.error('❌ Error in POST /medication-commands:', error);
+    const executionTime = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    
+    console.error('❌ [Backend] Error in POST /medication-commands:', {
+      requestId,
+      error,
+      errorType: error instanceof Error ? error.constructor.name : typeof error,
+      message: errorMessage,
+      executionTime,
+      timestamp: new Date().toISOString()
+    });
+    
+    const structuredError = createErrorResponse(
+      'INTERNAL_ERROR',
+      'Internal server error',
+      errorMessage
+    );
+    
+    logResponse(500, { requestId, error: structuredError.code, executionTime });
+    
+    // Track failed operation
+    await performanceTimer.end(false, structuredError.code, errorMessage);
+    
+    await trackMedicationOperation(
+      'create',
+      (req as any).user?.uid || 'unknown',
+      false,
+      executionTime,
+      undefined,
+      req.body.medicationData?.name,
+      structuredError.code,
+      errorMessage
+    );
+    
     res.status(500).json({
       success: false,
-      error: 'Internal server error',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      error: structuredError.message,
+      errorCode: structuredError.code,
+      details: structuredError.details,
+      timestamp: structuredError.timestamp,
+      requestId
     });
   }
 });
@@ -195,7 +463,7 @@ router.get('/', async (req, res) => {
       isActive: isActive === 'true' ? true : isActive === 'false' ? false : undefined,
       isPRN: isPRN === 'true' ? true : isPRN === 'false' ? false : undefined,
       limit: limit ? parseInt(limit as string, 10) : undefined,
-      orderBy: (orderBy as 'name' | 'createdAt' | 'updatedAt') || 'name',
+      orderBy: (orderBy as 'name' | 'createdAt' | 'updatedAt') || 'createdAt', // Default to createdAt to avoid index requirements
       orderDirection: (orderDirection as 'asc' | 'desc') || 'asc'
     };
 
@@ -286,9 +554,25 @@ router.get('/:commandId', async (req, res) => {
  */
 router.put('/:commandId', async (req, res) => {
   try {
-    console.log('📝 PUT /medication-commands/:id - Updating medication:', req.params.commandId);
-    
+    const { commandId } = req.params;
+    // Frontend sends { updates: {...}, reason: "...", notifyFamily: false }
+    // Backend should extract updates from req.body.updates
+    const updates = req.body.updates || req.body; // Support both formats
     const userId = (req as any).user?.uid;
+    
+    console.log('📝 [BACKEND] PUT /medication-commands/:id - Received update request:', {
+      commandId,
+      userId,
+      requestBody: JSON.stringify(req.body, null, 2),
+      hasUpdatesKey: !!req.body.updates,
+      updatesFromBody: req.body.updates ? 'req.body.updates' : 'req.body',
+      hasScheduleData: !!updates.scheduleData,
+      hasReminderSettings: !!updates.reminderSettings,
+      scheduleTimes: updates.scheduleData?.times,
+      reminderEnabled: updates.reminderSettings?.enabled,
+      updatesKeys: Object.keys(updates)
+    });
+    
     if (!userId) {
       return res.status(401).json({
         success: false,
@@ -296,10 +580,7 @@ router.put('/:commandId', async (req, res) => {
       });
     }
 
-    const { commandId } = req.params;
-    const updates = req.body;
-
-    // Get current command to check permissions
+    // Get current command to check permissions and detect schedule changes
     const currentResult = await getCommandService().getCommand(commandId);
     
     if (!currentResult.success || !currentResult.data) {
@@ -309,8 +590,10 @@ router.put('/:commandId', async (req, res) => {
       });
     }
 
+    const currentCommand = currentResult.data;
+
     // Check access permissions
-    if (currentResult.data.patientId !== userId) {
+    if (currentCommand.patientId !== userId) {
       // TODO: Add family access validation here
       return res.status(403).json({
         success: false,
@@ -318,10 +601,72 @@ router.put('/:commandId', async (req, res) => {
       });
     }
 
-    // Execute update
+    // Map frontend format (scheduleData, reminderSettings) to command format (schedule, reminders)
+    const mappedUpdates: any = { ...updates };
+    if (updates.scheduleData) {
+      mappedUpdates.schedule = {
+        ...currentCommand.schedule,
+        ...updates.scheduleData,
+        // Ensure dates are Date objects
+        startDate: updates.scheduleData.startDate 
+          ? (updates.scheduleData.startDate instanceof Date ? updates.scheduleData.startDate : new Date(updates.scheduleData.startDate))
+          : currentCommand.schedule.startDate,
+        endDate: updates.scheduleData.endDate !== undefined
+          ? (updates.scheduleData.endDate === null ? null : (updates.scheduleData.endDate instanceof Date ? updates.scheduleData.endDate : new Date(updates.scheduleData.endDate)))
+          : currentCommand.schedule.endDate
+      };
+      delete mappedUpdates.scheduleData;
+    }
+    if (updates.reminderSettings) {
+      mappedUpdates.reminders = {
+        ...currentCommand.reminders,
+        ...updates.reminderSettings
+      };
+      delete mappedUpdates.reminderSettings;
+    }
+    if (updates.medicationData) {
+      mappedUpdates.medication = {
+        ...currentCommand.medication,
+        ...updates.medicationData
+      };
+      delete mappedUpdates.medicationData;
+    }
+    if (updates.status) {
+      mappedUpdates.status = {
+        ...currentCommand.status,
+        ...updates.status
+      };
+    }
+
+    // Detect if schedule times or reminder settings changed
+    const scheduleChanged = 
+      (updates.scheduleData?.times !== undefined && 
+       JSON.stringify(updates.scheduleData.times) !== JSON.stringify(currentCommand.schedule.times)) ||
+      (updates.reminderSettings?.enabled !== undefined && 
+       updates.reminderSettings.enabled !== currentCommand.reminders.enabled) ||
+      (updates.scheduleData?.frequency !== undefined && 
+       updates.scheduleData.frequency !== currentCommand.schedule.frequency);
+
+    console.log('🔍 [BACKEND] Schedule change detection:', {
+      scheduleChanged,
+      currentTimes: currentCommand.schedule.times,
+      newTimes: updates.scheduleData?.times,
+      timesChanged: updates.scheduleData?.times !== undefined && 
+        JSON.stringify(updates.scheduleData.times) !== JSON.stringify(currentCommand.schedule.times),
+      currentRemindersEnabled: currentCommand.reminders.enabled,
+      newRemindersEnabled: updates.reminderSettings?.enabled,
+      remindersChanged: updates.reminderSettings?.enabled !== undefined && 
+        updates.reminderSettings.enabled !== currentCommand.reminders.enabled,
+      currentFrequency: currentCommand.schedule.frequency,
+      newFrequency: updates.scheduleData?.frequency,
+      frequencyChanged: updates.scheduleData?.frequency !== undefined && 
+        updates.scheduleData.frequency !== currentCommand.schedule.frequency
+    });
+
+    // Execute update with mapped format
     const result = await getCommandService().updateCommand({
       commandId,
-      updates,
+      updates: mappedUpdates,
       updatedBy: userId,
       reason: 'User update via API'
     });
@@ -334,12 +679,57 @@ router.put('/:commandId', async (req, res) => {
       });
     }
 
-    res.json({
+    // Regenerate calendar events if schedule changed
+    let regenerationResult = null;
+    if (scheduleChanged && result.data) {
+      console.log('🔄 [BACKEND] Schedule changed, regenerating calendar events...', {
+        commandId,
+        updatedCommandSchedule: result.data.schedule,
+        updatedCommandReminders: result.data.reminders
+      });
+      const orchestrator = new MedicationOrchestrator();
+      regenerationResult = await orchestrator.regenerateScheduledEvents(commandId);
+      
+      console.log('🔄 [BACKEND] Regeneration result:', {
+        success: regenerationResult.success,
+        deleted: regenerationResult.deleted,
+        created: regenerationResult.created,
+        eventIds: regenerationResult.eventIds,
+        error: regenerationResult.error
+      });
+      
+      if (!regenerationResult.success) {
+        console.warn('⚠️ [BACKEND] Failed to regenerate events:', regenerationResult.error);
+        // Don't fail the update, but log the warning
+      } else {
+        console.log(`✅ [BACKEND] Regenerated events: deleted ${regenerationResult.deleted}, created ${regenerationResult.created}`);
+      }
+    } else {
+      console.log('ℹ️ [BACKEND] No schedule change detected, skipping event regeneration');
+    }
+
+    const responseData = {
       success: true,
       data: result.data,
       validation: result.validation,
+      workflow: regenerationResult ? {
+        eventsDeleted: regenerationResult.deleted,
+        eventsCreated: regenerationResult.created,
+        eventIds: regenerationResult.eventIds
+      } : undefined,
       message: 'Medication updated successfully'
+    };
+
+    console.log('✅ [BACKEND] Sending success response:', {
+      success: responseData.success,
+      commandId: responseData.data?.id,
+      scheduleTimes: responseData.data?.schedule?.times,
+      remindersEnabled: responseData.data?.reminders?.enabled,
+      eventsDeleted: responseData.workflow?.eventsDeleted,
+      eventsCreated: responseData.workflow?.eventsCreated
     });
+
+    res.json(responseData);
 
   } catch (error) {
     console.error('❌ Error in PUT /medication-commands/:id:', error);

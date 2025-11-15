@@ -1,0 +1,500 @@
+2025-10-24T00:56:07.946694Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:56:07.946698Z ? api:   isActive: true,
+2025-10-24T00:56:07.946701Z ? api:   orderBy: 'name',
+2025-10-24T00:56:07.946704Z ? api:   orderDirection: 'asc'
+2025-10-24T00:56:07.946707Z ? api: }
+2025-10-24T00:56:07.972111Z ? api: ❌ Error calculating family engagement: Error: 9 FAILED_PRECONDITION: The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB
+2025-10-24T00:56:07.972127Z ? api:     at callErrorFromStatus (/workspace/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+2025-10-24T00:56:07.972133Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:359:73)
+2025-10-24T00:56:07.972137Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:324:181)
+2025-10-24T00:56:07.972140Z ? api:     at /workspace/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+2025-10-24T00:56:07.972144Z ? api:     at process.processTicksAndRejections (node:internal/process/task_queues:77:11)
+2025-10-24T00:56:07.972147Z ? api: for call at
+2025-10-24T00:56:07.972151Z ? api:     at ServiceClientImpl.makeServerStreamRequest (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:342:32)
+2025-10-24T00:56:07.972155Z ? api:     at ServiceClientImpl.<anonymous> (/workspace/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+2025-10-24T00:56:07.972159Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/v1/firestore_client.js:242:33
+2025-10-24T00:56:07.972162Z ? api:     at /workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:38:28
+2025-10-24T00:56:07.972166Z ? api:     at /workspace/node_modules/google-gax/build/src/normalCalls/timeout.js:44:16
+2025-10-24T00:56:07.972170Z ? api:     at Object.request (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:234:40)
+2025-10-24T00:56:07.972173Z ? api:     at makeRequest (/workspace/node_modules/retry-request/index.js:159:28)
+2025-10-24T00:56:07.972177Z ? api:     at retryRequest (/workspace/node_modules/retry-request/index.js:119:5)
+2025-10-24T00:56:07.972180Z ? api:     at StreamProxy.setStream (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:225:37)
+2025-10-24T00:56:07.972184Z ? api:     at StreamingApiCaller.call (/workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:54:16)
+2025-10-24T00:56:07.972190Z ? api: Caused by: Error
+2025-10-24T00:56:07.972194Z ? api:     at QueryUtil._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query-util.js:44:23)
+2025-10-24T00:56:07.972197Z ? api:     at Query._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:784:32)
+2025-10-24T00:56:07.972201Z ? api:     at Query._get (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:777:35)
+2025-10-24T00:56:07.972205Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:745:43
+2025-10-24T00:56:07.972208Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:110:30
+2025-10-24T00:56:07.972212Z ? api:     at NoopContextManager.with (/workspace/node_modules/@opentelemetry/api/build/src/context/NoopContextManager.js:25:19)
+2025-10-24T00:56:07.972216Z ? api:     at ContextAPI.with (/workspace/node_modules/@opentelemetry/api/build/src/api/context.js:60:46)
+2025-10-24T00:56:07.972221Z ? api:     at NoopTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/NoopTracer.js:65:31)
+2025-10-24T00:56:07.972227Z ? api:     at ProxyTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/ProxyTracer.js:36:24)
+2025-10-24T00:56:07.972233Z ? api:     at EnabledTraceUtil.startActiveSpan (/workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:102:28) {
+2025-10-24T00:56:07.972238Z ? api:   code: 9,
+2025-10-24T00:56:07.972243Z ? api:   details: 'The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB',
+2025-10-24T00:56:07.972247Z ? api:   metadata: Metadata {
+2025-10-24T00:56:07.972251Z ? api:     internalRepr: Map(1) { 'x-debug-tracking-id' => [Array] },
+2025-10-24T00:56:07.972255Z ? api:     options: {}
+2025-10-24T00:56:07.972256Z ? api: ✅ Comprehensive adherence calculated: {
+2025-10-24T00:56:07.972258Z ? api:   }
+2025-10-24T00:56:07.972261Z ? api: }
+2025-10-24T00:56:07.972270Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:56:07.972273Z ? api:   medicationId: undefined,
+2025-10-24T00:56:07.972277Z ? api:   adherenceRate: 0,
+2025-10-24T00:56:07.972280Z ? api:   riskLevel: 'critical'
+2025-10-24T00:56:07.972283Z ? api: }
+2025-10-24T00:56:07.972288Z ? api: 🔔 Triggering family notifications for concerning adherence patterns
+2025-10-24T00:56:07.972318Z ? api: 🔍 FamilyAdherenceNotificationService: Detecting patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:07.972386Z ? api: 📊 AdherenceAnalyticsService: Calculating comprehensive adherence: {
+2025-10-24T00:56:07.972395Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:56:07.972399Z ? api:   medicationId: undefined,
+2025-10-24T00:56:07.972405Z ? api:   includePatterns: true,
+2025-10-24T00:56:07.972410Z ? api:   includePredictions: true,
+2025-10-24T00:56:07.972413Z ? api:   includeFamilyData: true
+2025-10-24T00:56:07.972419Z ? api: }
+2025-10-24T00:56:07.973199Z ? api: ✅ Detected 1 adherence patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:07.973258Z ? api: 📨 FamilyAdherenceNotificationService: Sending pattern alerts for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:07.975051Z ? api: ✅ Pattern alert sent: low_adherence to 1 recipients
+2025-10-24T00:56:07.975121Z ? api: ✅ Family notifications triggered: 1 alerts sent
+2025-10-24T00:56:07.981242Z ? api: 📨 Notification delivery complete: { sent: 1, failed: 0, success: true }
+2025-10-24T00:56:07.983042Z ? api: 📨 Notification delivery complete: { sent: 1, failed: 0, success: true }
+2025-10-24T00:56:07.987578Z ? api: 📨 MedicationNotificationService: Sending notification: alert for: Medication Adherence
+2025-10-24T00:56:07.990779Z ? api: ✅ MedicationCommandService: Found 0 commands
+2025-10-24T00:56:07.990993Z ? api: 🔍 MedicationEventService: Querying events with options: {
+2025-10-24T00:56:07.991Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:56:07.991005Z ? api:   eventType: [ 'dose_scheduled', 'dose_taken', 'dose_missed', 'dose_skipped' ],
+2025-10-24T00:56:07.991009Z ? api:   startDate: 2025-10-24T00:00:00.000Z,
+2025-10-24T00:56:07.991014Z ? api:   endDate: 2025-10-24T23:59:59.999Z,
+2025-10-24T00:56:07.991018Z ? api:   orderBy: 'eventTimestamp',
+2025-10-24T00:56:07.991023Z ? api:   orderDirection: 'asc'
+2025-10-24T00:56:07.991028Z ? api: }
+2025-10-24T00:56:08.081037Z ? api: ❌ MedicationEventService: Error querying events: Error: 9 FAILED_PRECONDITION: The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB
+2025-10-24T00:56:08.081056Z ? api:     at callErrorFromStatus (/workspace/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+2025-10-24T00:56:08.081062Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:359:73)
+2025-10-24T00:56:08.081067Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:324:181)
+2025-10-24T00:56:08.081071Z ? api:     at /workspace/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+2025-10-24T00:56:08.081076Z ? api:     at process.processTicksAndRejections (node:internal/process/task_queues:77:11)
+2025-10-24T00:56:08.081081Z ? api: for call at
+2025-10-24T00:56:08.081085Z ? api:     at ServiceClientImpl.makeServerStreamRequest (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:342:32)
+2025-10-24T00:56:08.081090Z ? api:     at ServiceClientImpl.<anonymous> (/workspace/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+2025-10-24T00:56:08.081094Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/v1/firestore_client.js:242:33
+2025-10-24T00:56:08.081098Z ? api:     at /workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:38:28
+2025-10-24T00:56:08.081109Z ? api: 📊 Filtered events: 0 total, 0 non-archived
+2025-10-24T00:56:08.081110Z ? api:     at /workspace/node_modules/google-gax/build/src/normalCalls/timeout.js:44:16
+2025-10-24T00:56:08.081114Z ? api:     at Object.request (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:234:40)
+2025-10-24T00:56:08.081119Z ? api:     at makeRequest (/workspace/node_modules/retry-request/index.js:159:28)
+2025-10-24T00:56:08.081123Z ? api:     at retryRequest (/workspace/node_modules/retry-request/index.js:119:5)
+2025-10-24T00:56:08.081128Z ? api:     at StreamProxy.setStream (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:225:37)
+2025-10-24T00:56:08.081133Z ? api:     at StreamingApiCaller.call (/workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:54:16)
+2025-10-24T00:56:08.081141Z ? api: Caused by: Error
+2025-10-24T00:56:08.081146Z ? api:     at QueryUtil._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query-util.js:44:23)
+2025-10-24T00:56:08.081150Z ? api:     at Query._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:784:32)
+2025-10-24T00:56:08.081156Z ? api:     at Query._get (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:777:35)
+2025-10-24T00:56:08.081161Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:745:43
+2025-10-24T00:56:08.081165Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:110:30
+2025-10-24T00:56:08.081169Z ? api:     at NoopContextManager.with (/workspace/node_modules/@opentelemetry/api/build/src/context/NoopContextManager.js:25:19)
+2025-10-24T00:56:08.081172Z ? api:     at ContextAPI.with (/workspace/node_modules/@opentelemetry/api/build/src/api/context.js:60:46)
+2025-10-24T00:56:08.081177Z ? api:     at NoopTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/NoopTracer.js:65:31)
+2025-10-24T00:56:08.081180Z ? api:     at ProxyTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/ProxyTracer.js:36:24)
+2025-10-24T00:56:08.081184Z ? api:     at EnabledTraceUtil.startActiveSpan (/workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:102:28) {
+2025-10-24T00:56:08.081187Z ? api:   code: 9,
+2025-10-24T00:56:08.081192Z ? api:   details: 'The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB',
+2025-10-24T00:56:08.081196Z ? api:   metadata: Metadata {
+2025-10-24T00:56:08.081199Z ? api:     internalRepr: Map(1) { 'x-debug-tracking-id' => [Array] },
+2025-10-24T00:56:08.081202Z ? api:     options: {}
+2025-10-24T00:56:08.081206Z ? api:   }
+2025-10-24T00:56:08.081209Z ? api: }
+2025-10-24T00:56:08.082261076Z D api: Function execution took 229 ms, finished with status code: 200
+2025-10-24T00:56:08.083779Z ? api: ✅ Pattern alert sent: low_adherence to 1 recipients
+2025-10-24T00:56:08.083827Z ? api: ✅ Family notifications triggered: 1 alerts sent
+2025-10-24T00:56:08.083989Z ? api: ✅ Pattern alert sent: low_adherence to 1 recipients
+2025-10-24T00:56:08.084027Z ? api: ✅ Family notifications triggered: 1 alerts sent
+2025-10-24T00:56:08.109211Z ? api: 📨 MedicationNotificationService: Sending notification: alert for: Medication Adherence
+2025-10-24T00:56:08.112086Z ? api: ❌ Error calculating family engagement: Error: 9 FAILED_PRECONDITION: The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB
+2025-10-24T00:56:08.112100Z ? api:     at callErrorFromStatus (/workspace/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+2025-10-24T00:56:08.112104Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:359:73)
+2025-10-24T00:56:08.112108Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:324:181)
+2025-10-24T00:56:08.112111Z ? api:     at /workspace/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+2025-10-24T00:56:08.112115Z ? api:     at process.processTicksAndRejections (node:internal/process/task_queues:77:11)
+2025-10-24T00:56:08.112118Z ? api: for call at
+2025-10-24T00:56:08.112122Z ? api:     at ServiceClientImpl.makeServerStreamRequest (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:342:32)
+2025-10-24T00:56:08.112126Z ? api:     at ServiceClientImpl.<anonymous> (/workspace/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+2025-10-24T00:56:08.112129Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/v1/firestore_client.js:242:33
+2025-10-24T00:56:08.112132Z ? api:     at /workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:38:28
+2025-10-24T00:56:08.112135Z ? api:     at /workspace/node_modules/google-gax/build/src/normalCalls/timeout.js:44:16
+2025-10-24T00:56:08.112139Z ? api:     at Object.request (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:234:40)
+2025-10-24T00:56:08.112142Z ? api:     at makeRequest (/workspace/node_modules/retry-request/index.js:159:28)
+2025-10-24T00:56:08.112146Z ? api:     at retryRequest (/workspace/node_modules/retry-request/index.js:119:5)
+2025-10-24T00:56:08.112151Z ? api:     at StreamProxy.setStream (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:225:37)
+2025-10-24T00:56:08.112156Z ? api:     at StreamingApiCaller.call (/workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:54:16)
+2025-10-24T00:56:08.112172Z ? api: Caused by: Error
+2025-10-24T00:56:08.112177Z ? api:     at QueryUtil._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query-util.js:44:23)
+2025-10-24T00:56:08.112181Z ? api:     at Query._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:784:32)
+2025-10-24T00:56:08.112184Z ? api:     at Query._get (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:777:35)
+2025-10-24T00:56:08.112189Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:745:43
+2025-10-24T00:56:08.112203Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:110:30
+2025-10-24T00:56:08.112208Z ? api: ✅ Comprehensive adherence calculated: {
+2025-10-24T00:56:08.112209Z ? api:     at NoopContextManager.with (/workspace/node_modules/@opentelemetry/api/build/src/context/NoopContextManager.js:25:19)
+2025-10-24T00:56:08.112214Z ? api:     at ContextAPI.with (/workspace/node_modules/@opentelemetry/api/build/src/api/context.js:60:46)
+2025-10-24T00:56:08.112217Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:56:08.112222Z ? api:   medicationId: undefined,
+2025-10-24T00:56:08.112223Z ? api:     at NoopTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/NoopTracer.js:65:31)
+2025-10-24T00:56:08.112225Z ? api:   adherenceRate: 0,
+2025-10-24T00:56:08.112227Z ? api:     at ProxyTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/ProxyTracer.js:36:24)
+2025-10-24T00:56:08.112229Z ? api:   riskLevel: 'critical'
+2025-10-24T00:56:08.112231Z ? api:     at EnabledTraceUtil.startActiveSpan (/workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:102:28) {
+2025-10-24T00:56:08.112235Z ? api:   code: 9,
+2025-10-24T00:56:08.112239Z ? api: }
+2025-10-24T00:56:08.112244Z ? api: 🔔 Triggering family notifications for concerning adherence patterns
+2025-10-24T00:56:08.112250Z ? api:   details: 'The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB',
+2025-10-24T00:56:08.112255Z ? api:   metadata: Metadata {
+2025-10-24T00:56:08.112260Z ? api:     internalRepr: Map(1) { 'x-debug-tracking-id' => [Array] },
+2025-10-24T00:56:08.112264Z ? api:     options: {}
+2025-10-24T00:56:08.112269Z ? api:   }
+2025-10-24T00:56:08.112273Z ? api: }
+2025-10-24T00:56:08.112278Z ? api: 🔍 FamilyAdherenceNotificationService: Detecting patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:08.112325Z ? api: 📊 AdherenceAnalyticsService: Calculating comprehensive adherence: {
+2025-10-24T00:56:08.112331Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:56:08.112336Z ? api:   medicationId: undefined,
+2025-10-24T00:56:08.112341Z ? api:   includePatterns: true,
+2025-10-24T00:56:08.112345Z ? api:   includePredictions: true,
+2025-10-24T00:56:08.112350Z ? api:   includeFamilyData: true
+2025-10-24T00:56:08.112354Z ? api: }
+2025-10-24T00:56:08.113094Z ? api: ✅ Detected 1 adherence patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:08.113135Z ? api: 📨 FamilyAdherenceNotificationService: Sending pattern alerts for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:08.178361Z ? api: 📨 Notification delivery complete: { sent: 1, failed: 0, success: true }
+2025-10-24T00:56:10.870407Z ? api: ❌ Error calculating family engagement: Error: 9 FAILED_PRECONDITION: The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB
+2025-10-24T00:56:10.870422Z ? api:     at callErrorFromStatus (/workspace/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+2025-10-24T00:56:10.870426Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:359:73)
+2025-10-24T00:56:10.870430Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:324:181)
+2025-10-24T00:56:10.870433Z ? api:     at /workspace/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+2025-10-24T00:56:10.870437Z ? api:     at process.processTicksAndRejections (node:internal/process/task_queues:77:11)
+2025-10-24T00:56:10.870440Z ? api: for call at
+2025-10-24T00:56:10.870444Z ? api:     at ServiceClientImpl.makeServerStreamRequest (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:342:32)
+2025-10-24T00:56:10.870447Z ? api:     at ServiceClientImpl.<anonymous> (/workspace/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+2025-10-24T00:56:10.870450Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/v1/firestore_client.js:242:33
+2025-10-24T00:56:10.870454Z ? api:     at /workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:38:28
+2025-10-24T00:56:10.870457Z ? api:     at /workspace/node_modules/google-gax/build/src/normalCalls/timeout.js:44:16
+2025-10-24T00:56:10.870460Z ? api:     at Object.request (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:234:40)
+2025-10-24T00:56:10.870466Z ? api:     at makeRequest (/workspace/node_modules/retry-request/index.js:159:28)
+2025-10-24T00:56:10.870470Z ? api:     at retryRequest (/workspace/node_modules/retry-request/index.js:119:5)
+2025-10-24T00:56:10.870473Z ? api:     at StreamProxy.setStream (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:225:37)
+2025-10-24T00:56:10.870476Z ? api:     at StreamingApiCaller.call (/workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:54:16)
+2025-10-24T00:56:10.870482Z ? api: Caused by: Error
+2025-10-24T00:56:10.870485Z ? api:     at QueryUtil._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query-util.js:44:23)
+2025-10-24T00:56:10.870488Z ? api:     at Query._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:784:32)
+2025-10-24T00:56:10.870492Z ? api:     at Query._get (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:777:35)
+2025-10-24T00:56:10.870495Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:745:43
+2025-10-24T00:56:10.870498Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:110:30
+2025-10-24T00:56:10.870502Z ? api:     at NoopContextManager.with (/workspace/node_modules/@opentelemetry/api/build/src/context/NoopContextManager.js:25:19)
+2025-10-24T00:56:10.870504Z ? api:     at ContextAPI.with (/workspace/node_modules/@opentelemetry/api/build/src/api/context.js:60:46)
+2025-10-24T00:56:10.870508Z ? api:     at NoopTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/NoopTracer.js:65:31)
+2025-10-24T00:56:10.870512Z ? api:     at ProxyTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/ProxyTracer.js:36:24)
+2025-10-24T00:56:10.870515Z ? api:     at EnabledTraceUtil.startActiveSpan (/workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:102:28) {
+2025-10-24T00:56:10.870518Z ? api:   code: 9,
+2025-10-24T00:56:10.870523Z ? api:   details: 'The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB',
+2025-10-24T00:56:10.870526Z ? api:   metadata: Metadata {
+2025-10-24T00:56:10.870529Z ? api:     internalRepr: Map(1) { 'x-debug-tracking-id' => [Array] },
+2025-10-24T00:56:10.870532Z ? api:     options: {}
+2025-10-24T00:56:10.870535Z ? api:   }
+2025-10-24T00:56:10.870538Z ? api: }
+2025-10-24T00:56:10.870627Z ? api: ✅ Comprehensive adherence calculated: {
+2025-10-24T00:56:10.870637Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:56:10.870641Z ? api:   medicationId: undefined,
+2025-10-24T00:56:10.870644Z ? api:   adherenceRate: 0,
+2025-10-24T00:56:10.870648Z ? api:   riskLevel: 'critical'
+2025-10-24T00:56:10.870651Z ? api: }
+2025-10-24T00:56:10.870655Z ? api: 🔔 Triggering family notifications for concerning adherence patterns
+2025-10-24T00:56:10.870709Z ? api: 🔍 FamilyAdherenceNotificationService: Detecting patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:10.870760Z ? api: 📊 AdherenceAnalyticsService: Calculating comprehensive adherence: {
+2025-10-24T00:56:10.870764Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:56:10.870766Z ? api:   medicationId: undefined,
+2025-10-24T00:56:10.870769Z ? api:   includePatterns: true,
+2025-10-24T00:56:10.870772Z ? api:   includePredictions: true,
+2025-10-24T00:56:10.870775Z ? api:   includeFamilyData: true
+2025-10-24T00:56:10.870778Z ? api: }
+2025-10-24T00:56:10.871689Z ? api: ✅ Detected 1 adherence patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:10.871739Z ? api: 📨 FamilyAdherenceNotificationService: Sending pattern alerts for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:14.971585Z ? api: ✅ Pattern alert sent: low_adherence to 1 recipients
+2025-10-24T00:56:14.971606Z ? api: ✅ Family notifications triggered: 1 alerts sent
+2025-10-24T00:56:18.370699Z ? api: 📨 Notification delivery complete: { sent: 1, failed: 0, success: true }
+2025-10-24T00:56:20.870732Z ? api: ❌ Error calculating family engagement: Error: 9 FAILED_PRECONDITION: The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB
+2025-10-24T00:56:20.870747Z ? api:     at callErrorFromStatus (/workspace/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+2025-10-24T00:56:20.870751Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:359:73)
+2025-10-24T00:56:20.870755Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:324:181)
+2025-10-24T00:56:20.870758Z ? api:     at /workspace/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+2025-10-24T00:56:20.870762Z ? api:     at process.processTicksAndRejections (node:internal/process/task_queues:77:11)
+2025-10-24T00:56:20.870766Z ? api: for call at
+2025-10-24T00:56:20.870769Z ? api:     at ServiceClientImpl.makeServerStreamRequest (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:342:32)
+2025-10-24T00:56:20.870773Z ? api:     at ServiceClientImpl.<anonymous> (/workspace/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+2025-10-24T00:56:20.870777Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/v1/firestore_client.js:242:33
+2025-10-24T00:56:20.870780Z ? api:     at /workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:38:28
+2025-10-24T00:56:20.870784Z ? api:     at /workspace/node_modules/google-gax/build/src/normalCalls/timeout.js:44:16
+2025-10-24T00:56:20.870787Z ? api:     at Object.request (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:234:40)
+2025-10-24T00:56:20.870790Z ? api:     at makeRequest (/workspace/node_modules/retry-request/index.js:159:28)
+2025-10-24T00:56:20.870794Z ? api:     at retryRequest (/workspace/node_modules/retry-request/index.js:119:5)
+2025-10-24T00:56:20.870797Z ? api:     at StreamProxy.setStream (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:225:37)
+2025-10-24T00:56:20.870801Z ? api:     at StreamingApiCaller.call (/workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:54:16)
+2025-10-24T00:56:20.870807Z ? api: Caused by: Error
+2025-10-24T00:56:20.870810Z ? api:     at QueryUtil._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query-util.js:44:23)
+2025-10-24T00:56:20.870813Z ? api:     at Query._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:784:32)
+2025-10-24T00:56:20.870816Z ? api:     at Query._get (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:777:35)
+2025-10-24T00:56:20.870820Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:745:43
+2025-10-24T00:56:20.870823Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:110:30
+2025-10-24T00:56:20.870827Z ? api:     at NoopContextManager.with (/workspace/node_modules/@opentelemetry/api/build/src/context/NoopContextManager.js:25:19)
+2025-10-24T00:56:20.870830Z ? api:     at ContextAPI.with (/workspace/node_modules/@opentelemetry/api/build/src/api/context.js:60:46)
+2025-10-24T00:56:20.870834Z ? api:     at NoopTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/NoopTracer.js:65:31)
+2025-10-24T00:56:20.870837Z ? api:     at ProxyTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/ProxyTracer.js:36:24)
+2025-10-24T00:56:20.870841Z ? api:     at EnabledTraceUtil.startActiveSpan (/workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:102:28) {
+2025-10-24T00:56:20.870844Z ? api:   code: 9,
+2025-10-24T00:56:20.870849Z ? api:   details: 'The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB',
+2025-10-24T00:56:20.870852Z ? api:   metadata: Metadata {
+2025-10-24T00:56:20.870855Z ? api:     internalRepr: Map(1) { 'x-debug-tracking-id' => [Array] },
+2025-10-24T00:56:20.870858Z ? api:     options: {}
+2025-10-24T00:56:20.870861Z ? api:   }
+2025-10-24T00:56:20.870864Z ? api: }
+2025-10-24T00:56:20.870869Z ? api: ✅ Comprehensive adherence calculated: {
+2025-10-24T00:56:20.870878Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:56:20.870882Z ? api:   medicationId: undefined,
+2025-10-24T00:56:20.870885Z ? api:   adherenceRate: 0,
+2025-10-24T00:56:20.870888Z ? api:   riskLevel: 'critical'
+2025-10-24T00:56:20.870892Z ? api: }
+2025-10-24T00:56:20.870896Z ? api: 🔔 Triggering family notifications for concerning adherence patterns
+2025-10-24T00:56:20.870900Z ? api: 🔍 FamilyAdherenceNotificationService: Detecting patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:21.370618Z ? api: 📊 AdherenceAnalyticsService: Calculating comprehensive adherence: {
+2025-10-24T00:56:21.370630Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:56:21.370634Z ? api:   medicationId: undefined,
+2025-10-24T00:56:21.370638Z ? api:   includePatterns: true,
+2025-10-24T00:56:21.370641Z ? api:   includePredictions: true,
+2025-10-24T00:56:21.370645Z ? api:   includeFamilyData: true
+2025-10-24T00:56:21.370648Z ? api: }
+2025-10-24T00:56:21.770828Z ? api: ✅ Detected 1 adherence patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:21.770926Z ? api: 📨 FamilyAdherenceNotificationService: Sending pattern alerts for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:23.471680Z ? api: 📨 MedicationNotificationService: Sending notification: alert for: Medication Adherence
+2025-10-24T00:56:24.870317Z ? api: ✅ Pattern alert sent: low_adherence to 1 recipients
+2025-10-24T00:56:24.870502Z ? api: ✅ Family notifications triggered: 1 alerts sent
+2025-10-24T00:56:31.670688Z ? api: 📨 MedicationNotificationService: Sending notification: alert for: Medication Adherence
+2025-10-24T00:56:37.670803Z ? api: ❌ Error calculating family engagement: Error: 9 FAILED_PRECONDITION: The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB
+2025-10-24T00:56:37.670823Z ? api:     at callErrorFromStatus (/workspace/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+2025-10-24T00:56:37.670829Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:359:73)
+2025-10-24T00:56:37.670833Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:324:181)
+2025-10-24T00:56:37.670838Z ? api:     at /workspace/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+2025-10-24T00:56:37.670843Z ? api:     at process.processTicksAndRejections (node:internal/process/task_queues:77:11)
+2025-10-24T00:56:37.670847Z ? api: for call at
+2025-10-24T00:56:37.670852Z ? api:     at ServiceClientImpl.makeServerStreamRequest (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:342:32)
+2025-10-24T00:56:37.670856Z ? api:     at ServiceClientImpl.<anonymous> (/workspace/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+2025-10-24T00:56:37.670861Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/v1/firestore_client.js:242:33
+2025-10-24T00:56:37.670866Z ? api:     at /workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:38:28
+2025-10-24T00:56:37.670870Z ? api:     at /workspace/node_modules/google-gax/build/src/normalCalls/timeout.js:44:16
+2025-10-24T00:56:37.670875Z ? api:     at Object.request (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:234:40)
+2025-10-24T00:56:37.670880Z ? api:     at makeRequest (/workspace/node_modules/retry-request/index.js:159:28)
+2025-10-24T00:56:37.670885Z ? api:     at retryRequest (/workspace/node_modules/retry-request/index.js:119:5)
+2025-10-24T00:56:37.670889Z ? api:     at StreamProxy.setStream (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:225:37)
+2025-10-24T00:56:37.670894Z ? api:     at StreamingApiCaller.call (/workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:54:16)
+2025-10-24T00:56:37.670902Z ? api: Caused by: Error
+2025-10-24T00:56:37.670907Z ? api:     at QueryUtil._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query-util.js:44:23)
+2025-10-24T00:56:37.670912Z ? api:     at Query._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:784:32)
+2025-10-24T00:56:37.670917Z ? api:     at Query._get (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:777:35)
+2025-10-24T00:56:37.670922Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:745:43
+2025-10-24T00:56:37.670926Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:110:30
+2025-10-24T00:56:37.670945Z ? api:     at NoopContextManager.with (/workspace/node_modules/@opentelemetry/api/build/src/context/NoopContextManager.js:25:19)
+2025-10-24T00:56:37.670950Z ? api:     at ContextAPI.with (/workspace/node_modules/@opentelemetry/api/build/src/api/context.js:60:46)
+2025-10-24T00:56:37.670955Z ? api:     at NoopTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/NoopTracer.js:65:31)
+2025-10-24T00:56:37.670960Z ? api:     at ProxyTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/ProxyTracer.js:36:24)
+2025-10-24T00:56:37.670965Z ? api:     at EnabledTraceUtil.startActiveSpan (/workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:102:28) {
+2025-10-24T00:56:37.670969Z ? api:   code: 9,
+2025-10-24T00:56:37.670976Z ? api:   details: 'The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB',
+2025-10-24T00:56:37.670980Z ? api:   metadata: Metadata {
+2025-10-24T00:56:37.670985Z ? api:     internalRepr: Map(1) { 'x-debug-tracking-id' => [Array] },
+2025-10-24T00:56:37.670990Z ? api:     options: {}
+2025-10-24T00:56:37.670994Z ? api:   }
+2025-10-24T00:56:37.670998Z ? api: }
+2025-10-24T00:56:37.770322Z ? api: ✅ Comprehensive adherence calculated: {
+2025-10-24T00:56:37.770335Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:56:37.770339Z ? api:   medicationId: undefined,
+2025-10-24T00:56:37.770342Z ? api:   adherenceRate: 0,
+2025-10-24T00:56:37.770346Z ? api:   riskLevel: 'critical'
+2025-10-24T00:56:37.770349Z ? api: }
+2025-10-24T00:56:37.770501Z ? api: 🔔 Triggering family notifications for concerning adherence patterns
+2025-10-24T00:56:37.770573Z ? api: 🔍 FamilyAdherenceNotificationService: Detecting patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:37.770695Z ? api: 📊 AdherenceAnalyticsService: Calculating comprehensive adherence: {
+2025-10-24T00:56:37.770699Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:56:37.770703Z ? api:   medicationId: undefined,
+2025-10-24T00:56:37.770706Z ? api:   includePatterns: true,
+2025-10-24T00:56:37.770709Z ? api:   includePredictions: true,
+2025-10-24T00:56:37.770712Z ? api:   includeFamilyData: true
+2025-10-24T00:56:37.770715Z ? api: }
+2025-10-24T00:56:38.270769Z ? api: ✅ Detected 1 adherence patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:38.270819Z ? api: 📨 FamilyAdherenceNotificationService: Sending pattern alerts for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:42.072673Z ? api: 📨 Notification delivery complete: { sent: 1, failed: 0, success: true }
+2025-10-24T00:56:46.270805Z ? api: ✅ Pattern alert sent: low_adherence to 1 recipients
+2025-10-24T00:56:46.270878Z ? api: ✅ Family notifications triggered: 1 alerts sent
+2025-10-24T00:56:47.470767Z ? api: 📨 MedicationNotificationService: Sending notification: alert for: Medication Adherence
+2025-10-24T00:56:48.472547Z ? api: 📨 Notification delivery complete: { sent: 1, failed: 0, success: true }
+2025-10-24T00:56:50.570641Z ? api: ❌ Error calculating family engagement: Error: 9 FAILED_PRECONDITION: The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB
+2025-10-24T00:56:50.570656Z ? api:     at callErrorFromStatus (/workspace/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+2025-10-24T00:56:50.570661Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:359:73)
+2025-10-24T00:56:50.570665Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:324:181)
+2025-10-24T00:56:50.570668Z ? api:     at /workspace/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+2025-10-24T00:56:50.570671Z ? api:     at process.processTicksAndRejections (node:internal/process/task_queues:77:11)
+2025-10-24T00:56:50.570674Z ? api: for call at
+2025-10-24T00:56:50.570678Z ? api:     at ServiceClientImpl.makeServerStreamRequest (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:342:32)
+2025-10-24T00:56:50.570681Z ? api:     at ServiceClientImpl.<anonymous> (/workspace/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+2025-10-24T00:56:50.570685Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/v1/firestore_client.js:242:33
+2025-10-24T00:56:50.570688Z ? api:     at /workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:38:28
+2025-10-24T00:56:50.570692Z ? api:     at /workspace/node_modules/google-gax/build/src/normalCalls/timeout.js:44:16
+2025-10-24T00:56:50.570695Z ? api:     at Object.request (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:234:40)
+2025-10-24T00:56:50.570698Z ? api:     at makeRequest (/workspace/node_modules/retry-request/index.js:159:28)
+2025-10-24T00:56:50.570702Z ? api:     at retryRequest (/workspace/node_modules/retry-request/index.js:119:5)
+2025-10-24T00:56:50.570705Z ? api:     at StreamProxy.setStream (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:225:37)
+2025-10-24T00:56:50.570708Z ? api:     at StreamingApiCaller.call (/workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:54:16)
+2025-10-24T00:56:50.570715Z ? api: Caused by: Error
+2025-10-24T00:56:50.570718Z ? api:     at QueryUtil._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query-util.js:44:23)
+2025-10-24T00:56:50.570721Z ? api:     at Query._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:784:32)
+2025-10-24T00:56:50.570725Z ? api:     at Query._get (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:777:35)
+2025-10-24T00:56:50.570728Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:745:43
+2025-10-24T00:56:50.570731Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:110:30
+2025-10-24T00:56:50.570735Z ? api:     at NoopContextManager.with (/workspace/node_modules/@opentelemetry/api/build/src/context/NoopContextManager.js:25:19)
+2025-10-24T00:56:50.570738Z ? api:     at ContextAPI.with (/workspace/node_modules/@opentelemetry/api/build/src/api/context.js:60:46)
+2025-10-24T00:56:50.570742Z ? api:     at NoopTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/NoopTracer.js:65:31)
+2025-10-24T00:56:50.570745Z ? api:     at ProxyTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/ProxyTracer.js:36:24)
+2025-10-24T00:56:50.570749Z ? api:     at EnabledTraceUtil.startActiveSpan (/workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:102:28) {
+2025-10-24T00:56:50.570752Z ? api:   code: 9,
+2025-10-24T00:56:50.570757Z ? api:   details: 'The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB',
+2025-10-24T00:56:50.570760Z ? api:   metadata: Metadata {
+2025-10-24T00:56:50.570763Z ? api:     internalRepr: Map(1) { 'x-debug-tracking-id' => [Array] },
+2025-10-24T00:56:50.570766Z ? api:     options: {}
+2025-10-24T00:56:50.570769Z ? api:   }
+2025-10-24T00:56:50.570772Z ? api: }
+2025-10-24T00:56:50.570800Z ? api: ✅ Comprehensive adherence calculated: {
+2025-10-24T00:56:50.570806Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:56:50.570810Z ? api:   medicationId: undefined,
+2025-10-24T00:56:50.570814Z ? api:   adherenceRate: 0,
+2025-10-24T00:56:50.570819Z ? api:   riskLevel: 'critical'
+2025-10-24T00:56:50.570823Z ? api: }
+2025-10-24T00:56:50.570828Z ? api: 🔔 Triggering family notifications for concerning adherence patterns
+2025-10-24T00:56:50.570883Z ? api: 🔍 FamilyAdherenceNotificationService: Detecting patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:50.670310Z ? api: 📊 AdherenceAnalyticsService: Calculating comprehensive adherence: {
+2025-10-24T00:56:50.670323Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:56:50.670327Z ? api:   medicationId: undefined,
+2025-10-24T00:56:50.670330Z ? api:   includePatterns: true,
+2025-10-24T00:56:50.670333Z ? api:   includePredictions: true,
+2025-10-24T00:56:50.670337Z ? api:   includeFamilyData: true
+2025-10-24T00:56:50.670340Z ? api: }
+2025-10-24T00:56:50.971952Z ? api: ✅ Detected 1 adherence patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:51.070320Z ? api: 📨 FamilyAdherenceNotificationService: Sending pattern alerts for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:56:55.370917Z ? api: ✅ Pattern alert sent: low_adherence to 1 recipients
+2025-10-24T00:56:55.971024Z ? api: ✅ Family notifications triggered: 1 alerts sent
+2025-10-24T00:57:04.470199Z ? api: 📨 MedicationNotificationService: Sending notification: alert for: Medication Adherence
+2025-10-24T00:57:06.470708Z ? api: ❌ Error calculating family engagement: Error: 9 FAILED_PRECONDITION: The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB
+2025-10-24T00:57:06.470725Z ? api:     at callErrorFromStatus (/workspace/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+2025-10-24T00:57:06.470729Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:359:73)
+2025-10-24T00:57:06.470734Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:324:181)
+2025-10-24T00:57:06.470738Z ? api:     at /workspace/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+2025-10-24T00:57:06.470742Z ? api:     at process.processTicksAndRejections (node:internal/process/task_queues:77:11)
+2025-10-24T00:57:06.470745Z ? api: for call at
+2025-10-24T00:57:06.470749Z ? api:     at ServiceClientImpl.makeServerStreamRequest (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:342:32)
+2025-10-24T00:57:06.470753Z ? api:     at ServiceClientImpl.<anonymous> (/workspace/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+2025-10-24T00:57:06.470756Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/v1/firestore_client.js:242:33
+2025-10-24T00:57:06.470760Z ? api:     at /workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:38:28
+2025-10-24T00:57:06.470763Z ? api:     at /workspace/node_modules/google-gax/build/src/normalCalls/timeout.js:44:16
+2025-10-24T00:57:06.470767Z ? api:     at Object.request (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:234:40)
+2025-10-24T00:57:06.470771Z ? api:     at makeRequest (/workspace/node_modules/retry-request/index.js:159:28)
+2025-10-24T00:57:06.470774Z ? api:     at retryRequest (/workspace/node_modules/retry-request/index.js:119:5)
+2025-10-24T00:57:06.470778Z ? api:     at StreamProxy.setStream (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:225:37)
+2025-10-24T00:57:06.470781Z ? api:     at StreamingApiCaller.call (/workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:54:16)
+2025-10-24T00:57:06.470788Z ? api: Caused by: Error
+2025-10-24T00:57:06.470791Z ? api:     at QueryUtil._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query-util.js:44:23)
+2025-10-24T00:57:06.470795Z ? api:     at Query._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:784:32)
+2025-10-24T00:57:06.470798Z ? api:     at Query._get (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:777:35)
+2025-10-24T00:57:06.470801Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:745:43
+2025-10-24T00:57:06.470805Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:110:30
+2025-10-24T00:57:06.470808Z ? api:     at NoopContextManager.with (/workspace/node_modules/@opentelemetry/api/build/src/context/NoopContextManager.js:25:19)
+2025-10-24T00:57:06.470812Z ? api:     at ContextAPI.with (/workspace/node_modules/@opentelemetry/api/build/src/api/context.js:60:46)
+2025-10-24T00:57:06.470816Z ? api:     at NoopTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/NoopTracer.js:65:31)
+2025-10-24T00:57:06.470819Z ? api:     at ProxyTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/ProxyTracer.js:36:24)
+2025-10-24T00:57:06.470823Z ? api:     at EnabledTraceUtil.startActiveSpan (/workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:102:28) {
+2025-10-24T00:57:06.470826Z ? api:   code: 9,
+2025-10-24T00:57:06.470831Z ? api:   details: 'The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB',
+2025-10-24T00:57:06.470835Z ? api:   metadata: Metadata {
+2025-10-24T00:57:06.470839Z ? api:     internalRepr: Map(1) { 'x-debug-tracking-id' => [Array] },
+2025-10-24T00:57:06.470842Z ? api:     options: {}
+2025-10-24T00:57:06.470845Z ? api:   }
+2025-10-24T00:57:06.470849Z ? api: }
+2025-10-24T00:57:06.470858Z ? api: ✅ Comprehensive adherence calculated: {
+2025-10-24T00:57:06.470871Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:57:06.470874Z ? api:   medicationId: undefined,
+2025-10-24T00:57:06.470877Z ? api:   adherenceRate: 0,
+2025-10-24T00:57:06.470881Z ? api:   riskLevel: 'critical'
+2025-10-24T00:57:06.470884Z ? api: }
+2025-10-24T00:57:06.470909Z ? api: 🔔 Triggering family notifications for concerning adherence patterns
+2025-10-24T00:57:06.470967Z ? api: 🔍 FamilyAdherenceNotificationService: Detecting patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:57:06.471029Z ? api: 📊 AdherenceAnalyticsService: Calculating comprehensive adherence: {
+2025-10-24T00:57:06.471033Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:57:06.471036Z ? api:   medicationId: undefined,
+2025-10-24T00:57:06.471040Z ? api:   includePatterns: true,
+2025-10-24T00:57:06.471043Z ? api:   includePredictions: true,
+2025-10-24T00:57:06.471046Z ? api:   includeFamilyData: true
+2025-10-24T00:57:06.471049Z ? api: }
+2025-10-24T00:57:06.572731Z ? api: ✅ Detected 1 adherence patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:57:06.572798Z ? api: 📨 FamilyAdherenceNotificationService: Sending pattern alerts for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:57:07.370861Z ? api: 📨 Notification delivery complete: { sent: 1, failed: 0, success: true }
+2025-10-24T00:57:13.970180Z ? api: ✅ Pattern alert sent: low_adherence to 1 recipients
+2025-10-24T00:57:13.970407Z ? api: ✅ Family notifications triggered: 1 alerts sent
+2025-10-24T00:57:17.670751Z ? api: 📨 MedicationNotificationService: Sending notification: alert for: Medication Adherence
+2025-10-24T00:57:19.270850Z ? api: ❌ Error calculating family engagement: Error: 9 FAILED_PRECONDITION: The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB
+2025-10-24T00:57:19.270865Z ? api:     at callErrorFromStatus (/workspace/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+2025-10-24T00:57:19.270869Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:359:73)
+2025-10-24T00:57:19.270872Z ? api:     at Object.onReceiveStatus (/workspace/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:324:181)
+2025-10-24T00:57:19.270875Z ? api:     at /workspace/node_modules/@grpc/grpc-js/build/src/resolving-call.js:135:78
+2025-10-24T00:57:19.270879Z ? api:     at process.processTicksAndRejections (node:internal/process/task_queues:77:11)
+2025-10-24T00:57:19.270882Z ? api: for call at
+2025-10-24T00:57:19.270885Z ? api:     at ServiceClientImpl.makeServerStreamRequest (/workspace/node_modules/@grpc/grpc-js/build/src/client.js:342:32)
+2025-10-24T00:57:19.270888Z ? api:     at ServiceClientImpl.<anonymous> (/workspace/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+2025-10-24T00:57:19.270891Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/v1/firestore_client.js:242:33
+2025-10-24T00:57:19.270894Z ? api:     at /workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:38:28
+2025-10-24T00:57:19.270898Z ? api:     at /workspace/node_modules/google-gax/build/src/normalCalls/timeout.js:44:16
+2025-10-24T00:57:19.270901Z ? api:     at Object.request (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:234:40)
+2025-10-24T00:57:19.270904Z ? api:     at makeRequest (/workspace/node_modules/retry-request/index.js:159:28)
+2025-10-24T00:57:19.270907Z ? api:     at retryRequest (/workspace/node_modules/retry-request/index.js:119:5)
+2025-10-24T00:57:19.270910Z ? api:     at StreamProxy.setStream (/workspace/node_modules/google-gax/build/src/streamingCalls/streaming.js:225:37)
+2025-10-24T00:57:19.270914Z ? api:     at StreamingApiCaller.call (/workspace/node_modules/google-gax/build/src/streamingCalls/streamingApiCaller.js:54:16)
+2025-10-24T00:57:19.270919Z ? api: Caused by: Error
+2025-10-24T00:57:19.270922Z ? api:     at QueryUtil._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query-util.js:44:23)
+2025-10-24T00:57:19.270925Z ? api:     at Query._getResponse (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:784:32)
+2025-10-24T00:57:19.270928Z ? api:     at Query._get (/workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:777:35)
+2025-10-24T00:57:19.270945Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/reference/query.js:745:43
+2025-10-24T00:57:19.270949Z ? api:     at /workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:110:30
+2025-10-24T00:57:19.270952Z ? api:     at NoopContextManager.with (/workspace/node_modules/@opentelemetry/api/build/src/context/NoopContextManager.js:25:19)
+2025-10-24T00:57:19.270955Z ? api:     at ContextAPI.with (/workspace/node_modules/@opentelemetry/api/build/src/api/context.js:60:46)
+2025-10-24T00:57:19.270959Z ? api:     at NoopTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/NoopTracer.js:65:31)
+2025-10-24T00:57:19.270962Z ? api:     at ProxyTracer.startActiveSpan (/workspace/node_modules/@opentelemetry/api/build/src/trace/ProxyTracer.js:36:24)
+2025-10-24T00:57:19.270965Z ? api:     at EnabledTraceUtil.startActiveSpan (/workspace/node_modules/@google-cloud/firestore/build/src/telemetry/enabled-trace-util.js:102:28) {
+2025-10-24T00:57:19.270968Z ? api:   code: 9,
+2025-10-24T00:57:19.270973Z ? api:   details: 'The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/claritystream-uldp9/firestore/indexes?create_composite=Cl1wcm9qZWN0cy9jbGFyaXR5c3RyZWFtLXVsZHA5L2RhdGFiYXNlcy8oZGVmYXVsdCkvY29sbGVjdGlvbkdyb3Vwcy9tZWRpY2F0aW9uX2V2ZW50cy9pbmRleGVzL18QARoNCglldmVudFR5cGUQARoNCglwYXRpZW50SWQQARoZChV0aW1pbmcuZXZlbnRUaW1lc3RhbXAQARoMCghfX25hbWVfXxAB',
+2025-10-24T00:57:19.270976Z ? api:   metadata: Metadata {
+2025-10-24T00:57:19.270979Z ? api:     internalRepr: Map(1) { 'x-debug-tracking-id' => [Array] },
+2025-10-24T00:57:19.270982Z ? api:     options: {}
+2025-10-24T00:57:19.270985Z ? api:   }
+2025-10-24T00:57:19.270988Z ? api: }
+2025-10-24T00:57:19.570530Z ? api: ✅ Comprehensive adherence calculated: {
+2025-10-24T00:57:19.570542Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:57:19.570546Z ? api:   medicationId: undefined,
+2025-10-24T00:57:19.570549Z ? api:   adherenceRate: 0,
+2025-10-24T00:57:19.570553Z ? api:   riskLevel: 'critical'
+2025-10-24T00:57:19.570556Z ? api: }
+2025-10-24T00:57:19.570595Z ? api: 🔔 Triggering family notifications for concerning adherence patterns
+2025-10-24T00:57:19.570645Z ? api: 🔍 FamilyAdherenceNotificationService: Detecting patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:57:19.570717Z ? api: 📊 AdherenceAnalyticsService: Calculating comprehensive adherence: {
+2025-10-24T00:57:19.570721Z ? api:   patientId: 'PPJdgtyeB4ZV6vr7WqeCgba1aZO2',
+2025-10-24T00:57:19.570725Z ? api:   medicationId: undefined,
+2025-10-24T00:57:19.570728Z ? api:   includePatterns: true,
+2025-10-24T00:57:19.570731Z ? api:   includePredictions: true,
+2025-10-24T00:57:19.570735Z ? api:   includeFamilyData: true
+2025-10-24T00:57:19.570739Z ? api: }
+2025-10-24T00:57:21.271005Z ? api: ✅ Detected 1 adherence patterns for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:57:21.271286Z ? api: 📨 FamilyAdherenceNotificationService: Sending pattern alerts for patient: PPJdgtyeB4ZV6vr7WqeCgba1aZO2
+2025-10-24T00:57:22.069983Z ? api: 📨 Notification delivery complete: { sent: 1, failed: 0, success: true }
+2025-10-24T00:57:27.070693Z ? api: ✅ Pattern alert sent: low_adherence to 1 recipients
+2025-10-24T00:57:27.070738Z ? api: ✅ Family notifications triggered: 1 alerts sent

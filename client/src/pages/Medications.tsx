@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useFamily } from '@/contexts/FamilyContext';
 import {
@@ -9,13 +9,11 @@ import {
   AlertTriangle,
   User,
   Users,
-  TrendingUp
+  TrendingUp,
 } from 'lucide-react';
 import { Medication, NewMedication } from '@shared/types';
-import { apiClient, API_ENDPOINTS } from '@/lib/api';
-import { createSmartRefresh, createDebouncedFunction } from '@/lib/requestDebouncer';
+import { createSmartRefresh, createDebouncedFunction, clearRequestCache } from '@/lib/requestDebouncer';
 import { unifiedMedicationApi } from '@/lib/unifiedMedicationApi';
-import { parseFrequencyToScheduleType, generateDefaultTimesForFrequency } from '@/utils/medicationFrequencyUtils';
 import MedicationManager from '@/components/MedicationManager';
 import TimeBucketView from '@/components/TimeBucketView';
 import MissedMedicationsModal from '@/components/MissedMedicationsModal';
@@ -26,6 +24,17 @@ import { ViewOnlyBanner } from '@/components/ViewOnlyBanner';
 import PRNQuickAccess from '@/components/PRNQuickAccess';
 import PRNFloatingButton from '@/components/PRNFloatingButton';
 import { showSuccess, showError } from '@/utils/toast';
+
+// Enhanced error types for better error handling
+type ErrorType = 'validation' | 'network' | 'server' | 'timeout' | 'unknown';
+
+interface EnhancedError {
+  type: ErrorType;
+  message: string;
+  details?: string;
+  retryable: boolean;
+  fieldErrors?: Record<string, string>;
+}
 
 export default function Medications() {
   const {
@@ -51,6 +60,120 @@ export default function Medications() {
     success: boolean | null;
     message: string | null;
   }>({ isCreating: false, success: null, message: null });
+  
+  // Enhanced error state management
+  const [currentError, setCurrentError] = useState<EnhancedError | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const errorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const MAX_RETRY_ATTEMPTS = 3;
+
+  // Helper function to parse and categorize errors
+  const parseError = (error: any): EnhancedError => {
+    console.log('🔍 [Medications] Parsing error:', error);
+    
+    // Network errors
+    if (error.message?.includes('fetch') || error.message?.includes('network') || !navigator.onLine) {
+      return {
+        type: 'network',
+        message: 'Network connection issue. Please check your internet connection.',
+        details: error.message,
+        retryable: true
+      };
+    }
+    
+    // Timeout errors
+    if (error.message?.includes('timeout') || error.code === 'ETIMEDOUT') {
+      return {
+        type: 'timeout',
+        message: 'Request timed out. The server is taking too long to respond.',
+        details: error.message,
+        retryable: true
+      };
+    }
+    
+    // Validation errors (from backend)
+    if (error.validation || error.fieldErrors) {
+      return {
+        type: 'validation',
+        message: 'Please check the form for errors.',
+        details: error.message || 'Validation failed',
+        retryable: false,
+        fieldErrors: error.fieldErrors || error.validation
+      };
+    }
+    
+    // Server errors (5xx)
+    if (error.status >= 500 || error.message?.includes('server error')) {
+      return {
+        type: 'server',
+        message: 'Server error. Our team has been notified.',
+        details: error.message,
+        retryable: true
+      };
+    }
+    
+    // Authentication errors
+    if (error.status === 401 || error.message?.includes('authentication')) {
+      return {
+        type: 'validation',
+        message: 'Authentication required. Please log in again.',
+        details: error.message,
+        retryable: false
+      };
+    }
+    
+    // Permission errors
+    if (error.status === 403 || error.message?.includes('permission')) {
+      return {
+        type: 'validation',
+        message: 'You do not have permission to perform this action.',
+        details: error.message,
+        retryable: false
+      };
+    }
+    
+    // Default unknown error
+    return {
+      type: 'unknown',
+      message: 'An unexpected error occurred. Please try again.',
+      details: error.message || String(error),
+      retryable: true
+    };
+  };
+
+  // Display error with auto-clear
+  const displayError = (error: EnhancedError) => {
+    console.error('❌ [Medications] Displaying error:', error);
+    setCurrentError(error);
+    
+    // Show toast notification
+    showError(error.message);
+    
+    // Auto-clear error after 5 seconds
+    if (errorTimeoutRef.current) {
+      clearTimeout(errorTimeoutRef.current);
+    }
+    errorTimeoutRef.current = setTimeout(() => {
+      setCurrentError(null);
+    }, 5000);
+  };
+
+  // Clear error manually
+  const clearError = () => {
+    setCurrentError(null);
+    if (errorTimeoutRef.current) {
+      clearTimeout(errorTimeoutRef.current);
+    }
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (errorTimeoutRef.current) {
+        clearTimeout(errorTimeoutRef.current);
+      }
+    };
+  }, []);
   
 
   // Create smart refresh function for medications
@@ -221,160 +344,206 @@ export default function Medications() {
     };
   }, []);
 
-  // Medication management functions
-  const handleAddMedication = async (medication: NewMedication) => {
+  // Medication management functions with enhanced error handling
+  const handleAddMedication = async (medication: NewMedication, attemptNumber: number = 0): Promise<void> => {
     let createdMedication: Medication | null = null;
-    let scheduleCreated = false;
     
     try {
       setIsLoadingMedications(true);
-      setScheduleCreationStatus({ isCreating: false, success: null, message: null });
-      console.log('🔧 Medications: Adding new medication:', medication.name);
+      clearError(); // Clear any previous errors
+      setScheduleCreationStatus({ isCreating: true, success: null, message: 'Adding medication and creating schedule...' });
       
-      // Step 1: Create the medication
-      const response = await apiClient.post<{ success: boolean; data: Medication }>(
-        API_ENDPOINTS.MEDICATIONS,
-        medication
-      );
+      console.log('🔧 [Medications] Adding new medication:', {
+        name: medication.name,
+        attempt: attemptNumber + 1,
+        maxAttempts: MAX_RETRY_ATTEMPTS,
+        timestamp: new Date().toISOString()
+      });
+      
+      console.log('🔍 [Medications] Request payload:', {
+        name: medication.name,
+        frequency: medication.frequency,
+        hasReminders: medication.hasReminders,
+        reminderTimes: medication.reminderTimes,
+        reminderTimesIsArray: Array.isArray(medication.reminderTimes),
+        reminderTimesLength: medication.reminderTimes?.length,
+        isPRN: medication.isPRN,
+        usePatientTimePreferences: !medication.isPRN,
+        fullMedicationObject: JSON.stringify(medication, null, 2)
+      });
+      
+      // Use unified API to create medication with schedule in one call
+      const startTime = performance.now();
+      const response = await unifiedMedicationApi.createMedication({
+        name: medication.name,
+        genericName: medication.genericName,
+        dosage: medication.dosage,
+        frequency: medication.frequency,
+        instructions: medication.instructions,
+        prescribedBy: medication.prescribedBy,
+        prescribedDate: medication.prescribedDate,
+        startDate: medication.startDate,
+        endDate: medication.endDate,
+        reminderTimes: medication.reminderTimes,
+        hasReminders: medication.hasReminders,
+        usePatientTimePreferences: !medication.isPRN // Use patient preferences unless PRN
+      });
+      const endTime = performance.now();
+
+      console.log('🔍 [Medications] API Response:', {
+        success: response.success,
+        hasData: !!response.data,
+        error: response.error,
+        responseTime: `${(endTime - startTime).toFixed(2)}ms`,
+        fullResponse: JSON.stringify(response, null, 2)
+      });
       
       if (!response.success || !response.data) {
-        throw new Error('Failed to create medication');
-      }
-      
-      // Parse date strings back to Date objects for the new medication
-      createdMedication = {
-        ...response.data,
-        prescribedDate: new Date(response.data.prescribedDate),
-        startDate: response.data.startDate ? new Date(response.data.startDate) : undefined,
-        endDate: response.data.endDate ? new Date(response.data.endDate) : undefined,
-        createdAt: new Date(response.data.createdAt),
-        updatedAt: new Date(response.data.updatedAt),
-      };
-      
-      console.log('✅ Medications: Medication created successfully:', createdMedication.id);
-      
-      // Step 2: Check if automatic schedule creation is needed
-      if (medication.hasReminders && !medication.isPRN) {
-        setScheduleCreationStatus({
-          isCreating: true,
-          success: null,
-          message: 'Creating medication schedule...'
+        // Parse the error for better handling
+        const enhancedError = parseError({
+          message: response.error || 'Failed to create medication',
+          validation: (response as any).validation,
+          fieldErrors: (response as any).fieldErrors
         });
         
-        console.log('🔧 Medications: Attempting automatic schedule creation');
-        console.log('🔧 Medications: Frequency:', medication.frequency);
-        console.log('🔧 Medications: Reminder times:', medication.reminderTimes);
-        
-        try {
-          // Parse frequency to schedule type
-          const scheduleFrequency = parseFrequencyToScheduleType(medication.frequency);
-          console.log('🔧 Medications: Parsed schedule frequency:', scheduleFrequency);
-          
-          // Use provided reminder times or generate defaults
-          const scheduleTimes = medication.reminderTimes && medication.reminderTimes.length > 0
-            ? medication.reminderTimes
-            : generateDefaultTimesForFrequency(scheduleFrequency);
-          
-          console.log('🔧 Medications: Schedule times:', scheduleTimes);
-          
-          // Create the schedule
-          const scheduleData = {
-            medicationId: createdMedication.id,
-            patientId: medication.patientId,
-            frequency: scheduleFrequency,
-            times: scheduleTimes,
-            dosageAmount: medication.dosage,
-            instructions: medication.instructions,
-            startDate: medication.startDate || new Date(),
-            endDate: medication.endDate,
-            isIndefinite: !medication.endDate,
-            generateCalendarEvents: true,
-            reminderMinutesBefore: [15, 5], // Default reminders
-            isActive: true
-          };
-          
-          console.log('🔧 Medications: Creating schedule with data:', scheduleData);
-          
-          // Note: createMedicationSchedule not yet in unified API
-          // For now, log a warning - this will be implemented later
-          console.warn('createMedicationSchedule not yet available in unified API');
-          const scheduleResponse = { success: false, error: 'Schedule creation not yet implemented in unified API' };
-          
-          if (scheduleResponse.success) {
-            scheduleCreated = true;
-            console.log('✅ Medications: Schedule created successfully');
-            
-            setScheduleCreationStatus({
-              isCreating: false,
-              success: true,
-              message: '✅ Medication added and reminders scheduled successfully!'
-            });
-            
-            showSuccess('Medication added and reminders scheduled successfully!');
-            
-            // Clear success message after 5 seconds
-            setTimeout(() => {
-              setScheduleCreationStatus({ isCreating: false, success: null, message: null });
-            }, 5000);
-          } else {
-            console.warn('⚠️ Medications: Schedule creation failed:', scheduleResponse.error);
-            
-            setScheduleCreationStatus({
-              isCreating: false,
-              success: false,
-              message: '⚠️ Medication added but reminders could not be scheduled. You can set them up later from the medication list.'
-            });
-            
-            // Clear error message after 8 seconds
-            setTimeout(() => {
-              setScheduleCreationStatus({ isCreating: false, success: null, message: null });
-            }, 8000);
-          }
-        } catch (scheduleError) {
-          console.error('❌ Medications: Error creating schedule:', scheduleError);
+        // Check if we should retry
+        if (enhancedError.retryable && attemptNumber < MAX_RETRY_ATTEMPTS - 1) {
+          const retryDelay = Math.min(1000 * Math.pow(2, attemptNumber), 5000); // Exponential backoff, max 5s
+          console.log(`⏳ [Medications] Retrying in ${retryDelay}ms (attempt ${attemptNumber + 2}/${MAX_RETRY_ATTEMPTS})`);
           
           setScheduleCreationStatus({
-            isCreating: false,
-            success: false,
-            message: '⚠️ Medication added but reminders could not be scheduled. You can set them up later from the medication list.'
+            isCreating: true,
+            success: null,
+            message: `Retrying... (attempt ${attemptNumber + 2}/${MAX_RETRY_ATTEMPTS})`
           });
           
-          // Clear error message after 8 seconds
-          setTimeout(() => {
-            setScheduleCreationStatus({ isCreating: false, success: null, message: null });
-          }, 8000);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          return handleAddMedication(medication, attemptNumber + 1);
         }
+        
+        throw enhancedError;
+      }
+      
+      // Handle both response formats: simplified {id, timestamp} or full {command, workflow}
+      const unifiedCommand = response.data.command;
+      
+      if (unifiedCommand) {
+        // Full response format with command object
+        createdMedication = {
+          id: unifiedCommand.id,
+          patientId: unifiedCommand.patientId,
+          name: unifiedCommand.medication.name,
+          genericName: unifiedCommand.medication.genericName,
+          brandName: unifiedCommand.medication.brandName,
+          rxcui: unifiedCommand.medication.rxcui,
+          dosage: unifiedCommand.medication.dosage,
+          strength: unifiedCommand.medication.strength,
+          dosageForm: unifiedCommand.medication.dosageForm,
+          route: unifiedCommand.medication.route,
+          instructions: unifiedCommand.medication.instructions,
+          prescribedBy: unifiedCommand.medication.prescribedBy,
+          prescribedDate: unifiedCommand.medication.prescribedDate || new Date(),
+          startDate: unifiedCommand.schedule.startDate,
+          endDate: unifiedCommand.schedule.endDate,
+          isActive: unifiedCommand.status.isActive,
+          isPRN: unifiedCommand.status.isPRN,
+          maxDailyDose: unifiedCommand.medication.maxDailyDose,
+          sideEffects: unifiedCommand.medication.sideEffects,
+          notes: unifiedCommand.medication.notes,
+          pharmacy: unifiedCommand.medication.pharmacy,
+          prescriptionNumber: unifiedCommand.medication.prescriptionNumber,
+          refillsRemaining: unifiedCommand.medication.refillsRemaining,
+          hasReminders: unifiedCommand.reminders.enabled,
+          reminderTimes: unifiedCommand.schedule.times,
+          frequency: mapUnifiedFrequencyToLegacy(unifiedCommand.schedule.frequency),
+          createdAt: unifiedCommand.metadata.createdAt,
+          updatedAt: unifiedCommand.metadata.updatedAt,
+        };
       } else {
-        console.log('ℹ️ Medications: No automatic schedule creation needed (hasReminders:', medication.hasReminders, ', isPRN:', medication.isPRN, ')');
+        // Simplified response format with just {id, timestamp}
+        // Create a minimal medication object and rely on refresh to get full data
+        console.log('📝 [Medications] Received simplified response, will refresh to get full data');
+        const simplifiedData = response.data as any; // Type assertion for simplified response
+        createdMedication = {
+          id: simplifiedData.id,
+          patientId: medication.patientId,
+          name: medication.name,
+          genericName: medication.genericName,
+          dosage: medication.dosage,
+          instructions: medication.instructions,
+          prescribedBy: medication.prescribedBy,
+          prescribedDate: medication.prescribedDate || new Date(),
+          frequency: medication.frequency,
+          isActive: true,
+          isPRN: medication.isPRN || false,
+          hasReminders: medication.hasReminders || false,
+          reminderTimes: medication.reminderTimes || [],
+          createdAt: simplifiedData.timestamp ? new Date(simplifiedData.timestamp) : new Date(),
+          updatedAt: simplifiedData.timestamp ? new Date(simplifiedData.timestamp) : new Date(),
+        };
       }
       
-      // Step 3: Update local state
-      setMedications(prev => [...prev, createdMedication!]);
+      console.log('✅ Medications: Medication and schedule created successfully:', createdMedication?.id);
       
-      // Show success toast if no schedule was created (PRN or no reminders)
-      if (!scheduleCreated && !medication.hasReminders) {
-        showSuccess(`${medication.name} added successfully!`);
+      setScheduleCreationStatus({
+        isCreating: false,
+        success: true,
+        message: '✅ Medication added and reminders scheduled successfully!'
+      });
+      
+      showSuccess('Medication added and reminders scheduled successfully!');
+      
+      // Clear cache to force fresh fetch after mutation
+      clearRequestCache('medications_list');
+      
+      // Update local state optimistically
+      if (createdMedication) {
+        setMedications(prev => [...prev, createdMedication!]);
       }
       
-      // Step 4: Refresh related data
-      if (scheduleCreated) {
-        // Refresh medications list to show the new schedule
-        await loadMedications();
-        // Refresh today's view
-        setRefreshTrigger(prev => prev + 1);
-        // Refresh adherence stats
-        loadMissedMedicationsCount();
-        loadAdherenceStats();
-      }
+      // Refresh related data - cache is cleared so this will force a fresh fetch
+      await loadMedications();
+      setRefreshTrigger(prev => prev + 1);
+      loadMissedMedicationsCount();
+      loadAdherenceStats();
+      
+      // Clear success message after 5 seconds
+      setTimeout(() => {
+        setScheduleCreationStatus({ isCreating: false, success: null, message: null });
+      }, 5000);
       
     } catch (error) {
-      console.error('❌ Medications: Error adding medication:', error);
+      console.error('❌ [Medications] Error adding medication:', {
+        error,
+        attempt: attemptNumber + 1,
+        medicationName: medication.name,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Parse and display the error
+      const enhancedError = error instanceof Error || (error as any).type
+        ? parseError(error)
+        : parseError({ message: 'Unknown error occurred' });
+      
+      displayError(enhancedError);
+      
+      // Update status with specific error message
+      let statusMessage = '❌ Failed to add medication.';
+      if (enhancedError.type === 'network') {
+        statusMessage += ' Please check your connection and try again.';
+      } else if (enhancedError.type === 'validation') {
+        statusMessage += ' Please check the form for errors.';
+      } else if (enhancedError.retryable) {
+        statusMessage += ' Please try again.';
+      }
+      
       setScheduleCreationStatus({
         isCreating: false,
         success: false,
-        message: '❌ Failed to add medication. Please try again.'
+        message: statusMessage
       });
-      throw error; // Re-throw to let the component handle the error
+      
+      throw enhancedError; // Re-throw to let the component handle the error
     } finally {
       setIsLoadingMedications(false);
     }
@@ -383,20 +552,138 @@ export default function Medications() {
   const handleUpdateMedication = async (id: string, updates: Partial<Medication>) => {
     try {
       setIsLoadingMedications(true);
-      const response = await apiClient.put<{ success: boolean; data: Medication }>(
-        API_ENDPOINTS.MEDICATION_BY_ID(id),
-        updates
-      );
       
-      if (response.success && response.data) {
-        // Parse date strings back to Date objects for the updated medication
+      // Map legacy frequency to unified format
+      const mapFrequencyToUnified = (frequency: string): 'daily' | 'twice_daily' | 'three_times_daily' | 'four_times_daily' | 'weekly' | 'monthly' | 'as_needed' => {
+        const freq = frequency.toLowerCase();
+        if (freq.includes('twice') || freq.includes('bid')) return 'twice_daily';
+        if (freq.includes('three') || freq.includes('tid')) return 'three_times_daily';
+        if (freq.includes('four') || freq.includes('qid')) return 'four_times_daily';
+        if (freq.includes('weekly')) return 'weekly';
+        if (freq.includes('monthly')) return 'monthly';
+        if (freq.includes('needed') || freq.includes('prn')) return 'as_needed';
+        return 'daily';
+      };
+
+      // Get default times for frequency if reminderTimes not provided
+      const getDefaultTimesForFrequency = (frequency: string): string[] => {
+        switch (frequency) {
+          case 'daily':
+            return ['08:00'];
+          case 'twice_daily':
+            return ['08:00', '20:00'];
+          case 'three_times_daily':
+            return ['08:00', '14:00', '20:00'];
+          case 'four_times_daily':
+            return ['08:00', '12:00', '16:00', '20:00'];
+          case 'as_needed':
+            return [];
+          default:
+            return ['08:00'];
+        }
+      };
+
+      // Determine schedule times: use provided reminderTimes or defaults based on frequency
+      let scheduleTimes: string[] | undefined;
+      if (updates.reminderTimes !== undefined) {
+        // If reminderTimes is explicitly provided (even if empty array), use it
+        scheduleTimes = updates.reminderTimes.length > 0 ? updates.reminderTimes : undefined;
+        // If reminderTimes are provided, automatically enable reminders
+        if (scheduleTimes && scheduleTimes.length > 0 && updates.hasReminders === undefined) {
+          updates.hasReminders = true;
+        }
+      } else if (updates.frequency) {
+        // If frequency is provided but no reminderTimes, use defaults
+        const unifiedFreq = mapFrequencyToUnified(updates.frequency);
+        scheduleTimes = getDefaultTimesForFrequency(unifiedFreq);
+      }
+
+      // Map legacy updates to unified format
+      const unifiedUpdates: any = {
+        medicationData: {},
+        scheduleData: {},
+        reminderSettings: {},
+        status: {}
+      };
+
+      // Only include fields that are actually being updated
+      if (updates.name !== undefined) unifiedUpdates.medicationData.name = updates.name;
+      if (updates.dosage !== undefined) unifiedUpdates.medicationData.dosage = updates.dosage;
+      if (updates.instructions !== undefined) unifiedUpdates.medicationData.instructions = updates.instructions;
+      if (updates.prescribedBy !== undefined) unifiedUpdates.medicationData.prescribedBy = updates.prescribedBy;
+
+      // Schedule data
+      if (updates.frequency !== undefined) {
+        unifiedUpdates.scheduleData.frequency = mapFrequencyToUnified(updates.frequency);
+      }
+      if (scheduleTimes !== undefined) {
+        unifiedUpdates.scheduleData.times = scheduleTimes;
+      }
+      if (updates.startDate !== undefined) unifiedUpdates.scheduleData.startDate = updates.startDate;
+      if (updates.endDate !== undefined) unifiedUpdates.scheduleData.endDate = updates.endDate;
+
+      // Reminder settings
+      if (updates.hasReminders !== undefined) {
+        unifiedUpdates.reminderSettings.enabled = updates.hasReminders;
+        // Include reminder settings only if reminders are enabled
+        if (updates.hasReminders) {
+          unifiedUpdates.reminderSettings.minutesBefore = [15, 5];
+          unifiedUpdates.reminderSettings.notificationMethods = ['browser', 'push'];
+        }
+      }
+
+      // Status
+      if (updates.isActive !== undefined) unifiedUpdates.status.isActive = updates.isActive;
+      if (updates.isPRN !== undefined) unifiedUpdates.status.isPRN = updates.isPRN;
+
+      // Remove empty objects to avoid sending unnecessary data
+      if (Object.keys(unifiedUpdates.medicationData).length === 0) delete unifiedUpdates.medicationData;
+      if (Object.keys(unifiedUpdates.scheduleData).length === 0) delete unifiedUpdates.scheduleData;
+      if (Object.keys(unifiedUpdates.reminderSettings).length === 0) delete unifiedUpdates.reminderSettings;
+      if (Object.keys(unifiedUpdates.status).length === 0) delete unifiedUpdates.status;
+
+      console.log('🔍 [Medications] Updating medication with unified format:', {
+        id,
+        unifiedUpdates,
+        originalUpdates: updates
+      });
+
+      const response = await unifiedMedicationApi.updateMedication(id, unifiedUpdates, {
+        reason: 'Updated by user from medications page'
+      });
+      
+      if (response.success && response.data?.command) {
+        // Convert unified format back to legacy format for compatibility
+        const unifiedCommand = response.data.command;
         const medicationWithDates = {
-          ...response.data,
-          prescribedDate: new Date(response.data.prescribedDate),
-          startDate: response.data.startDate ? new Date(response.data.startDate) : undefined,
-          endDate: response.data.endDate ? new Date(response.data.endDate) : undefined,
-          createdAt: new Date(response.data.createdAt),
-          updatedAt: new Date(response.data.updatedAt),
+          id: unifiedCommand.id,
+          patientId: unifiedCommand.patientId,
+          name: unifiedCommand.medication.name,
+          genericName: unifiedCommand.medication.genericName,
+          brandName: unifiedCommand.medication.brandName,
+          rxcui: unifiedCommand.medication.rxcui,
+          dosage: unifiedCommand.medication.dosage,
+          strength: unifiedCommand.medication.strength,
+          dosageForm: unifiedCommand.medication.dosageForm,
+          route: unifiedCommand.medication.route,
+          instructions: unifiedCommand.medication.instructions,
+          prescribedBy: unifiedCommand.medication.prescribedBy,
+          prescribedDate: unifiedCommand.medication.prescribedDate || new Date(),
+          startDate: unifiedCommand.schedule.startDate,
+          endDate: unifiedCommand.schedule.endDate,
+          isActive: unifiedCommand.status.isActive,
+          isPRN: unifiedCommand.status.isPRN,
+          maxDailyDose: unifiedCommand.medication.maxDailyDose,
+          sideEffects: unifiedCommand.medication.sideEffects,
+          notes: unifiedCommand.medication.notes,
+          pharmacy: unifiedCommand.medication.pharmacy,
+          prescriptionNumber: unifiedCommand.medication.prescriptionNumber,
+          refillsRemaining: unifiedCommand.medication.refillsRemaining,
+          hasReminders: unifiedCommand.reminders.enabled,
+          reminderTimes: unifiedCommand.schedule.times,
+          frequency: mapUnifiedFrequencyToLegacy(unifiedCommand.schedule.frequency),
+          createdAt: unifiedCommand.metadata.createdAt,
+          updatedAt: unifiedCommand.metadata.updatedAt,
         };
         setMedications(prev =>
           prev.map(med =>
@@ -404,6 +691,10 @@ export default function Medications() {
           )
         );
         showSuccess('Medication updated successfully!');
+        
+        // Clear cache to force fresh fetch after mutation
+        clearRequestCache('medications_list');
+        await loadMedications();
       }
     } catch (error) {
       console.error('Error updating medication:', error);
@@ -425,12 +716,15 @@ export default function Medications() {
       if (response.success) {
         console.log('✅ Medication deleted successfully with cascade cleanup');
 
+        // Clear cache to force fresh fetch after mutation
+        clearRequestCache('medications_list');
+
         // Update local state immediately
         setMedications(prev => prev.filter(med => med.id !== id));
 
         showSuccess('Medication deleted successfully!');
 
-        // Force immediate refresh to ensure UI is in sync
+        // Force immediate refresh to ensure UI is in sync - cache is cleared so this will force a fresh fetch
         await loadMedications();
 
         // Refresh related data

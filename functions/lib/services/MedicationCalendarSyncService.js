@@ -2,7 +2,8 @@
 /**
  * MedicationCalendarSyncService
  *
- * Syncs medication events from medication_calendar_events to medical_events collection
+ * MIGRATED TO UNIFIED SYSTEM
+ * Now syncs medication events from medication_events (unified) to medical_events collection
  * for unified calendar view integration.
  *
  * Responsibilities:
@@ -60,7 +61,8 @@ class MedicationCalendarSyncService {
     }
     get medicationEventsCollection() {
         if (!this._medicationEventsCollection) {
-            this._medicationEventsCollection = this.firestore.collection('medication_calendar_events');
+            // Now uses unified medication_events collection
+            this._medicationEventsCollection = this.firestore.collection('medication_events');
         }
         return this._medicationEventsCollection;
     }
@@ -84,17 +86,19 @@ class MedicationCalendarSyncService {
         };
         try {
             console.log('📅 MedicationCalendarSync: Starting sync for patient:', options.patientId);
-            // Build query for medication events
+            // Build query for medication events from unified system
+            // Only sync dose_scheduled events to calendar
             let query = this.medicationEventsCollection
-                .where('patientId', '==', options.patientId);
+                .where('patientId', '==', options.patientId)
+                .where('eventType', '==', 'dose_scheduled');
             if (options.startDate) {
-                query = query.where('scheduledDateTime', '>=', admin.firestore.Timestamp.fromDate(options.startDate));
+                query = query.where('timing.scheduledFor', '>=', admin.firestore.Timestamp.fromDate(options.startDate));
             }
             if (options.endDate) {
-                query = query.where('scheduledDateTime', '<=', admin.firestore.Timestamp.fromDate(options.endDate));
+                query = query.where('timing.scheduledFor', '<=', admin.firestore.Timestamp.fromDate(options.endDate));
             }
             if (options.medicationId) {
-                query = query.where('medicationId', '==', options.medicationId);
+                query = query.where('commandId', '==', options.medicationId);
             }
             const medicationEventsSnapshot = await query.get();
             console.log(`📊 Found ${medicationEventsSnapshot.docs.length} medication events to sync`);
@@ -163,21 +167,24 @@ class MedicationCalendarSyncService {
      * Create a medical event from medication event
      */
     async createMedicalEvent(medicalEventId, medicationEvent) {
-        const scheduledDateTime = medicationEvent.scheduledDateTime?.toDate?.() || new Date(medicationEvent.scheduledDateTime);
+        // Extract data from unified medication event structure
+        const scheduledDateTime = medicationEvent.timing?.scheduledFor?.toDate?.() ||
+            medicationEvent.eventData?.scheduledDateTime?.toDate?.() ||
+            new Date();
         const duration = 5; // 5 minutes for medication reminder
         const endDateTime = new Date(scheduledDateTime.getTime() + duration * 60 * 1000);
         const medicalEvent = {
-            // Link to medication event
+            // Link to medication event (unified system)
             medicationEventId: medicationEvent.id || medicalEventId.replace('med_', ''),
-            medicationId: medicationEvent.medicationId,
-            medicationScheduleId: medicationEvent.medicationScheduleId,
+            medicationId: medicationEvent.commandId, // commandId is the medication ID in unified system
+            medicationScheduleId: medicationEvent.context?.scheduleId,
             // Basic event information
             patientId: medicationEvent.patientId,
-            title: `${medicationEvent.medicationName} - ${medicationEvent.dosageAmount}`,
-            description: medicationEvent.instructions || `Take ${medicationEvent.dosageAmount}`,
+            title: `${medicationEvent.context?.medicationName || 'Medication'} - ${medicationEvent.eventData?.dosageAmount || 'Dose'}`,
+            description: medicationEvent.eventData?.actionNotes || `Take ${medicationEvent.eventData?.dosageAmount || 'medication'}`,
             eventType: 'medication_reminder',
             priority: this.determinePriority(medicationEvent),
-            status: this.mapMedicationStatusToEventStatus(medicationEvent.status),
+            status: this.mapMedicationEventTypeToStatus(medicationEvent.eventType),
             // Date and time
             startDateTime: admin.firestore.Timestamp.fromDate(scheduledDateTime),
             endDateTime: admin.firestore.Timestamp.fromDate(endDateTime),
@@ -185,15 +192,15 @@ class MedicationCalendarSyncService {
             isAllDay: false,
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             // Medication-specific data
-            medications: [medicationEvent.medicationName],
-            specialInstructions: medicationEvent.instructions || undefined,
+            medications: [medicationEvent.context?.medicationName || 'Unknown'],
+            specialInstructions: medicationEvent.eventData?.actionNotes || undefined,
             // Family responsibility (not applicable for medication reminders)
             requiresTransportation: false,
             responsibilityStatus: 'unassigned',
             // Recurring information
-            isRecurring: medicationEvent.isRecurring || false,
+            isRecurring: false, // Unified system handles recurrence differently
             // Reminders
-            reminders: (medicationEvent.reminderMinutesBefore || [15, 5]).map((minutes, index) => ({
+            reminders: [15, 5].map((minutes, index) => ({
                 id: `reminder_${index}`,
                 type: 'push',
                 minutesBefore: minutes,
@@ -201,31 +208,34 @@ class MedicationCalendarSyncService {
             })),
             // Sync metadata
             syncedFromMedicationCalendar: true,
+            syncedFromUnifiedSystem: true, // New flag to indicate unified system source
             lastSyncedAt: admin.firestore.Timestamp.now(),
             // Audit trail
             createdBy: medicationEvent.patientId,
-            createdAt: medicationEvent.createdAt || admin.firestore.Timestamp.now(),
+            createdAt: medicationEvent.metadata?.createdAt || admin.firestore.Timestamp.now(),
             updatedAt: admin.firestore.Timestamp.now(),
             version: 1
         };
         await this.medicalEventsCollection.doc(medicalEventId).set(medicalEvent);
-        console.log('✅ Created medical event:', medicalEventId, 'for medication:', medicationEvent.medicationName);
+        console.log('✅ Created medical event:', medicalEventId, 'for medication:', medicationEvent.context?.medicationName);
     }
     /**
      * Update an existing medical event from medication event
      */
     async updateMedicalEvent(medicalEventId, medicationEvent) {
-        const scheduledDateTime = medicationEvent.scheduledDateTime?.toDate?.() || new Date(medicationEvent.scheduledDateTime);
+        const scheduledDateTime = medicationEvent.timing?.scheduledFor?.toDate?.() ||
+            medicationEvent.eventData?.scheduledDateTime?.toDate?.() ||
+            new Date();
         const duration = 5;
         const endDateTime = new Date(scheduledDateTime.getTime() + duration * 60 * 1000);
         const updates = {
-            title: `${medicationEvent.medicationName} - ${medicationEvent.dosageAmount}`,
-            description: medicationEvent.instructions || `Take ${medicationEvent.dosageAmount}`,
-            status: this.mapMedicationStatusToEventStatus(medicationEvent.status),
+            title: `${medicationEvent.context?.medicationName || 'Medication'} - ${medicationEvent.eventData?.dosageAmount || 'Dose'}`,
+            description: medicationEvent.eventData?.actionNotes || `Take ${medicationEvent.eventData?.dosageAmount || 'medication'}`,
+            status: this.mapMedicationEventTypeToStatus(medicationEvent.eventType),
             priority: this.determinePriority(medicationEvent),
             startDateTime: admin.firestore.Timestamp.fromDate(scheduledDateTime),
             endDateTime: admin.firestore.Timestamp.fromDate(endDateTime),
-            specialInstructions: medicationEvent.instructions || undefined,
+            specialInstructions: medicationEvent.eventData?.actionNotes || undefined,
             lastSyncedAt: admin.firestore.Timestamp.now(),
             updatedAt: admin.firestore.Timestamp.now(),
             version: admin.firestore.FieldValue.increment(1)
@@ -238,39 +248,36 @@ class MedicationCalendarSyncService {
      */
     needsUpdate(existingEvent, medicationEvent) {
         const existingScheduledTime = existingEvent.startDateTime?.toDate?.()?.getTime();
-        const newScheduledTime = medicationEvent.scheduledDateTime?.toDate?.()?.getTime() ||
-            new Date(medicationEvent.scheduledDateTime).getTime();
-        // Update if time changed or status changed
+        const newScheduledTime = medicationEvent.timing?.scheduledFor?.toDate?.()?.getTime() ||
+            medicationEvent.eventData?.scheduledDateTime?.toDate?.()?.getTime() ||
+            new Date().getTime();
+        // Update if time changed or event type changed
         return existingScheduledTime !== newScheduledTime ||
-            existingEvent.status !== this.mapMedicationStatusToEventStatus(medicationEvent.status);
+            existingEvent.status !== this.mapMedicationEventTypeToStatus(medicationEvent.eventType);
     }
     /**
-     * Map medication event status to medical event status
+     * Map medication event type to medical event status (unified system)
      */
-    mapMedicationStatusToEventStatus(medicationStatus) {
+    mapMedicationEventTypeToStatus(eventType) {
         const statusMap = {
-            'scheduled': 'scheduled',
-            'taken': 'completed',
-            'missed': 'cancelled',
-            'skipped': 'cancelled',
-            'late': 'completed',
-            'snoozed': 'scheduled'
+            'dose_scheduled': 'scheduled',
+            'dose_taken': 'completed',
+            'dose_missed': 'cancelled',
+            'dose_skipped': 'cancelled',
+            'dose_snoozed': 'scheduled'
         };
-        return statusMap[medicationStatus] || 'scheduled';
+        return statusMap[eventType] || 'scheduled';
     }
     /**
      * Determine priority based on medication event
      */
     determinePriority(medicationEvent) {
-        // Critical medications get high priority
-        if (medicationEvent.isCritical || medicationEvent.status === 'overdue') {
-            return 'high';
-        }
-        // Missed medications get urgent priority
-        if (medicationEvent.status === 'missed') {
+        // Check event type for priority (unified system)
+        if (medicationEvent.eventType === 'dose_missed') {
             return 'urgent';
         }
-        // Default to medium priority
+        // Check if medication is critical (would need to query command for this)
+        // For now, default to medium priority
         return 'medium';
     }
     /**
@@ -293,10 +300,10 @@ class MedicationCalendarSyncService {
                 if (!medicationEventId) {
                     continue;
                 }
-                // Check if corresponding medication event still exists
+                // Check if corresponding medication event still exists in unified system
                 const medicationEventDoc = await this.medicationEventsCollection.doc(medicationEventId).get();
                 if (!medicationEventDoc.exists) {
-                    // Medication event was deleted, remove medical event
+                    // Medication event was deleted from unified system, remove medical event
                     batch.delete(medicalEventDoc.ref);
                     batchCount++;
                     deleted++;
@@ -370,9 +377,10 @@ class MedicationCalendarSyncService {
      */
     async getSyncStatus(patientId) {
         try {
-            // Count total medication events
+            // Count total medication events (dose_scheduled only for calendar sync)
             const medicationEventsQuery = await this.medicationEventsCollection
                 .where('patientId', '==', patientId)
+                .where('eventType', '==', 'dose_scheduled')
                 .get();
             const totalMedicationEvents = medicationEventsQuery.docs.length;
             // Count synced medical events
@@ -439,8 +447,8 @@ class MedicationCalendarSyncService {
                 // Event not synced yet, sync it now
                 return this.syncSingleMedicationEvent(medicationEventId);
             }
-            // Update status
-            const mappedStatus = this.mapMedicationStatusToEventStatus(newStatus);
+            // Map event type to status (unified system uses event types, not status strings)
+            const mappedStatus = this.mapMedicationEventTypeToStatus(newStatus);
             await medicalEventDoc.ref.update({
                 status: mappedStatus,
                 lastSyncedAt: admin.firestore.Timestamp.now(),

@@ -1,9 +1,9 @@
 /**
  * Unified Medication API Client
- * 
+ *
  * Frontend adapter for the unified medication data flow.
  * Replaces the fragmented medicationCalendarApi with a clean, unified interface.
- * 
+ *
  * Key Features:
  * - Single source of truth for medication data
  * - Event-driven architecture
@@ -11,12 +11,43 @@
  * - Simplified API surface
  * - Backward compatibility during transition
  * - Flexible time scheduling capabilities
+ * - Enhanced error handling and logging
  */
 
 import type { ApiResponse } from '@shared/types';
 import { getIdToken, validateAuthState } from './firebase';
+import { deepStripUndefined } from '@shared/utils/serialization';
 
 const API_BASE = 'https://us-central1-claritystream-uldp9.cloudfunctions.net/api';
+
+// Enhanced error types for better error handling
+export class ValidationError extends Error {
+  constructor(message: string, public fieldErrors?: Record<string, string>) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
+
+export class NetworkError extends Error {
+  constructor(message: string, public originalError?: any) {
+    super(message);
+    this.name = 'NetworkError';
+  }
+}
+
+export class ServerError extends Error {
+  constructor(message: string, public statusCode?: number, public details?: any) {
+    super(message);
+    this.name = 'ServerError';
+  }
+}
+
+export class TimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TimeoutError';
+  }
+}
 
 // ===== UNIFIED TYPES =====
 
@@ -252,18 +283,146 @@ export interface TimeBucketStatus {
   nextDueTime?: string;
 }
 
-// ===== AUTHENTICATION HELPER =====
+// ===== HELPER FUNCTIONS =====
 
+/**
+ * Parse error response and throw appropriate error type
+ */
+function parseErrorResponse(error: any, response?: Response): never {
+  console.error('🔍 [API Client] Parsing error response:', { error, status: response?.status });
+  
+  // Network errors
+  if (error.name === 'TypeError' && error.message.includes('fetch')) {
+    throw new NetworkError('Network request failed. Please check your internet connection.', error);
+  }
+  
+  // Timeout errors
+  if (error.name === 'AbortError' || error.message?.includes('timeout')) {
+    throw new TimeoutError('Request timed out. Please try again.');
+  }
+  
+  // Server errors (5xx)
+  if (response && response.status >= 500) {
+    throw new ServerError(
+      error.error || 'Server error occurred. Please try again later.',
+      response.status,
+      error
+    );
+  }
+  
+  // Validation errors (400, 422)
+  if (response && (response.status === 400 || response.status === 422)) {
+    throw new ValidationError(
+      error.error || 'Validation failed',
+      error.fieldErrors || error.validation
+    );
+  }
+  
+  // Authentication errors (401)
+  if (response && response.status === 401) {
+    throw new ValidationError('Authentication required. Please log in again.');
+  }
+  
+  // Permission errors (403)
+  if (response && response.status === 403) {
+    throw new ValidationError('You do not have permission to perform this action.');
+  }
+  
+  // Generic error
+  throw new Error(error.error || error.message || 'An unexpected error occurred');
+}
+
+/**
+ * Make API request with timeout and enhanced error handling
+ */
+async function makeRequest<T>(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number = 30000
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
+  try {
+    console.log(`🌐 [API Client] Making request to: ${url}`, {
+      method: options.method,
+      timeout: `${timeoutMs}ms`
+    });
+    
+    const startTime = performance.now();
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    const endTime = performance.now();
+    
+    console.log(`📊 [API Client] Response received:`, {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+      responseTime: `${(endTime - startTime).toFixed(2)}ms`
+    });
+    
+    clearTimeout(timeoutId);
+    
+    // Parse response
+    const result = await response.json();
+    
+    // Log response details
+    console.log(`📦 [API Client] Response data:`, {
+      success: result.success,
+      hasData: !!result.data,
+      hasError: !!result.error,
+      dataKeys: result.data ? Object.keys(result.data) : []
+    });
+    
+    if (!response.ok) {
+      parseErrorResponse(result, response);
+    }
+    
+    return result;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    
+    // Handle abort/timeout
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error('⏱️ [API Client] Request timed out');
+      throw new TimeoutError(`Request timed out after ${timeoutMs}ms`);
+    }
+    
+    // Re-throw our custom errors
+    if (error instanceof ValidationError ||
+        error instanceof NetworkError ||
+        error instanceof ServerError ||
+        error instanceof TimeoutError) {
+      throw error;
+    }
+    
+    // Handle network errors
+    if (error instanceof TypeError) {
+      console.error('🌐 [API Client] Network error:', error);
+      throw new NetworkError('Network request failed. Please check your connection.', error);
+    }
+    
+    // Generic error
+    console.error('❌ [API Client] Unexpected error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get authentication headers
+ */
 async function getAuthHeaders(): Promise<HeadersInit> {
   try {
     const authValidation = await validateAuthState();
     if (!authValidation.isValid) {
-      throw new Error(authValidation.error || 'Authentication required');
+      throw new ValidationError(authValidation.error || 'Authentication required');
     }
 
     const token = await getIdToken();
     if (!token) {
-      throw new Error('Failed to obtain authentication token');
+      throw new ValidationError('Failed to obtain authentication token');
     }
 
     return {
@@ -271,7 +430,7 @@ async function getAuthHeaders(): Promise<HeadersInit> {
       'Authorization': `Bearer ${token}`
     };
   } catch (error) {
-    console.error('🔐 Error preparing auth headers:', error);
+    console.error('🔐 [API Client] Error preparing auth headers:', error);
     throw error;
   }
 }
@@ -309,11 +468,37 @@ export class UnifiedMedicationApi {
     };
   }>> {
     try {
-      console.log('🚀 UnifiedMedicationApi: Creating medication:', medicationData.name);
+      console.log('🚀 [API Client] Creating medication:', {
+        name: medicationData.name,
+        timestamp: new Date().toISOString()
+      });
+
+      console.log('🔍 [API Client] Input validation:', {
+        name: medicationData.name,
+        frequency: medicationData.frequency,
+        frequencyType: typeof medicationData.frequency,
+        hasReminders: medicationData.hasReminders,
+        reminderTimes: medicationData.reminderTimes,
+        reminderTimesIsArray: Array.isArray(medicationData.reminderTimes),
+        reminderTimesLength: medicationData.reminderTimes?.length,
+        usePatientTimePreferences: medicationData.usePatientTimePreferences
+      });
 
       const headers = await getAuthHeaders();
       
+      // Map frequency BEFORE using it
+      const mappedFrequency = this.mapFrequencyToUnified(medicationData.frequency);
+      console.log('🔍 [API Client] Frequency mapping:', {
+        original: medicationData.frequency,
+        mapped: mappedFrequency
+      });
+      
       // Map legacy data to unified structure
+      // CRITICAL: Always provide times array - use defaults if empty
+      const times = medicationData.reminderTimes && medicationData.reminderTimes.length > 0
+        ? medicationData.reminderTimes
+        : this.getDefaultTimesForFrequency(mappedFrequency);
+      
       const requestData = {
         medicationData: {
           name: medicationData.name,
@@ -324,12 +509,13 @@ export class UnifiedMedicationApi {
           prescribedDate: medicationData.prescribedDate
         },
         scheduleData: {
-          frequency: this.mapFrequencyToUnified(medicationData.frequency),
-          times: medicationData.reminderTimes,
+          frequency: mappedFrequency,
+          times: times, // ALWAYS provide times array
           startDate: medicationData.startDate || new Date(),
-          endDate: medicationData.endDate,
+          ...(medicationData.endDate ? { endDate: medicationData.endDate } : {}),
           dosageAmount: medicationData.dosage,
-          usePatientTimePreferences: medicationData.usePatientTimePreferences ?? true
+          usePatientTimePreferences: medicationData.usePatientTimePreferences ?? true,
+          flexibleScheduling: false // Explicitly set default to prevent undefined
         },
         reminderSettings: {
           enabled: medicationData.hasReminders ?? true,
@@ -338,30 +524,62 @@ export class UnifiedMedicationApi {
         },
         notifyFamily: false
       };
+      
+      // Strip undefined values before sending to Firestore
+      const cleanedRequestData = deepStripUndefined(requestData);
 
-      const response = await fetch(`${API_BASE}/unified-medication/medication-commands`, {
+      console.log('📤 [API Client] Request payload:', {
+        endpoint: '/unified-medication/medication-commands',
+        method: 'POST',
+        scheduleFrequency: requestData.scheduleData.frequency,
+        scheduleTimes: requestData.scheduleData.times,
+        usePatientPrefs: requestData.scheduleData.usePatientTimePreferences,
+        remindersEnabled: requestData.reminderSettings.enabled
+      });
+
+      const endpoint = `${API_BASE}/unified-medication/medication-commands`;
+      
+      // Use enhanced request handler with timeout
+      const result = await makeRequest<ApiResponse<{
+        command: UnifiedMedicationCommand;
+        workflow: {
+          workflowId: string;
+          correlationId: string;
+          eventsCreated: number;
+          notificationsSent: number;
+          executionTimeMs: number;
+        };
+      }>>(endpoint, {
         method: 'POST',
         headers,
         credentials: 'include',
-        body: JSON.stringify(requestData)
+        body: JSON.stringify(cleanedRequestData)
+      }, 30000); // 30 second timeout
+
+      console.log('✅ [API Client] Medication created successfully:', {
+        commandId: result.data?.id || result.data?.command?.id,
+        timestamp: result.data?.timestamp,
+        hasFullCommand: !!result.data?.command,
+        workflowId: result.data?.workflow?.workflowId,
+        eventsCreated: result.data?.workflow?.eventsCreated
       });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || `HTTP ${response.status}`);
-      }
-
-      console.log('✅ Medication created successfully:', result.data?.id);
 
       return result;
 
     } catch (error) {
-      console.error('❌ Error creating medication:', error);
+      console.error('❌ [API Client] Error creating medication:', {
+        error,
+        errorType: error instanceof Error ? error.constructor.name : typeof error,
+        message: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString()
+      });
+      
+      // Return structured error response
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to create medication'
-      };
+        error: error instanceof Error ? error.message : 'Failed to create medication',
+        ...(error instanceof ValidationError && error.fieldErrors ? { fieldErrors: error.fieldErrors } : {})
+      } as ApiResponse<any>;
     }
   }
 
@@ -1210,6 +1428,267 @@ export class UnifiedMedicationApi {
   }
 
   /**
+   * Update a medication
+   */
+  async updateMedication(
+    commandId: string,
+    updates: Partial<{
+      medicationData: Partial<{
+        name: string;
+        genericName?: string;
+        brandName?: string;
+        rxcui?: string;
+        dosage: string;
+        strength?: string;
+        dosageForm?: string;
+        route?: string;
+        instructions?: string;
+        prescribedBy?: string;
+        prescribedDate?: Date;
+        pharmacy?: string;
+        prescriptionNumber?: string;
+        refillsRemaining?: number;
+        maxDailyDose?: string;
+        sideEffects?: string[];
+        notes?: string;
+      }>;
+      scheduleData: Partial<{
+        frequency: 'daily' | 'twice_daily' | 'three_times_daily' | 'four_times_daily' | 'weekly' | 'monthly' | 'as_needed';
+        times: string[];
+        daysOfWeek?: number[];
+        dayOfMonth?: number;
+        startDate: Date;
+        endDate?: Date;
+        isIndefinite: boolean;
+        dosageAmount: string;
+        scheduleInstructions?: string;
+      }>;
+      reminderSettings: Partial<{
+        enabled: boolean;
+        minutesBefore: number[];
+        notificationMethods: ('email' | 'sms' | 'push' | 'browser')[];
+        quietHours?: {
+          start: string;
+          end: string;
+          enabled: boolean;
+        };
+      }>;
+      status: Partial<{
+        current: 'active' | 'paused' | 'held' | 'discontinued' | 'completed';
+        isActive: boolean;
+        isPRN: boolean;
+        pausedUntil?: Date;
+        holdReason?: string;
+        discontinueReason?: string;
+        discontinueDate?: Date;
+      }>;
+      preferences: Partial<{
+        timeSlot: 'morning' | 'lunch' | 'evening' | 'beforeBed' | 'custom';
+        customTime?: string;
+        packId?: string;
+        packPosition?: number;
+      }>;
+    }>,
+    options: {
+      reason?: string;
+      notifyFamily?: boolean;
+    } = {}
+  ): Promise<ApiResponse<{
+    command: UnifiedMedicationCommand;
+    workflow: {
+      workflowId: string;
+      correlationId: string;
+      eventsCreated: number;
+      notificationsSent: number;
+      executionTimeMs: number;
+    };
+  }>> {
+    try {
+      console.log('📝 [UnifiedMedicationApi] updateMedication called:', {
+        commandId,
+        updatesPayload: JSON.stringify(updates, null, 2),
+        hasScheduleData: !!updates.scheduleData,
+        hasReminderSettings: !!updates.reminderSettings,
+        scheduleTimes: updates.scheduleData?.times,
+        reminderEnabled: updates.reminderSettings?.enabled,
+        options
+      });
+
+      const headers = await getAuthHeaders();
+      
+      const requestData = {
+        updates,
+        reason: options.reason,
+        notifyFamily: options.notifyFamily || false
+      };
+
+      console.log('📤 [UnifiedMedicationApi] Sending PUT request:', {
+        url: `${API_BASE}/unified-medication/medication-commands/${commandId}`,
+        method: 'PUT',
+        requestBody: JSON.stringify(requestData, null, 2),
+        hasScheduleData: !!requestData.updates.scheduleData,
+        scheduleTimes: requestData.updates.scheduleData?.times,
+        hasReminderSettings: !!requestData.updates.reminderSettings
+      });
+
+      const response = await fetch(`${API_BASE}/unified-medication/medication-commands/${commandId}`, {
+        method: 'PUT',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify(requestData)
+      });
+
+      console.log('📥 [UnifiedMedicationApi] Response received:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok
+      });
+
+      const result = await response.json();
+
+      console.log('📥 [UnifiedMedicationApi] Response body:', {
+        success: result.success,
+        hasData: !!result.data,
+        hasCommand: !!result.data?.command,
+        hasWorkflow: !!result.data?.workflow,
+        workflowEventsDeleted: result.data?.workflow?.eventsDeleted,
+        workflowEventsCreated: result.data?.workflow?.eventsCreated,
+        error: result.error,
+        fullResponse: JSON.stringify(result, null, 2)
+      });
+
+      if (!response.ok) {
+        console.error('❌ [UnifiedMedicationApi] Update failed:', {
+          status: response.status,
+          error: result.error,
+          fullError: result
+        });
+        throw new Error(result.error || `HTTP ${response.status}`);
+      }
+
+      console.log('✅ [UnifiedMedicationApi] Medication updated successfully:', {
+        commandId: result.data?.command?.id,
+        scheduleTimes: result.data?.command?.schedule?.times,
+        remindersEnabled: result.data?.command?.reminders?.enabled,
+        eventsDeleted: result.data?.workflow?.eventsDeleted,
+        eventsCreated: result.data?.workflow?.eventsCreated
+      });
+
+      return result;
+
+    } catch (error) {
+      console.error('❌ Error updating medication:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update medication'
+      };
+    }
+  }
+
+  /**
+   * Create a medication schedule for an existing medication
+   * 
+   * @deprecated Schedules are now embedded in medications. Use updateMedication() with scheduleData instead.
+   * This method is kept for backward compatibility but internally uses updateMedication.
+   * 
+   * In the unified medication system, schedules are part of medication commands.
+   * When you need to add or update a schedule, update the medication with scheduleData.
+   */
+  async createMedicationSchedule(scheduleData: {
+    medicationId: string;
+    patientId: string;
+    frequency: 'daily' | 'twice_daily' | 'three_times_daily' | 'four_times_daily' | 'weekly' | 'monthly' | 'as_needed';
+    times: string[];
+    dosageAmount: string;
+    instructions?: string;
+    startDate?: Date;
+    endDate?: Date;
+    isIndefinite?: boolean;
+    generateCalendarEvents?: boolean;
+    reminderMinutesBefore?: number[];
+    isActive?: boolean;
+  }): Promise<ApiResponse<{
+    scheduleId: string;
+    medicationId: string;
+    patientId: string;
+    eventsCreated: number;
+    workflow: {
+      workflowId: string;
+      correlationId: string;
+      notificationsSent: number;
+      executionTimeMs: number;
+    };
+  }>> {
+    try {
+      console.warn('⚠️ createMedicationSchedule is deprecated. Use updateMedication() with scheduleData instead.');
+      console.log('📅 UnifiedMedicationApi: Creating medication schedule for:', scheduleData.medicationId);
+
+      // Convert to unified update format - schedules are embedded in medications
+      const updateResult = await this.updateMedication(
+        scheduleData.medicationId,
+        {
+          scheduleData: {
+            frequency: scheduleData.frequency,
+            times: scheduleData.times,
+            startDate: scheduleData.startDate || new Date(),
+            endDate: scheduleData.endDate,
+            isIndefinite: scheduleData.isIndefinite ?? true,
+            dosageAmount: scheduleData.dosageAmount,
+            scheduleInstructions: scheduleData.instructions
+          },
+          reminderSettings: {
+            enabled: true,
+            minutesBefore: scheduleData.reminderMinutesBefore ?? [15, 5]
+          },
+          status: {
+            isActive: scheduleData.isActive ?? true
+          }
+        },
+        {
+          reason: 'Creating schedule for existing medication via createMedicationSchedule (deprecated)',
+          notifyFamily: false
+        }
+      );
+
+      if (!updateResult.success) {
+        return {
+          success: false,
+          error: updateResult.error || 'Failed to create medication schedule'
+        };
+      }
+
+      // Map response to expected format for backward compatibility
+      const workflow = updateResult.data?.workflow || {
+        workflowId: '',
+        correlationId: '',
+        notificationsSent: 0,
+        executionTimeMs: 0
+      };
+
+      console.log('✅ Medication schedule created successfully via updateMedication');
+
+      return {
+        success: true,
+        data: {
+          scheduleId: scheduleData.medicationId, // In unified system, medication ID is the schedule ID
+          medicationId: scheduleData.medicationId,
+          patientId: scheduleData.patientId,
+          eventsCreated: workflow.eventsCreated || 0,
+          workflow
+        },
+        message: 'Medication schedule created successfully'
+      };
+
+    } catch (error) {
+      console.error('❌ Error creating medication schedule:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to create medication schedule'
+      };
+    }
+  }
+
+  /**
    * Delete a medication
    */
   async deleteMedication(
@@ -1286,6 +1765,26 @@ export class UnifiedMedicationApi {
     if (freq.includes('needed') || freq.includes('prn')) return 'as_needed';
     
     return 'daily';
+  }
+
+  /**
+   * Get default times for a given frequency
+   */
+  private getDefaultTimesForFrequency(frequency: string): string[] {
+    switch (frequency) {
+      case 'daily':
+        return ['08:00'];
+      case 'twice_daily':
+        return ['08:00', '20:00'];
+      case 'three_times_daily':
+        return ['08:00', '14:00', '20:00'];
+      case 'four_times_daily':
+        return ['08:00', '12:00', '16:00', '20:00'];
+      case 'as_needed':
+        return []; // PRN medications don't need scheduled times
+      default:
+        return ['08:00'];
+    }
   }
 
   /**

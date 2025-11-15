@@ -1,4 +1,9 @@
 "use strict";
+/**
+ * MIGRATED TO UNIFIED SYSTEM
+ * Now uses medication_events collection instead of legacy medication_calendar_events
+ * This service detects missed medications from the unified event sourcing system
+ */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -60,10 +65,11 @@ class MissedMedicationDetector {
             // Look back 24 hours to catch any that might have been missed
             const lookbackTime = new Date(now.getTime() - (24 * 60 * 60 * 1000));
             const queryStartTime = Date.now();
-            const overdueQuery = await this.firestore.collection('medication_calendar_events')
-                .where('status', '==', 'scheduled')
-                .where('scheduledDateTime', '<=', admin.firestore.Timestamp.fromDate(now))
-                .where('scheduledDateTime', '>=', admin.firestore.Timestamp.fromDate(lookbackTime))
+            // Query unified medication_events collection for scheduled doses
+            const overdueQuery = await this.firestore.collection('medication_events')
+                .where('eventType', '==', 'dose_scheduled')
+                .where('timing.scheduledFor', '<=', admin.firestore.Timestamp.fromDate(now))
+                .where('timing.scheduledFor', '>=', admin.firestore.Timestamp.fromDate(lookbackTime))
                 .limit(500) // Process in batches to avoid timeouts
                 .get();
             const queryTime = Date.now() - queryStartTime;
@@ -140,11 +146,12 @@ class MissedMedicationDetector {
             console.log('🔍 Starting missed medication detection for patient:', patientId);
             // Look back 24 hours for this specific patient
             const lookbackTime = new Date(now.getTime() - (24 * 60 * 60 * 1000));
-            const overdueQuery = await this.firestore.collection('medication_calendar_events')
+            // Query unified medication_events collection for this patient's scheduled doses
+            const overdueQuery = await this.firestore.collection('medication_events')
                 .where('patientId', '==', patientId)
-                .where('status', '==', 'scheduled')
-                .where('scheduledDateTime', '<=', admin.firestore.Timestamp.fromDate(now))
-                .where('scheduledDateTime', '>=', admin.firestore.Timestamp.fromDate(lookbackTime))
+                .where('eventType', '==', 'dose_scheduled')
+                .where('timing.scheduledFor', '<=', admin.firestore.Timestamp.fromDate(now))
+                .where('timing.scheduledFor', '>=', admin.firestore.Timestamp.fromDate(lookbackTime))
                 .get();
             console.log(`🔍 Found ${overdueQuery.docs.length} potentially overdue events for patient ${patientId}`);
             if (overdueQuery.docs.length > 0) {
@@ -168,46 +175,71 @@ class MissedMedicationDetector {
             try {
                 const event = doc.data();
                 results.processed++;
-                // Calculate grace period for this specific event
-                const gracePeriodCalc = await this.gracePeriodEngine.calculateGracePeriod(event, event.patientId, currentTime);
+                // Check if event already has grace period end time from unified system
+                const gracePeriodEnd = event.timing?.gracePeriodEnd?.toDate();
+                if (!gracePeriodEnd) {
+                    console.warn(`⚠️ Event ${doc.id} missing grace period end time, skipping`);
+                    results.errors.push(`Event ${doc.id}: Missing grace period end time`);
+                    return;
+                }
                 // Check if grace period has expired
-                if (currentTime > gracePeriodCalc.gracePeriodEnd) {
-                    // Mark as missed
-                    batch.update(doc.ref, {
-                        status: 'missed',
-                        missedAt: admin.firestore.Timestamp.now(),
-                        missedReason: 'automatic_detection',
-                        gracePeriodMinutes: gracePeriodCalc.gracePeriodMinutes,
-                        gracePeriodEnd: admin.firestore.Timestamp.fromDate(gracePeriodCalc.gracePeriodEnd),
-                        gracePeriodRules: gracePeriodCalc.appliedRules,
-                        updatedAt: admin.firestore.Timestamp.now()
+                if (currentTime > gracePeriodEnd) {
+                    // Create a dose_missed event in the unified system
+                    const missedEventId = `${event.commandId}_missed_${Date.now()}`;
+                    batch.set(this.firestore.collection('medication_events').doc(missedEventId), {
+                        id: missedEventId,
+                        commandId: event.commandId,
+                        patientId: event.patientId,
+                        eventType: 'dose_missed',
+                        eventData: {
+                            scheduledDateTime: event.timing?.scheduledFor,
+                            actionReason: 'automatic_detection',
+                            gracePeriodMinutes: event.eventData?.gracePeriodMinutes,
+                            gracePeriodEnd: event.timing?.gracePeriodEnd,
+                            appliedRules: event.eventData?.appliedRules || [],
+                            additionalData: {
+                                originalScheduledEventId: doc.id
+                            }
+                        },
+                        context: {
+                            medicationName: event.context?.medicationName || 'Unknown',
+                            scheduleId: event.context?.scheduleId,
+                            calendarEventId: event.context?.calendarEventId,
+                            triggerSource: 'system_detection'
+                        },
+                        timing: {
+                            eventTimestamp: admin.firestore.Timestamp.now(),
+                            scheduledFor: event.timing?.scheduledFor,
+                            gracePeriodEnd: event.timing?.gracePeriodEnd
+                        },
+                        metadata: {
+                            eventVersion: 1,
+                            createdAt: admin.firestore.Timestamp.now(),
+                            createdBy: 'system',
+                            correlationId: event.metadata?.correlationId || `corr_${Date.now()}`
+                        }
                     });
                     results.missed++;
                     // Add to batch results for reporting
                     results.batchResults?.push({
                         eventId: doc.id,
-                        medicationName: event.medicationName || 'Unknown',
+                        medicationName: event.context?.medicationName || 'Unknown',
                         patientId: event.patientId,
-                        gracePeriodMinutes: gracePeriodCalc.gracePeriodMinutes,
-                        gracePeriodEnd: gracePeriodCalc.gracePeriodEnd,
-                        appliedRules: gracePeriodCalc.appliedRules
+                        gracePeriodMinutes: event.eventData?.gracePeriodMinutes || 0,
+                        gracePeriodEnd: gracePeriodEnd,
+                        appliedRules: event.eventData?.appliedRules || []
                     });
                     // Queue for notification processing
                     notificationQueue.push({
                         eventId: doc.id,
                         event,
-                        gracePeriodCalc
+                        gracePeriodCalc: {
+                            gracePeriodMinutes: event.eventData?.gracePeriodMinutes || 0,
+                            gracePeriodEnd: gracePeriodEnd,
+                            appliedRules: event.eventData?.appliedRules || []
+                        }
                     });
-                    console.log(`📋 Marked as missed: ${event.medicationName} for patient ${event.patientId}`);
-                }
-                else {
-                    // Update with grace period info for future reference
-                    batch.update(doc.ref, {
-                        gracePeriodMinutes: gracePeriodCalc.gracePeriodMinutes,
-                        gracePeriodEnd: admin.firestore.Timestamp.fromDate(gracePeriodCalc.gracePeriodEnd),
-                        gracePeriodRules: gracePeriodCalc.appliedRules,
-                        updatedAt: admin.firestore.Timestamp.now()
-                    });
+                    console.log(`📋 Marked as missed: ${event.context?.medicationName} for patient ${event.patientId}`);
                 }
             }
             catch (error) {
@@ -336,24 +368,25 @@ class MissedMedicationDetector {
      */
     async getConsecutiveMissedCount(medicationId, patientId) {
         try {
-            // Get recent events for this medication, ordered by scheduled time descending
-            const recentEvents = await this.firestore.collection('medication_calendar_events')
-                .where('medicationId', '==', medicationId)
+            // Get recent events for this medication from unified system
+            const recentEvents = await this.firestore.collection('medication_events')
+                .where('commandId', '==', medicationId)
                 .where('patientId', '==', patientId)
-                .orderBy('scheduledDateTime', 'desc')
+                .where('eventType', 'in', ['dose_scheduled', 'dose_taken', 'dose_missed', 'dose_skipped'])
+                .orderBy('timing.scheduledFor', 'desc')
                 .limit(10)
                 .get();
             let consecutiveCount = 0;
             for (const doc of recentEvents.docs) {
                 const event = doc.data();
-                if (event.status === 'missed') {
+                if (event.eventType === 'dose_missed') {
                     consecutiveCount++;
                 }
-                else if (event.status === 'taken' || event.status === 'skipped') {
+                else if (event.eventType === 'dose_taken' || event.eventType === 'dose_skipped') {
                     // Break the consecutive streak
                     break;
                 }
-                // Continue counting for 'scheduled' events (they might become missed)
+                // Continue counting for 'dose_scheduled' events (they might become missed)
             }
             return consecutiveCount;
         }
@@ -412,7 +445,9 @@ class MissedMedicationDetector {
      */
     async markEventAsMissed(eventId, userId, reason = 'manual_mark') {
         try {
-            const eventDoc = await this.firestore.collection('medication_calendar_events').doc(eventId).get();
+            // Note: Manual marking should use the unified MedicationOrchestrator instead
+            // This method is kept for backward compatibility but should be deprecated
+            const eventDoc = await this.firestore.collection('medication_events').doc(eventId).get();
             if (!eventDoc.exists) {
                 return { success: false, error: 'Event not found' };
             }
@@ -457,18 +492,19 @@ class MissedMedicationDetector {
      */
     async getMissedMedications(patientId, startDate, endDate, limit = 50) {
         try {
-            let query = this.firestore.collection('medication_calendar_events')
+            // Query unified medication_events for missed doses
+            let query = this.firestore.collection('medication_events')
                 .where('patientId', '==', patientId)
-                .where('status', '==', 'missed');
+                .where('eventType', '==', 'dose_missed');
             // Add date filters if provided
             if (startDate) {
-                query = query.where('scheduledDateTime', '>=', admin.firestore.Timestamp.fromDate(startDate));
+                query = query.where('timing.scheduledFor', '>=', admin.firestore.Timestamp.fromDate(startDate));
             }
             if (endDate) {
-                query = query.where('scheduledDateTime', '<=', admin.firestore.Timestamp.fromDate(endDate));
+                query = query.where('timing.scheduledFor', '<=', admin.firestore.Timestamp.fromDate(endDate));
             }
             const missedSnapshot = await query
-                .orderBy('scheduledDateTime', 'desc')
+                .orderBy('timing.scheduledFor', 'desc')
                 .limit(limit)
                 .get();
             return missedSnapshot.docs.map(doc => {
@@ -476,11 +512,12 @@ class MissedMedicationDetector {
                 return {
                     id: doc.id,
                     ...data,
-                    scheduledDateTime: data.scheduledDateTime?.toDate(),
-                    missedAt: data.missedAt?.toDate(),
-                    gracePeriodEnd: data.gracePeriodEnd?.toDate(),
-                    createdAt: data.createdAt?.toDate(),
-                    updatedAt: data.updatedAt?.toDate()
+                    scheduledDateTime: data.timing?.scheduledFor?.toDate(),
+                    missedAt: data.timing?.eventTimestamp?.toDate(),
+                    gracePeriodEnd: data.timing?.gracePeriodEnd?.toDate(),
+                    medicationName: data.context?.medicationName,
+                    createdAt: data.metadata?.createdAt?.toDate(),
+                    updatedAt: data.metadata?.createdAt?.toDate()
                 };
             });
         }
@@ -505,15 +542,16 @@ class MissedMedicationDetector {
             let gracePeriodCount = 0;
             for (const event of missedEvents) {
                 // Count by medication
-                const medKey = event.medicationId;
+                const medKey = event.commandId || 'unknown';
+                const medName = event.medicationName || 'Unknown';
                 if (medicationCounts.has(medKey)) {
                     medicationCounts.get(medKey).count++;
                 }
                 else {
-                    medicationCounts.set(medKey, { name: event.medicationName, count: 1 });
+                    medicationCounts.set(medKey, { name: medName, count: 1 });
                 }
                 // Count by time slot (simplified classification)
-                const hour = event.scheduledDateTime.getHours();
+                const hour = event.scheduledDateTime?.getHours() || 0;
                 if (hour >= 6 && hour < 11)
                     timeSlotCounts.morning++;
                 else if (hour >= 11 && hour < 17)
@@ -523,11 +561,12 @@ class MissedMedicationDetector {
                 else
                     timeSlotCounts.bedtime++;
                 // Count reasons
-                const reason = event.missedReason || 'automatic_detection';
+                const reason = event.eventData?.actionReason || 'automatic_detection';
                 reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1);
                 // Calculate average grace period
-                if (event.gracePeriodMinutes) {
-                    totalGracePeriod += event.gracePeriodMinutes;
+                const gracePeriodMinutes = event.eventData?.gracePeriodMinutes;
+                if (gracePeriodMinutes) {
+                    totalGracePeriod += gracePeriodMinutes;
                     gracePeriodCount++;
                 }
             }

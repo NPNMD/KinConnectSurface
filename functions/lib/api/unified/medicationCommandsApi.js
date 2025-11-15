@@ -13,6 +13,12 @@
  * - /medications, /medication-schedules, /medication-reminders
  * - /medications/bulk-create-schedules, /medication-calendar/schedules
  * - Multiple medication status endpoints
+ *
+ * Enhanced with:
+ * - Structured error responses with error codes
+ * - Comprehensive logging with context
+ * - Field-specific validation errors
+ * - Performance timing and monitoring
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -59,7 +65,60 @@ const MedicationEventService_1 = require("../../services/unified/MedicationEvent
 const MedicationNotificationService_1 = require("../../services/unified/MedicationNotificationService");
 const AdherenceAnalyticsService_1 = require("../../services/unified/AdherenceAnalyticsService");
 const MedicationUndoService_1 = require("../../services/unified/MedicationUndoService");
+const medicationMonitoring_1 = require("../../utils/medicationMonitoring");
+const serialization_1 = require("../../utils/serialization");
 const router = express_1.default.Router();
+/**
+ * Create structured error response
+ */
+function createErrorResponse(code, message, details, fieldErrors) {
+    return {
+        code,
+        message,
+        details,
+        fieldErrors,
+        timestamp: new Date().toISOString(),
+        requestId: `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    };
+}
+/**
+ * Log request with context
+ */
+function logRequest(req, context = {}) {
+    console.log('📥 [API Request]', {
+        method: req.method,
+        path: req.path,
+        userId: req.user?.uid,
+        timestamp: new Date().toISOString(),
+        ...context
+    });
+}
+/**
+ * Log response with context
+ */
+function logResponse(statusCode, context = {}) {
+    const emoji = statusCode >= 500 ? '❌' : statusCode >= 400 ? '⚠️' : '✅';
+    console.log(`${emoji} [API Response]`, {
+        statusCode,
+        timestamp: new Date().toISOString(),
+        ...context
+    });
+}
+/**
+ * Validate required fields
+ */
+function validateRequiredFields(data, requiredFields) {
+    const fieldErrors = {};
+    for (const field of requiredFields) {
+        if (!data[field]) {
+            fieldErrors[field] = `${field} is required`;
+        }
+    }
+    return {
+        isValid: Object.keys(fieldErrors).length === 0,
+        fieldErrors: Object.keys(fieldErrors).length > 0 ? fieldErrors : undefined
+    };
+}
 // Lazy initialization to avoid Firebase Admin initialization order issues
 let orchestrator;
 let commandService;
@@ -93,49 +152,143 @@ function getUndoService() {
 /**
  * POST /medication-commands
  * Create a new medication with complete workflow
+ * Enhanced with performance monitoring
  */
 router.post('/', async (req, res) => {
+    const startTime = Date.now();
+    const requestId = `req_${startTime}_${Math.random().toString(36).substr(2, 9)}`;
+    const performanceTimer = new medicationMonitoring_1.PerformanceTimer('create', {
+        patientId: req.user?.uid,
+        endpoint: 'POST /medication-commands'
+    });
     try {
-        console.log('🚀 POST /medication-commands - Creating medication');
+        logRequest(req, { requestId, endpoint: 'POST /medication-commands' });
         const userId = req.user?.uid;
         if (!userId) {
+            const error = createErrorResponse('AUTH_REQUIRED', 'Authentication required', 'User must be authenticated to create medications');
+            logResponse(401, { requestId, error: error.code });
             return res.status(401).json({
                 success: false,
-                error: 'Authentication required'
+                error: error.message,
+                errorCode: error.code,
+                timestamp: error.timestamp
             });
         }
         const { medicationData, scheduleData, reminderSettings, notifyFamily = false } = req.body;
-        // Validation
-        if (!medicationData?.name || !scheduleData?.frequency) {
+        console.log('🔍 [Backend] Request payload:', {
+            requestId,
+            userId,
+            medicationName: medicationData?.name,
+            scheduleFrequency: scheduleData?.frequency,
+            hasFlexibleScheduling: !!scheduleData?.flexibleScheduling,
+            timestamp: new Date().toISOString()
+        });
+        // Enhanced validation with field-specific errors
+        const validation = validateRequiredFields({ medicationData, scheduleData }, ['medicationData', 'scheduleData']);
+        if (!validation.isValid) {
+            const error = createErrorResponse('VALIDATION_ERROR', 'Required fields are missing', 'Request must include medicationData and scheduleData', validation.fieldErrors);
+            logResponse(400, { requestId, error: error.code, fieldErrors: error.fieldErrors });
             return res.status(400).json({
                 success: false,
-                error: 'Medication name and schedule frequency are required'
+                error: error.message,
+                errorCode: error.code,
+                fieldErrors: error.fieldErrors,
+                timestamp: error.timestamp
             });
         }
-        // Execute complete medication creation workflow
-        const workflowResult = await getOrchestrator().createMedicationWorkflow({
+        // Validate medication data fields
+        const medicationValidation = validateRequiredFields(medicationData, ['name']);
+        const scheduleValidation = validateRequiredFields(scheduleData, ['frequency']);
+        if (!medicationValidation.isValid || !scheduleValidation.isValid) {
+            const fieldErrors = {
+                ...medicationValidation.fieldErrors,
+                ...scheduleValidation.fieldErrors
+            };
+            const error = createErrorResponse('VALIDATION_ERROR', 'Medication name and schedule frequency are required', 'Missing required fields in medication or schedule data', fieldErrors);
+            logResponse(400, { requestId, error: error.code, fieldErrors });
+            return res.status(400).json({
+                success: false,
+                error: error.message,
+                errorCode: error.code,
+                fieldErrors,
+                timestamp: error.timestamp
+            });
+        }
+        // Build scheduleData, filtering out undefined values for Firestore
+        const processedScheduleData = {
+            ...scheduleData,
+            times: scheduleData.times || ['07:00'], // Default time if not provided
+            startDate: scheduleData.startDate ? new Date(scheduleData.startDate) : new Date(),
+            dosageAmount: scheduleData.dosageAmount || medicationData.dosage || '1 tablet',
+            flexibleScheduling: scheduleData.flexibleScheduling ?? false // Explicitly set default to prevent undefined
+        };
+        // Only include optional fields if they have values
+        if (scheduleData.endDate) {
+            processedScheduleData.endDate = new Date(scheduleData.endDate);
+        }
+        if (scheduleData.computedSchedule) {
+            processedScheduleData.computedSchedule = {
+                ...scheduleData.computedSchedule,
+                lastComputedAt: scheduleData.computedSchedule.lastComputedAt
+                    ? new Date(scheduleData.computedSchedule.lastComputedAt)
+                    : undefined,
+                nextRecomputeAt: scheduleData.computedSchedule.nextRecomputeAt
+                    ? new Date(scheduleData.computedSchedule.nextRecomputeAt)
+                    : undefined
+            };
+        }
+        // Build the workflow request and strip undefined values
+        const workflowRequest = {
             patientId: userId,
-            medicationData,
-            scheduleData: {
-                ...scheduleData,
-                times: scheduleData.times || ['07:00'], // Default time if not provided
-                startDate: scheduleData.startDate ? new Date(scheduleData.startDate) : new Date(),
-                endDate: scheduleData.endDate ? new Date(scheduleData.endDate) : undefined,
-                dosageAmount: scheduleData.dosageAmount || medicationData.dosage || '1 tablet'
+            medicationData: {
+                ...medicationData,
+                // Convert prescribedDate string to Date object if present
+                prescribedDate: medicationData.prescribedDate
+                    ? new Date(medicationData.prescribedDate)
+                    : undefined
             },
+            scheduleData: processedScheduleData,
             reminderSettings,
             createdBy: userId,
             notifyFamily
-        });
+        };
+        // Strip undefined values before sending to Firestore
+        const cleanedWorkflowRequest = (0, serialization_1.deepStripUndefined)(workflowRequest);
+        // Execute complete medication creation workflow
+        const workflowResult = await getOrchestrator().createMedicationWorkflow(cleanedWorkflowRequest);
         if (!workflowResult.success) {
+            const error = createErrorResponse('WORKFLOW_ERROR', workflowResult.error || 'Failed to create medication workflow', { workflowId: workflowResult.workflowId });
+            logResponse(500, {
+                requestId,
+                error: error.code,
+                workflowId: workflowResult.workflowId,
+                executionTime: Date.now() - startTime
+            });
             return res.status(500).json({
                 success: false,
-                error: workflowResult.error,
-                workflowId: workflowResult.workflowId
+                error: error.message,
+                errorCode: error.code,
+                details: error.details,
+                timestamp: error.timestamp
             });
         }
         // Get the created command for response
         const commandResult = await getCommandService().getCommand(workflowResult.commandId);
+        const executionTime = Date.now() - startTime;
+        logResponse(201, {
+            requestId,
+            commandId: commandResult.data?.id,
+            workflowId: workflowResult.workflowId,
+            eventsCreated: workflowResult.eventIds.length,
+            executionTime
+        });
+        // Track performance metrics
+        await performanceTimer.end(true);
+        // Track medication creation specifically
+        await (0, medicationMonitoring_1.trackMedicationOperation)('create', userId, true, executionTime, commandResult.data?.id, medicationData.name, undefined, undefined, {
+            workflowId: workflowResult.workflowId,
+            eventsCreated: workflowResult.eventIds.length
+        });
         res.status(201).json({
             success: true,
             data: commandResult.data,
@@ -146,15 +299,34 @@ router.post('/', async (req, res) => {
                 notificationsSent: workflowResult.notificationsSent,
                 executionTimeMs: workflowResult.executionTimeMs
             },
-            message: 'Medication created successfully'
+            message: 'Medication created successfully',
+            requestId,
+            timestamp: new Date().toISOString()
         });
     }
     catch (error) {
-        console.error('❌ Error in POST /medication-commands:', error);
+        const executionTime = Date.now() - startTime;
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('❌ [Backend] Error in POST /medication-commands:', {
+            requestId,
+            error,
+            errorType: error instanceof Error ? error.constructor.name : typeof error,
+            message: errorMessage,
+            executionTime,
+            timestamp: new Date().toISOString()
+        });
+        const structuredError = createErrorResponse('INTERNAL_ERROR', 'Internal server error', errorMessage);
+        logResponse(500, { requestId, error: structuredError.code, executionTime });
+        // Track failed operation
+        await performanceTimer.end(false, structuredError.code, errorMessage);
+        await (0, medicationMonitoring_1.trackMedicationOperation)('create', req.user?.uid || 'unknown', false, executionTime, undefined, req.body.medicationData?.name, structuredError.code, errorMessage);
         res.status(500).json({
             success: false,
-            error: 'Internal server error',
-            details: error instanceof Error ? error.message : 'Unknown error'
+            error: structuredError.message,
+            errorCode: structuredError.code,
+            details: structuredError.details,
+            timestamp: structuredError.timestamp,
+            requestId
         });
     }
 });
@@ -191,7 +363,7 @@ router.get('/', async (req, res) => {
             isActive: isActive === 'true' ? true : isActive === 'false' ? false : undefined,
             isPRN: isPRN === 'true' ? true : isPRN === 'false' ? false : undefined,
             limit: limit ? parseInt(limit, 10) : undefined,
-            orderBy: orderBy || 'name',
+            orderBy: orderBy || 'createdAt', // Default to createdAt to avoid index requirements
             orderDirection: orderDirection || 'asc'
         };
         const result = await getCommandService().queryCommands(queryOptions);
@@ -372,6 +544,11 @@ router.delete('/:commandId', async (req, res) => {
             commandDeleted: false,
             eventsDeleted: 0,
             archivedEventsDeleted: 0,
+            legacyMedicationsDeleted: 0,
+            schedulesDeleted: 0,
+            calendarEventsDeleted: 0,
+            remindersDeleted: 0,
+            notificationsDeleted: 0,
             migrationTrackingUpdated: false,
             errors: []
         };
@@ -393,27 +570,85 @@ router.delete('/:commandId', async (req, res) => {
                     .get();
                 console.log(`📊 Found ${archivedEventsQuery.docs.length} archived events to delete`);
                 deletionResults.archivedEventsDeleted = archivedEventsQuery.docs.length;
-                // Step 3: Delete all events in transaction
-                console.log('🗑️ Step 3: Deleting medication_events...');
+                // Step 3: Query legacy collections for cascade cleanup
+                console.log('📋 Step 3: Querying legacy collections for commandId:', commandId);
+                // Query legacy medications collection
+                const legacyMedicationsQuery = await db.collection('medications')
+                    .where('patientId', '==', command.patientId)
+                    .where('name', '==', command.medication.name)
+                    .get();
+                // Query medication schedules
+                const schedulesQuery = await db.collection('medication_schedules')
+                    .where('medicationId', '==', commandId)
+                    .get();
+                // Query medication calendar events
+                const calendarEventsQuery = await db.collection('medication_calendar_events')
+                    .where('medicationId', '==', commandId)
+                    .get();
+                // Query medication reminders
+                const remindersQuery = await db.collection('medication_reminders')
+                    .where('medicationId', '==', commandId)
+                    .get();
+                // Query notification collections
+                const notificationDeliveryQuery = await db.collection('medication_notification_delivery_log')
+                    .where('medicationId', '==', commandId)
+                    .get();
+                const notificationQueueQuery = await db.collection('medication_notification_queue')
+                    .where('medicationId', '==', commandId)
+                    .get();
+                console.log(`📊 Legacy cleanup: ${legacyMedicationsQuery.docs.length} medications, ${schedulesQuery.docs.length} schedules, ${calendarEventsQuery.docs.length} calendar events, ${remindersQuery.docs.length} reminders, ${notificationDeliveryQuery.docs.length} delivery logs, ${notificationQueueQuery.docs.length} queued notifications`);
+                // Store counts for response
+                deletionResults.legacyMedicationsDeleted = legacyMedicationsQuery.docs.length;
+                deletionResults.schedulesDeleted = schedulesQuery.docs.length;
+                deletionResults.calendarEventsDeleted = calendarEventsQuery.docs.length;
+                deletionResults.remindersDeleted = remindersQuery.docs.length;
+                deletionResults.notificationsDeleted = notificationDeliveryQuery.docs.length + notificationQueueQuery.docs.length;
+                // Step 4: Delete all events in transaction
+                console.log('🗑️ Step 4: Deleting medication_events...');
                 eventsQuery.docs.forEach(doc => {
                     transaction.delete(doc.ref);
                 });
-                // Step 4: Delete archived events
-                console.log('🗑️ Step 4: Deleting archived events...');
+                // Step 5: Delete archived events
+                console.log('🗑️ Step 5: Deleting archived events...');
                 archivedEventsQuery.docs.forEach(doc => {
                     transaction.delete(doc.ref);
                 });
-                // Step 5: Handle command deletion based on hardDelete flag
+                // Step 6: Delete legacy collections
+                console.log('🗑️ Step 6: Deleting legacy medication data...');
+                legacyMedicationsQuery.docs.forEach(doc => {
+                    transaction.delete(doc.ref);
+                });
+                console.log('🗑️ Step 7: Deleting medication schedules...');
+                schedulesQuery.docs.forEach(doc => {
+                    transaction.delete(doc.ref);
+                });
+                console.log('🗑️ Step 8: Deleting medication calendar events...');
+                calendarEventsQuery.docs.forEach(doc => {
+                    transaction.delete(doc.ref);
+                });
+                console.log('🗑️ Step 9: Deleting medication reminders...');
+                remindersQuery.docs.forEach(doc => {
+                    transaction.delete(doc.ref);
+                });
+                console.log('🗑️ Step 10: Deleting notification delivery logs...');
+                notificationDeliveryQuery.docs.forEach(doc => {
+                    transaction.delete(doc.ref);
+                });
+                console.log('🗑️ Step 11: Deleting queued notifications...');
+                notificationQueueQuery.docs.forEach(doc => {
+                    transaction.delete(doc.ref);
+                });
+                // Step 7: Handle command deletion based on hardDelete flag
                 if (hardDelete) {
                     // Hard delete: Remove the command document entirely
-                    console.log('🗑️ Step 5: HARD DELETE - Removing command document');
+                    console.log('🗑️ Step 12: HARD DELETE - Removing command document');
                     const commandRef = db.collection('medication_commands').doc(commandId);
                     transaction.delete(commandRef);
                     deletionResults.commandDeleted = true;
                 }
                 else {
                     // Soft delete: Mark as discontinued (default behavior)
-                    console.log('🗑️ Step 5: SOFT DELETE - Marking command as discontinued');
+                    console.log('🗑️ Step 12: SOFT DELETE - Marking command as discontinued');
                     const commandRef = db.collection('medication_commands').doc(commandId);
                     transaction.update(commandRef, {
                         'status.current': 'discontinued',
@@ -426,8 +661,8 @@ router.delete('/:commandId', async (req, res) => {
                     });
                     deletionResults.commandDeleted = true;
                 }
-                // Step 6: Update migration tracking
-                console.log('📊 Step 6: Updating migration tracking...');
+                // Step 8: Update migration tracking
+                console.log('📊 Step 13: Updating migration tracking...');
                 const trackingRef = db.collection('migration_tracking').doc('medication_system');
                 const trackingDoc = await transaction.get(trackingRef);
                 if (trackingDoc.exists) {
@@ -437,13 +672,24 @@ router.delete('/:commandId', async (req, res) => {
                         'statistics.totalDeleted': (currentStats.totalDeleted || 0) + 1,
                         'statistics.eventsDeleted': (currentStats.eventsDeleted || 0) + deletionResults.eventsDeleted,
                         'statistics.archivedEventsDeleted': (currentStats.archivedEventsDeleted || 0) + deletionResults.archivedEventsDeleted,
+                        'statistics.legacyMedicationsDeleted': (currentStats.legacyMedicationsDeleted || 0) + legacyMedicationsQuery.docs.length,
+                        'statistics.schedulesDeleted': (currentStats.schedulesDeleted || 0) + schedulesQuery.docs.length,
+                        'statistics.calendarEventsDeleted': (currentStats.calendarEventsDeleted || 0) + calendarEventsQuery.docs.length,
+                        'statistics.remindersDeleted': (currentStats.remindersDeleted || 0) + remindersQuery.docs.length,
                         'lastOperation': {
-                            type: 'cascade_delete',
+                            type: 'cascade_delete_unified',
                             commandId,
                             deletedBy: userId,
                             timestamp: new Date(),
                             eventsDeleted: deletionResults.eventsDeleted,
                             archivedEventsDeleted: deletionResults.archivedEventsDeleted,
+                            legacyCleanup: {
+                                medications: legacyMedicationsQuery.docs.length,
+                                schedules: schedulesQuery.docs.length,
+                                calendarEvents: calendarEventsQuery.docs.length,
+                                reminders: remindersQuery.docs.length,
+                                notifications: notificationDeliveryQuery.docs.length + notificationQueueQuery.docs.length
+                            },
                             hardDelete
                         },
                         updatedAt: new Date()
@@ -471,6 +717,8 @@ router.delete('/:commandId', async (req, res) => {
             migrationTrackingUpdated: deletionResults.migrationTrackingUpdated,
             deleteType: hardDelete ? 'HARD' : 'SOFT'
         });
+        // Calculate comprehensive deletion stats
+        const totalLegacyItemsDeleted = deletionResults.legacyMedicationsDeleted + deletionResults.schedulesDeleted + deletionResults.calendarEventsDeleted + deletionResults.remindersDeleted + deletionResults.notificationsDeleted;
         res.json({
             success: true,
             data: {
@@ -480,10 +728,17 @@ router.delete('/:commandId', async (req, res) => {
                     commandDeleted: deletionResults.commandDeleted,
                     eventsDeleted: deletionResults.eventsDeleted,
                     archivedEventsDeleted: deletionResults.archivedEventsDeleted,
-                    totalItemsDeleted: deletionResults.eventsDeleted + deletionResults.archivedEventsDeleted + 1
+                    legacyMedicationsDeleted: deletionResults.legacyMedicationsDeleted,
+                    schedulesDeleted: deletionResults.schedulesDeleted,
+                    calendarEventsDeleted: deletionResults.calendarEventsDeleted,
+                    remindersDeleted: deletionResults.remindersDeleted,
+                    notificationsDeleted: deletionResults.notificationsDeleted,
+                    totalUnifiedItemsDeleted: deletionResults.eventsDeleted + deletionResults.archivedEventsDeleted + 1,
+                    totalLegacyItemsDeleted,
+                    totalItemsDeleted: deletionResults.eventsDeleted + deletionResults.archivedEventsDeleted + 1 + totalLegacyItemsDeleted
                 }
             },
-            message: `Medication ${hardDelete ? 'deleted' : 'discontinued'} successfully with ${deletionResults.eventsDeleted + deletionResults.archivedEventsDeleted} related events removed`
+            message: `Medication ${hardDelete ? 'deleted' : 'discontinued'} successfully with complete cascade cleanup: ${deletionResults.eventsDeleted + deletionResults.archivedEventsDeleted} events and ${totalLegacyItemsDeleted} legacy items removed`
         });
     }
     catch (error) {
@@ -1555,5 +1810,260 @@ async function calculateUndoAdherenceImpact(commandId, originalEvent) {
             streakImpact: 'Unable to calculate impact'
         };
     }
+}
+// ===== MIGRATION ENDPOINTS =====
+/**
+ * POST /medication-commands/migrate-from-legacy
+ * Migrate all legacy medications to medication_commands collection
+ */
+router.post('/migrate-from-legacy', async (req, res) => {
+    try {
+        console.log('🚀 POST /medication-commands/migrate-from-legacy - Starting migration');
+        const userId = req.user?.uid;
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                error: 'Authentication required'
+            });
+        }
+        const { patientId, dryRun = false } = req.body;
+        const targetPatientId = patientId || userId;
+        // Check access permissions
+        if (targetPatientId !== userId) {
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied'
+            });
+        }
+        const db = admin.firestore();
+        const stats = {
+            totalMedications: 0,
+            successful: 0,
+            failed: 0,
+            skipped: 0,
+            errors: []
+        };
+        console.log(`📊 Starting migration for patient: ${targetPatientId}, dryRun: ${dryRun}`);
+        // Get all medications from legacy collection for this patient
+        const medicationsSnapshot = await db.collection('medications')
+            .where('patientId', '==', targetPatientId)
+            .get();
+        stats.totalMedications = medicationsSnapshot.docs.length;
+        console.log(`📊 Found ${stats.totalMedications} medications to migrate`);
+        // Process each medication
+        for (const medDoc of medicationsSnapshot.docs) {
+            const medicationId = medDoc.id;
+            const medicationData = medDoc.data();
+            try {
+                console.log(`🔄 Processing: ${medicationData.name} (${medicationId})`);
+                // Check if already migrated
+                const existingCommand = await db.collection('medication_commands')
+                    .doc(medicationId)
+                    .get();
+                if (existingCommand.exists) {
+                    console.log(`  ⏭️  Already migrated, skipping...`);
+                    stats.skipped++;
+                    continue;
+                }
+                // Get associated schedule
+                const scheduleSnapshot = await db.collection('medication_schedules')
+                    .where('medicationId', '==', medicationId)
+                    .where('isActive', '==', true)
+                    .limit(1)
+                    .get();
+                const scheduleData = scheduleSnapshot.empty ? null : scheduleSnapshot.docs[0].data();
+                // Get associated reminder
+                const reminderSnapshot = await db.collection('medication_reminders')
+                    .where('medicationId', '==', medicationId)
+                    .where('isActive', '==', true)
+                    .limit(1)
+                    .get();
+                const reminderData = reminderSnapshot.empty ? null : reminderSnapshot.docs[0].data();
+                // Determine medication type
+                const medicationType = classifyMedicationType(medicationData.name, medicationData.frequency || 'daily');
+                // Map frequency
+                const unifiedFrequency = mapFrequency(medicationData.frequency || scheduleData?.frequency || 'daily');
+                // Generate times
+                const times = scheduleData?.times ||
+                    medicationData.reminderTimes ||
+                    generateDefaultTimes(unifiedFrequency);
+                // Build unified medication command
+                const medicationCommand = {
+                    id: medicationId,
+                    patientId: medicationData.patientId,
+                    medication: {
+                        name: medicationData.name,
+                        genericName: medicationData.genericName,
+                        brandName: medicationData.brandName,
+                        dosage: medicationData.dosage || '1 tablet',
+                        instructions: medicationData.instructions,
+                        prescribedBy: medicationData.prescribedBy,
+                        prescribedDate: medicationData.prescribedDate?.toDate() || null
+                    },
+                    schedule: {
+                        frequency: unifiedFrequency,
+                        times: times,
+                        startDate: scheduleData?.startDate?.toDate() ||
+                            medicationData.startDate?.toDate() ||
+                            medicationData.createdAt?.toDate() ||
+                            new Date(),
+                        endDate: scheduleData?.endDate?.toDate() || medicationData.endDate?.toDate() || null,
+                        isIndefinite: scheduleData?.isIndefinite !== false,
+                        dosageAmount: scheduleData?.dosageAmount || medicationData.dosage || '1 tablet',
+                        timingType: 'absolute'
+                    },
+                    reminders: {
+                        enabled: reminderData?.isActive || medicationData.hasReminders || false,
+                        minutesBefore: reminderData?.reminderTimes || [15, 5],
+                        notificationMethods: reminderData?.notificationMethods || ['browser'],
+                        quietHours: {
+                            start: '22:00',
+                            end: '07:00',
+                            enabled: true
+                        }
+                    },
+                    gracePeriod: {
+                        defaultMinutes: getGracePeriod(medicationType),
+                        medicationType: medicationType,
+                        weekendMultiplier: 1.5,
+                        holidayMultiplier: 2.0
+                    },
+                    status: {
+                        current: medicationData.isActive === false ? 'discontinued' :
+                            scheduleData?.isPaused ? 'paused' : 'active',
+                        isActive: medicationData.isActive !== false,
+                        isPRN: medicationData.isPRN || medicationData.frequency === 'as_needed' || false,
+                        lastStatusChange: admin.firestore.Timestamp.now(),
+                        statusChangedBy: 'migration_script'
+                    },
+                    preferences: {
+                        timeSlot: determineTimeSlot(times[0]),
+                        separationRules: []
+                    },
+                    metadata: {
+                        version: 1,
+                        createdAt: medicationData.createdAt?.toDate() || new Date(),
+                        createdBy: 'migration_script',
+                        updatedAt: admin.firestore.Timestamp.now(),
+                        updatedBy: 'migration_script',
+                        checksum: generateChecksum(medicationId, medicationData.name, unifiedFrequency),
+                        migratedFrom: {
+                            medicationId: medicationId,
+                            scheduleId: scheduleSnapshot.empty ? null : scheduleSnapshot.docs[0].id,
+                            reminderId: reminderSnapshot.empty ? null : reminderSnapshot.docs[0].id,
+                            migratedAt: admin.firestore.Timestamp.now()
+                        }
+                    }
+                };
+                if (!dryRun) {
+                    // Write to medication_commands collection
+                    await db.collection('medication_commands').doc(medicationId).set(medicationCommand);
+                    console.log(`  ✅ Successfully migrated`);
+                }
+                else {
+                    console.log(`  ✅ [DRY RUN] Would migrate`);
+                }
+                stats.successful++;
+            }
+            catch (error) {
+                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                console.error(`  ❌ Failed: ${errorMessage}`);
+                stats.failed++;
+                stats.errors.push({ medicationId, error: errorMessage });
+            }
+        }
+        console.log('\n📊 Migration Summary:');
+        console.log(`  Total: ${stats.totalMedications}`);
+        console.log(`  ✅ Successful: ${stats.successful}`);
+        console.log(`  ⏭️  Skipped: ${stats.skipped}`);
+        console.log(`  ❌ Failed: ${stats.failed}`);
+        res.json({
+            success: true,
+            data: stats,
+            message: dryRun
+                ? `DRY RUN: Would migrate ${stats.successful} medications`
+                : `Migration completed: ${stats.successful} medications migrated successfully`
+        });
+    }
+    catch (error) {
+        console.error('❌ Error in migration endpoint:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+// Helper functions for migration
+function classifyMedicationType(name, frequency) {
+    const nameLower = name.toLowerCase();
+    if (frequency === 'as_needed')
+        return 'prn';
+    const criticalMeds = ['insulin', 'warfarin', 'digoxin', 'levothyroxine', 'phenytoin'];
+    if (criticalMeds.some(med => nameLower.includes(med)))
+        return 'critical';
+    const vitaminMeds = ['vitamin', 'multivitamin', 'calcium', 'iron', 'supplement'];
+    if (vitaminMeds.some(med => nameLower.includes(med)))
+        return 'vitamin';
+    return 'standard';
+}
+function mapFrequency(frequency) {
+    const freqLower = frequency.toLowerCase().trim();
+    if (freqLower.includes('twice') || freqLower.includes('bid') || freqLower.includes('2x')) {
+        return 'twice_daily';
+    }
+    else if (freqLower.includes('three') || freqLower.includes('tid') || freqLower.includes('3x')) {
+        return 'three_times_daily';
+    }
+    else if (freqLower.includes('four') || freqLower.includes('qid') || freqLower.includes('4x')) {
+        return 'four_times_daily';
+    }
+    else if (freqLower.includes('weekly')) {
+        return 'weekly';
+    }
+    else if (freqLower.includes('monthly')) {
+        return 'monthly';
+    }
+    else if (freqLower.includes('needed') || freqLower.includes('prn')) {
+        return 'as_needed';
+    }
+    return 'daily';
+}
+function generateDefaultTimes(frequency) {
+    switch (frequency) {
+        case 'daily': return ['08:00'];
+        case 'twice_daily': return ['08:00', '20:00'];
+        case 'three_times_daily': return ['08:00', '14:00', '20:00'];
+        case 'four_times_daily': return ['08:00', '12:00', '17:00', '22:00'];
+        case 'weekly':
+        case 'monthly': return ['08:00'];
+        case 'as_needed': return [];
+        default: return ['08:00'];
+    }
+}
+function getGracePeriod(type) {
+    const periods = {
+        critical: 15,
+        standard: 30,
+        vitamin: 120,
+        prn: 0
+    };
+    return periods[type];
+}
+function determineTimeSlot(time) {
+    const hour = parseInt(time.split(':')[0]);
+    if (hour >= 6 && hour < 11)
+        return 'morning';
+    if (hour >= 11 && hour < 15)
+        return 'lunch';
+    if (hour >= 17 && hour < 21)
+        return 'evening';
+    if (hour >= 21 || hour < 6)
+        return 'beforeBed';
+    return 'custom';
+}
+function generateChecksum(id, name, frequency) {
+    const data = `${id}_${name}_${frequency}_${Date.now()}`;
+    return Buffer.from(data).toString('base64').slice(0, 16);
 }
 exports.default = router;

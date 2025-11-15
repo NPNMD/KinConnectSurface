@@ -231,6 +231,20 @@ class RequestDebouncer {
   }
 
   /**
+   * Clear cache for a specific key (reset last request time)
+   * This allows forcing a fresh fetch even if within the minInterval
+   */
+  clearCache(key?: string): void {
+    if (key) {
+      this.lastRequestTimes.delete(key);
+      console.log(`🔄 Cache cleared for key: ${key}`);
+    } else {
+      this.lastRequestTimes.clear();
+      console.log('🔄 All cache cleared');
+    }
+  }
+
+  /**
    * Clear all pending requests and timers
    */
   reset(): void {
@@ -279,6 +293,11 @@ export const createSmartRefreshWithMount = <T extends (...args: any[]) => Promis
   key?: string
 ) => requestDebouncer.smartRefreshWithMount(fn, minInterval, key);
 
+// Export clearCache function for convenience
+export const clearRequestCache = (key?: string) => {
+  requestDebouncer.clearCache(key);
+};
+
 // Add global debug helper
 if (typeof window !== 'undefined') {
   (window as any).debouncerStatus = () => {
@@ -289,4 +308,6 @@ if (typeof window !== 'undefined') {
     requestDebouncer.reset();
     console.log('🔄 Request debouncer reset');
   };
+
+  (window as any).clearRequestCache = clearRequestCache;
 }

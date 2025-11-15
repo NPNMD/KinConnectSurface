@@ -931,7 +931,22 @@ export class MedicationOrchestrator {
       while (currentDate <= endDate && events.length < 100) { // Limit to prevent excessive events
         if (this.shouldCreateEventForDate(currentDate, command.schedule)) {
           for (const time of command.schedule.times) {
-            const [hours, minutes] = time.split(':').map(Number);
+            // Parse time string with validation
+            const timeParts = time.split(':');
+            if (timeParts.length !== 2) {
+              console.warn(`⚠️ Invalid time format: ${time}, skipping`);
+              continue;
+            }
+
+            const hours = parseInt(timeParts[0], 10);
+            const minutes = parseInt(timeParts[1], 10);
+
+            // Validate parsed values
+            if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+              console.warn(`⚠️ Invalid time values: ${time} (hours: ${hours}, minutes: ${minutes}), skipping`);
+              continue;
+            }
+
             const eventDateTime = new Date(currentDate);
             eventDateTime.setHours(hours, minutes, 0, 0);
             
@@ -998,6 +1013,75 @@ export class MedicationOrchestrator {
       
       default:
         return false;
+    }
+  }
+
+  /**
+   * Regenerate scheduled dose events for a medication command
+   * Used when schedule times are updated
+   */
+  async regenerateScheduledEvents(commandId: string): Promise<{
+    success: boolean;
+    eventIds: string[];
+    deleted: number;
+    created: number;
+    error?: string;
+  }> {
+    try {
+      console.log('🔄 MedicationOrchestrator: Regenerating scheduled events for command:', commandId);
+
+      // Get the updated command
+      const commandResult = await this.commandService.getCommand(commandId);
+      if (!commandResult.success || !commandResult.data) {
+        return {
+          success: false,
+          eventIds: [],
+          deleted: 0,
+          created: 0,
+          error: 'Command not found'
+        };
+      }
+
+      const command = commandResult.data;
+
+      // Check if reminders are enabled and schedule has times
+      if (!command.reminders.enabled || !command.schedule.times || command.schedule.times.length === 0) {
+        console.log('⚠️ Reminders disabled or no schedule times, deleting future events only');
+        const deleteResult = await this.eventService.deleteFutureScheduledEvents(commandId);
+        return {
+          success: true,
+          eventIds: [],
+          deleted: deleteResult.data?.deleted || 0,
+          created: 0
+        };
+      }
+
+      // Delete existing future scheduled events
+      const deleteResult = await this.eventService.deleteFutureScheduledEvents(commandId);
+      const deletedCount = deleteResult.data?.deleted || 0;
+
+      // Generate new scheduled events
+      const correlationId = generateCorrelationId();
+      const newEventIds = await this.generateScheduledDoseEvents(command, correlationId);
+
+      console.log(`✅ Regenerated events: deleted ${deletedCount}, created ${newEventIds.length}`);
+
+      return {
+        success: true,
+        eventIds: newEventIds,
+        deleted: deletedCount,
+        created: newEventIds.length
+      };
+
+    } catch (error) {
+      console.error('❌ MedicationOrchestrator: Error regenerating scheduled events:', error);
+      return {
+        success: false,
+        eventIds: [],
+        deleted: 0,
+        created: 0,
+        error: error instanceof Error ? error.message : 'Failed to regenerate scheduled events'
+      };
     }
   }
 

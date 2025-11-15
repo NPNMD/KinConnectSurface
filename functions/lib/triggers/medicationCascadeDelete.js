@@ -3,9 +3,18 @@
  * Firestore Trigger: CASCADE DELETE for Medication Commands
  *
  * This trigger ensures that when a medication_commands document is deleted,
- * all related medication_events and archived events are automatically deleted.
+ * all related data is automatically deleted from both unified and legacy systems.
  *
- * This fixes the original bug where deleting a medication left orphaned events.
+ * Unified System Collections:
+ * - medication_events
+ * - medication_events_archive
+ *
+ * Legacy System Collections:
+ * - medication_calendar_events
+ * - medication_schedules
+ * - medication_reminders
+ *
+ * This fixes the bug where deleting a medication left orphaned events and reminders.
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -69,6 +78,9 @@ exports.onMedicationCommandDelete = functions
     const deletionResults = {
         eventsDeleted: 0,
         archivedEventsDeleted: 0,
+        legacyCalendarEventsDeleted: 0,
+        legacySchedulesDeleted: 0,
+        legacyRemindersDeleted: 0,
         errors: []
     };
     try {
@@ -130,15 +142,123 @@ exports.onMedicationCommandDelete = functions
             await Promise.all(archiveBatches.map(batch => batch.commit()));
             console.log(`✅ Deleted ${deletionResults.archivedEventsDeleted} archived events`);
         }
-        // Step 3: Update migration tracking
-        console.log('📊 Step 3: Updating migration tracking...');
+        // Step 3: Delete legacy medication_calendar_events
+        console.log('🔍 Step 3: Querying medication_calendar_events for medicationId:', commandId);
+        try {
+            const calendarEventsQuery = await db.collection('medication_calendar_events')
+                .where('medicationId', '==', commandId)
+                .get();
+            console.log(`📊 Found ${calendarEventsQuery.docs.length} legacy calendar events to delete`);
+            if (calendarEventsQuery.docs.length > 0) {
+                const calendarBatches = [];
+                let currentCalendarBatch = db.batch();
+                let calendarOperationCount = 0;
+                for (const doc of calendarEventsQuery.docs) {
+                    currentCalendarBatch.delete(doc.ref);
+                    calendarOperationCount++;
+                    deletionResults.legacyCalendarEventsDeleted++;
+                    if (calendarOperationCount >= 500) {
+                        calendarBatches.push(currentCalendarBatch);
+                        currentCalendarBatch = db.batch();
+                        calendarOperationCount = 0;
+                    }
+                }
+                if (calendarOperationCount > 0) {
+                    calendarBatches.push(currentCalendarBatch);
+                }
+                console.log(`🔥 Committing ${calendarBatches.length} batch(es) to delete legacy calendar events...`);
+                await Promise.all(calendarBatches.map(batch => batch.commit()));
+                console.log(`✅ Deleted ${deletionResults.legacyCalendarEventsDeleted} legacy calendar events`);
+            }
+        }
+        catch (calendarError) {
+            const errorMsg = `Failed to delete legacy calendar events: ${calendarError instanceof Error ? calendarError.message : 'Unknown error'}`;
+            console.error('❌', errorMsg);
+            deletionResults.errors.push(errorMsg);
+            // Continue with other deletions
+        }
+        // Step 4: Delete legacy medication_schedules
+        console.log('🔍 Step 4: Querying medication_schedules for medicationId:', commandId);
+        try {
+            const schedulesQuery = await db.collection('medication_schedules')
+                .where('medicationId', '==', commandId)
+                .get();
+            console.log(`📊 Found ${schedulesQuery.docs.length} legacy schedules to delete`);
+            if (schedulesQuery.docs.length > 0) {
+                const scheduleBatches = [];
+                let currentScheduleBatch = db.batch();
+                let scheduleOperationCount = 0;
+                for (const doc of schedulesQuery.docs) {
+                    currentScheduleBatch.delete(doc.ref);
+                    scheduleOperationCount++;
+                    deletionResults.legacySchedulesDeleted++;
+                    if (scheduleOperationCount >= 500) {
+                        scheduleBatches.push(currentScheduleBatch);
+                        currentScheduleBatch = db.batch();
+                        scheduleOperationCount = 0;
+                    }
+                }
+                if (scheduleOperationCount > 0) {
+                    scheduleBatches.push(currentScheduleBatch);
+                }
+                console.log(`🔥 Committing ${scheduleBatches.length} batch(es) to delete legacy schedules...`);
+                await Promise.all(scheduleBatches.map(batch => batch.commit()));
+                console.log(`✅ Deleted ${deletionResults.legacySchedulesDeleted} legacy schedules`);
+            }
+        }
+        catch (scheduleError) {
+            const errorMsg = `Failed to delete legacy schedules: ${scheduleError instanceof Error ? scheduleError.message : 'Unknown error'}`;
+            console.error('❌', errorMsg);
+            deletionResults.errors.push(errorMsg);
+            // Continue with other deletions
+        }
+        // Step 5: Delete legacy medication_reminders
+        console.log('🔍 Step 5: Querying medication_reminders for medicationId:', commandId);
+        try {
+            const remindersQuery = await db.collection('medication_reminders')
+                .where('medicationId', '==', commandId)
+                .get();
+            console.log(`📊 Found ${remindersQuery.docs.length} legacy reminders to delete`);
+            if (remindersQuery.docs.length > 0) {
+                const reminderBatches = [];
+                let currentReminderBatch = db.batch();
+                let reminderOperationCount = 0;
+                for (const doc of remindersQuery.docs) {
+                    currentReminderBatch.delete(doc.ref);
+                    reminderOperationCount++;
+                    deletionResults.legacyRemindersDeleted++;
+                    if (reminderOperationCount >= 500) {
+                        reminderBatches.push(currentReminderBatch);
+                        currentReminderBatch = db.batch();
+                        reminderOperationCount = 0;
+                    }
+                }
+                if (reminderOperationCount > 0) {
+                    reminderBatches.push(currentReminderBatch);
+                }
+                console.log(`🔥 Committing ${reminderBatches.length} batch(es) to delete legacy reminders...`);
+                await Promise.all(reminderBatches.map(batch => batch.commit()));
+                console.log(`✅ Deleted ${deletionResults.legacyRemindersDeleted} legacy reminders`);
+            }
+        }
+        catch (reminderError) {
+            const errorMsg = `Failed to delete legacy reminders: ${reminderError instanceof Error ? reminderError.message : 'Unknown error'}`;
+            console.error('❌', errorMsg);
+            deletionResults.errors.push(errorMsg);
+            // Continue with other deletions
+        }
+        // Step 6: Update migration tracking
+        console.log('📊 Step 6: Updating migration tracking...');
         try {
             const trackingRef = db.collection('migration_tracking').doc('medication_system');
             await trackingRef.set({
                 statistics: {
                     totalDeleted: admin.firestore.FieldValue.increment(1),
                     eventsDeleted: admin.firestore.FieldValue.increment(deletionResults.eventsDeleted),
-                    archivedEventsDeleted: admin.firestore.FieldValue.increment(deletionResults.archivedEventsDeleted)
+                    archivedEventsDeleted: admin.firestore.FieldValue.increment(deletionResults.archivedEventsDeleted),
+                    legacyCalendarEventsDeleted: admin.firestore.FieldValue.increment(deletionResults.legacyCalendarEventsDeleted),
+                    legacySchedulesDeleted: admin.firestore.FieldValue.increment(deletionResults.legacySchedulesDeleted),
+                    legacyRemindersDeleted: admin.firestore.FieldValue.increment(deletionResults.legacyRemindersDeleted)
                 },
                 lastCascadeDelete: {
                     commandId,
@@ -146,6 +266,9 @@ exports.onMedicationCommandDelete = functions
                     patientId: commandData?.patientId,
                     eventsDeleted: deletionResults.eventsDeleted,
                     archivedEventsDeleted: deletionResults.archivedEventsDeleted,
+                    legacyCalendarEventsDeleted: deletionResults.legacyCalendarEventsDeleted,
+                    legacySchedulesDeleted: deletionResults.legacySchedulesDeleted,
+                    legacyRemindersDeleted: deletionResults.legacyRemindersDeleted,
                     timestamp: new Date(),
                     triggerSource: 'firestore_trigger'
                 },
@@ -158,12 +281,24 @@ exports.onMedicationCommandDelete = functions
             // Don't fail the cascade delete if tracking update fails
         }
         // Log final results
+        const totalDeleted = deletionResults.eventsDeleted +
+            deletionResults.archivedEventsDeleted +
+            deletionResults.legacyCalendarEventsDeleted +
+            deletionResults.legacySchedulesDeleted +
+            deletionResults.legacyRemindersDeleted;
         console.log('✅ CASCADE DELETE TRIGGER COMPLETED:', {
             commandId,
             medicationName: commandData?.medication?.name,
-            eventsDeleted: deletionResults.eventsDeleted,
-            archivedEventsDeleted: deletionResults.archivedEventsDeleted,
-            totalDeleted: deletionResults.eventsDeleted + deletionResults.archivedEventsDeleted,
+            unifiedSystem: {
+                eventsDeleted: deletionResults.eventsDeleted,
+                archivedEventsDeleted: deletionResults.archivedEventsDeleted
+            },
+            legacySystem: {
+                calendarEventsDeleted: deletionResults.legacyCalendarEventsDeleted,
+                schedulesDeleted: deletionResults.legacySchedulesDeleted,
+                remindersDeleted: deletionResults.legacyRemindersDeleted
+            },
+            totalDeleted,
             errors: deletionResults.errors.length
         });
     }

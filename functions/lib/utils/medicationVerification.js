@@ -1,6 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.verifyMedicationChanges = verifyMedicationChanges;
+exports.validateMedicationData = validateMedicationData;
+exports.validateSchedule = validateSchedule;
+exports.validateDosageFormat = validateDosageFormat;
+exports.validateCrossFields = validateCrossFields;
+exports.validateCompleteMedication = validateCompleteMedication;
 const firebase_functions_1 = require("firebase-functions");
 const network_1 = require("./network");
 const RXNORM_APPROX_URL = 'https://rxnav.nlm.nih.gov/REST/approxMatch.json';
@@ -250,4 +255,302 @@ function buildVerificationWarnings(confidence, originalName, matchedName) {
         warnings.push(`Matched to RxNorm name "${matchedName}".`);
     }
     return warnings.length > 0 ? warnings : undefined;
+}
+/**
+ * Validate complete medication data
+ */
+function validateMedicationData(data) {
+    const errors = [];
+    const warnings = [];
+    const suggestions = [];
+    // Required field validation
+    if (!data.name || typeof data.name !== 'string' || data.name.trim().length === 0) {
+        errors.push({
+            field: 'name',
+            message: 'Medication name is required',
+            severity: 'critical',
+            code: 'REQUIRED_FIELD_MISSING'
+        });
+        suggestions.push('Enter the medication name as prescribed by your healthcare provider');
+    }
+    if (!data.dosage || typeof data.dosage !== 'string' || data.dosage.trim().length === 0) {
+        errors.push({
+            field: 'dosage',
+            message: 'Dosage is required',
+            severity: 'error',
+            code: 'REQUIRED_FIELD_MISSING'
+        });
+        suggestions.push('Specify the dosage (e.g., "10mg", "1 tablet", "5ml")');
+    }
+    // Dosage format validation
+    if (data.dosage && !validateDosageFormat(data.dosage)) {
+        warnings.push({
+            field: 'dosage',
+            message: 'Dosage format may be incorrect',
+            severity: 'warning',
+            code: 'INVALID_FORMAT'
+        });
+        suggestions.push('Use standard dosage format: number + unit (e.g., "10mg", "2 tablets")');
+    }
+    // Name validation
+    if (data.name && data.name.length < 2) {
+        errors.push({
+            field: 'name',
+            message: 'Medication name is too short',
+            severity: 'error',
+            code: 'INVALID_LENGTH'
+        });
+    }
+    if (data.name && data.name.length > 200) {
+        errors.push({
+            field: 'name',
+            message: 'Medication name is too long',
+            severity: 'error',
+            code: 'INVALID_LENGTH'
+        });
+    }
+    // Check for potentially dangerous characters
+    if (data.name && /[<>{}]/.test(data.name)) {
+        errors.push({
+            field: 'name',
+            message: 'Medication name contains invalid characters',
+            severity: 'error',
+            code: 'INVALID_CHARACTERS'
+        });
+    }
+    // Instructions validation
+    if (data.instructions && data.instructions.length > 1000) {
+        warnings.push({
+            field: 'instructions',
+            message: 'Instructions are very long',
+            severity: 'warning',
+            code: 'EXCESSIVE_LENGTH'
+        });
+    }
+    return {
+        isValid: errors.length === 0,
+        errors,
+        warnings,
+        suggestions
+    };
+}
+/**
+ * Validate medication schedule
+ */
+function validateSchedule(schedule) {
+    const errors = [];
+    const warnings = [];
+    const suggestions = [];
+    // Frequency validation
+    const validFrequencies = ['daily', 'twice_daily', 'three_times_daily', 'four_times_daily', 'weekly', 'monthly', 'as_needed', 'custom'];
+    if (!schedule.frequency || !validFrequencies.includes(schedule.frequency)) {
+        errors.push({
+            field: 'frequency',
+            message: 'Invalid frequency',
+            severity: 'critical',
+            code: 'INVALID_VALUE'
+        });
+        suggestions.push(`Frequency must be one of: ${validFrequencies.join(', ')}`);
+    }
+    // Times validation
+    if (!schedule.times || !Array.isArray(schedule.times) || schedule.times.length === 0) {
+        if (schedule.frequency !== 'as_needed') {
+            errors.push({
+                field: 'times',
+                message: 'Schedule times are required',
+                severity: 'critical',
+                code: 'REQUIRED_FIELD_MISSING'
+            });
+            suggestions.push('Add at least one time in HH:MM format (e.g., "08:00")');
+        }
+    }
+    else {
+        // Validate time format
+        const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+        const invalidTimes = schedule.times.filter((time) => !timeRegex.test(time));
+        if (invalidTimes.length > 0) {
+            errors.push({
+                field: 'times',
+                message: `Invalid time format: ${invalidTimes.join(', ')}`,
+                severity: 'error',
+                code: 'INVALID_FORMAT'
+            });
+            suggestions.push('Use 24-hour HH:MM format (e.g., "07:00", "19:30")');
+        }
+        // Check for duplicate times
+        const uniqueTimes = new Set(schedule.times);
+        if (uniqueTimes.size < schedule.times.length) {
+            warnings.push({
+                field: 'times',
+                message: 'Duplicate times detected',
+                severity: 'warning',
+                code: 'DUPLICATE_VALUES'
+            });
+        }
+        // Validate time count matches frequency
+        const expectedCounts = {
+            'daily': 1,
+            'twice_daily': 2,
+            'three_times_daily': 3,
+            'four_times_daily': 4
+        };
+        const expectedCount = expectedCounts[schedule.frequency];
+        if (expectedCount && schedule.times.length !== expectedCount) {
+            warnings.push({
+                field: 'times',
+                message: `${schedule.frequency} typically uses ${expectedCount} time(s), but ${schedule.times.length} provided`,
+                severity: 'warning',
+                code: 'INCONSISTENT_COUNT'
+            });
+        }
+    }
+    // Date validation
+    if (!schedule.startDate) {
+        errors.push({
+            field: 'startDate',
+            message: 'Start date is required',
+            severity: 'critical',
+            code: 'REQUIRED_FIELD_MISSING'
+        });
+    }
+    else {
+        const startDate = new Date(schedule.startDate);
+        if (isNaN(startDate.getTime())) {
+            errors.push({
+                field: 'startDate',
+                message: 'Invalid start date',
+                severity: 'error',
+                code: 'INVALID_DATE'
+            });
+        }
+    }
+    if (schedule.endDate) {
+        const endDate = new Date(schedule.endDate);
+        if (isNaN(endDate.getTime())) {
+            errors.push({
+                field: 'endDate',
+                message: 'Invalid end date',
+                severity: 'error',
+                code: 'INVALID_DATE'
+            });
+        }
+        else if (schedule.startDate) {
+            const startDate = new Date(schedule.startDate);
+            if (endDate <= startDate) {
+                errors.push({
+                    field: 'endDate',
+                    message: 'End date must be after start date',
+                    severity: 'error',
+                    code: 'INVALID_DATE_RANGE'
+                });
+            }
+        }
+    }
+    // Dosage amount validation
+    if (!schedule.dosageAmount) {
+        warnings.push({
+            field: 'dosageAmount',
+            message: 'Dosage amount not specified',
+            severity: 'warning',
+            code: 'MISSING_OPTIONAL_FIELD'
+        });
+        suggestions.push('Specify dosage amount for clarity');
+    }
+    return {
+        isValid: errors.length === 0,
+        errors,
+        warnings,
+        suggestions
+    };
+}
+/**
+ * Validate dosage format
+ */
+function validateDosageFormat(dosage) {
+    // Common dosage patterns
+    const patterns = [
+        /^\d+(\.\d+)?\s*(mg|g|mcg|ml|l|tablet|tablets|capsule|capsules|pill|pills|unit|units|drop|drops|spray|sprays|puff|puffs|patch|patches)$/i,
+        /^\d+\/\d+\s*(mg|g|mcg|ml|l|tablet|tablets)$/i, // Fractions like 1/2 tablet
+        /^\d+(\.\d+)?\s*to\s*\d+(\.\d+)?\s*(mg|g|mcg|ml|l)$/i // Ranges like 5 to 10mg
+    ];
+    return patterns.some(pattern => pattern.test(dosage.trim()));
+}
+/**
+ * Cross-field validation (PRN + scheduled times)
+ */
+function validateCrossFields(data) {
+    const errors = [];
+    const warnings = [];
+    const suggestions = [];
+    // PRN medications shouldn't have scheduled times
+    if (data.status?.isPRN && data.schedule?.times && data.schedule.times.length > 0) {
+        warnings.push({
+            field: 'schedule',
+            message: 'PRN medications typically do not have scheduled times',
+            severity: 'warning',
+            code: 'INCONSISTENT_CONFIGURATION'
+        });
+        suggestions.push('Consider removing scheduled times for PRN medications, or change to non-PRN');
+    }
+    // Non-PRN medications should have times
+    if (data.status?.isPRN === false && data.schedule?.frequency !== 'as_needed' &&
+        (!data.schedule?.times || data.schedule.times.length === 0)) {
+        errors.push({
+            field: 'schedule',
+            message: 'Non-PRN medications must have scheduled times',
+            severity: 'error',
+            code: 'REQUIRED_FIELD_MISSING'
+        });
+    }
+    // Frequency consistency
+    if (data.schedule?.frequency === 'as_needed' && data.status?.isPRN === false) {
+        warnings.push({
+            field: 'frequency',
+            message: 'Frequency is "as_needed" but medication is not marked as PRN',
+            severity: 'warning',
+            code: 'INCONSISTENT_CONFIGURATION'
+        });
+        suggestions.push('Mark medication as PRN or change frequency');
+    }
+    // Indefinite schedule validation
+    if (data.schedule?.isIndefinite === true && data.schedule?.endDate) {
+        warnings.push({
+            field: 'schedule',
+            message: 'Schedule is marked as indefinite but has an end date',
+            severity: 'warning',
+            code: 'INCONSISTENT_CONFIGURATION'
+        });
+    }
+    return {
+        isValid: errors.length === 0,
+        errors,
+        warnings,
+        suggestions
+    };
+}
+/**
+ * Comprehensive validation combining all checks
+ */
+function validateCompleteMedication(data) {
+    const medicationValidation = validateMedicationData(data.medication || data);
+    const scheduleValidation = validateSchedule(data.schedule || {});
+    const crossFieldValidation = validateCrossFields(data);
+    return {
+        isValid: medicationValidation.isValid && scheduleValidation.isValid && crossFieldValidation.isValid,
+        errors: [
+            ...medicationValidation.errors,
+            ...scheduleValidation.errors,
+            ...crossFieldValidation.errors
+        ],
+        warnings: [
+            ...medicationValidation.warnings,
+            ...scheduleValidation.warnings,
+            ...crossFieldValidation.warnings
+        ],
+        suggestions: [
+            ...medicationValidation.suggestions,
+            ...scheduleValidation.suggestions,
+            ...crossFieldValidation.suggestions
+        ]
+    };
 }
