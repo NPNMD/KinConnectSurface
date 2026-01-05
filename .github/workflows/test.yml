@@ -65,7 +65,7 @@ jobs:
           fi
 
       - name: Upload coverage to GitHub artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: coverage-report
