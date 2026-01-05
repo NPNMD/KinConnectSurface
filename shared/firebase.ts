@@ -18,6 +18,7 @@ export const COLLECTIONS = {
   TASKS: 'tasks',
   APPOINTMENTS: 'appointments',
   VISIT_RECORDS: 'visit_records',
+  AUDIT_LOGS: 'audit_logs',
 } as const;
 
 // Firebase security rules (for reference)

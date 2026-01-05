@@ -5,6 +5,7 @@ export interface User {
   name: string;
   profilePicture?: string;
   userType: 'patient' | 'family_member' | 'caregiver' | 'healthcare_provider';
+  familyGroupId?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -268,4 +269,102 @@ export interface PaginatedResponse<T> {
   page: number;
   limit: number;
   hasMore: boolean;
+}
+
+// Audit Log types
+export enum AuditAction {
+  // Authentication events
+  LOGIN = 'LOGIN',
+  LOGOUT = 'LOGOUT',
+  LOGIN_FAILED = 'LOGIN_FAILED',
+  TOKEN_REFRESH = 'TOKEN_REFRESH',
+  TOKEN_EXPIRED = 'TOKEN_EXPIRED',
+  
+  // Patient access events
+  ACCESS_PATIENT = 'ACCESS_PATIENT',
+  ACCESS_PATIENT_DENIED = 'ACCESS_PATIENT_DENIED',
+  VIEW_PATIENT_PROFILE = 'VIEW_PATIENT_PROFILE',
+  
+  // Medication events
+  CREATE_MEDICATION = 'CREATE_MEDICATION',
+  UPDATE_MEDICATION = 'UPDATE_MEDICATION',
+  DELETE_MEDICATION = 'DELETE_MEDICATION',
+  VIEW_MEDICATIONS = 'VIEW_MEDICATIONS',
+  MODIFY_MEDICATION = 'MODIFY_MEDICATION',
+  LOG_MEDICATION_TAKEN = 'LOG_MEDICATION_TAKEN',
+  
+  // Patient data events
+  CREATE_PATIENT = 'CREATE_PATIENT',
+  UPDATE_PATIENT = 'UPDATE_PATIENT',
+  DELETE_PATIENT = 'DELETE_PATIENT',
+  
+  // Family group events
+  CREATE_FAMILY_GROUP = 'CREATE_FAMILY_GROUP',
+  ADD_FAMILY_MEMBER = 'ADD_FAMILY_MEMBER',
+  REMOVE_FAMILY_MEMBER = 'REMOVE_FAMILY_MEMBER',
+  UPDATE_FAMILY_PERMISSIONS = 'UPDATE_FAMILY_PERMISSIONS',
+  
+  // Invitation events
+  CREATE_INVITATION = 'CREATE_INVITATION',
+  ACCEPT_INVITATION = 'ACCEPT_INVITATION',
+  REJECT_INVITATION = 'REJECT_INVITATION',
+  
+  // Appointment events
+  CREATE_APPOINTMENT = 'CREATE_APPOINTMENT',
+  UPDATE_APPOINTMENT = 'UPDATE_APPOINTMENT',
+  DELETE_APPOINTMENT = 'DELETE_APPOINTMENT',
+  
+  // Visit record events
+  CREATE_VISIT_RECORD = 'CREATE_VISIT_RECORD',
+  UPDATE_VISIT_RECORD = 'UPDATE_VISIT_RECORD',
+  DELETE_VISIT_RECORD = 'DELETE_VISIT_RECORD',
+  
+  // Task events
+  CREATE_TASK = 'CREATE_TASK',
+  UPDATE_TASK = 'UPDATE_TASK',
+  DELETE_TASK = 'DELETE_TASK',
+  
+  // Security events
+  UNAUTHORIZED_ACCESS = 'UNAUTHORIZED_ACCESS',
+  PERMISSION_DENIED = 'PERMISSION_DENIED',
+  INVALID_TOKEN = 'INVALID_TOKEN',
+}
+
+export enum AuditResult {
+  SUCCESS = 'SUCCESS',
+  FAILURE = 'FAILURE',
+  DENIED = 'DENIED',
+}
+
+export interface AuditLog {
+  id: string;
+  timestamp: Date;
+  userId: string;
+  userEmail?: string;
+  action: AuditAction;
+  resource: string; // e.g., "patient:123", "medication:456"
+  resourceId?: string;
+  result: AuditResult;
+  ipAddress?: string;
+  userAgent?: string;
+  metadata?: {
+    [key: string]: any;
+  };
+  errorMessage?: string;
+  createdAt: Date;
+}
+
+export interface NewAuditLog {
+  userId: string;
+  userEmail?: string;
+  action: AuditAction;
+  resource: string;
+  resourceId?: string;
+  result: AuditResult;
+  ipAddress?: string;
+  userAgent?: string;
+  metadata?: {
+    [key: string]: any;
+  };
+  errorMessage?: string;
 }

@@ -1,0 +1,152 @@
+name: Security Audit
+
+on:
+  schedule:
+    # Run every Monday at 9:00 AM UTC
+    - cron: '0 9 * * 1'
+  push:
+    paths:
+      - '**/package.json'
+      - '**/package-lock.json'
+  pull_request:
+    paths:
+      - '**/package.json'
+      - '**/package-lock.json'
+  workflow_dispatch:
+
+jobs:
+  security-audit:
+    name: NPM Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18.x
+
+      - name: Audit root dependencies
+        id: audit-root
+        run: |
+          echo "## Root Dependencies Audit" >> audit-report.txt
+          npm audit --audit-level=moderate >> audit-report.txt 2>&1 || echo "VULNERABILITIES_FOUND=true" >> $GITHUB_ENV
+          cat audit-report.txt
+
+      - name: Audit functions dependencies
+        id: audit-functions
+        run: |
+          echo "" >> audit-report.txt
+          echo "## Functions Dependencies Audit" >> audit-report.txt
+          cd functions
+          npm audit --audit-level=moderate >> ../audit-report.txt 2>&1 || echo "VULNERABILITIES_FOUND=true" >> $GITHUB_ENV
+          cat ../audit-report.txt
+
+      - name: Check for critical vulnerabilities
+        id: check-critical
+        run: |
+          # Check for critical or high severity vulnerabilities
+          if npm audit --audit-level=high 2>&1 | grep -q "found"; then
+            echo "CRITICAL_FOUND=true" >> $GITHUB_ENV
+            echo "❌ Critical or high severity vulnerabilities found"
+            exit 1
+          else
+            echo "✅ No critical vulnerabilities found"
+          fi
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-audit-report
+          path: audit-report.txt
+          retention-days: 90
+
+      - name: Create issue for critical vulnerabilities
+        if: env.CRITICAL_FOUND == 'true' && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('audit-report.txt', 'utf8');
+            
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 Critical Security Vulnerabilities Found',
+              body: `## Security Audit Alert\n\n` +
+                    `Critical or high severity vulnerabilities were found during the scheduled security audit.\n\n` +
+                    `### Audit Report\n\n` +
+                    `\`\`\`\n${report}\n\`\`\`\n\n` +
+                    `### Action Required\n\n` +
+                    `Please review and address these vulnerabilities as soon as possible.\n\n` +
+                    `Run \`npm audit fix\` to automatically fix issues where possible.`,
+              labels: ['security', 'priority-high']
+            });
+
+      - name: Generate security summary
+        if: always()
+        run: |
+          echo "## 🔒 Security Audit Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "$CRITICAL_FOUND" == "true" ]; then
+            echo "❌ **Status**: Critical vulnerabilities found" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **Status**: No critical vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Full Report" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          cat audit-report.txt >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Review dependencies
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          deny-licenses: GPL-3.0, AGPL-3.0
+
+  codeql-analysis:
+    name: CodeQL Security Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

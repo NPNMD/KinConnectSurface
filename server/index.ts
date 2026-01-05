@@ -4,12 +4,22 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import path from 'path';
+import { adminDb, adminAuth } from './firebase-admin';
 
-// Import routes
+// Import shared services
+import { MedicationService } from '../shared/services/medicationService';
+import { PatientService } from '../shared/services/patientService';
+import { AccessService } from '../shared/services/accessService';
+import { DrugService } from '../shared/services/drugService';
+import { RxImageService } from '../shared/services/rxImageService';
+import { DailyMedService } from '../shared/services/dailyMedService';
+import { createAuthMiddleware } from '../shared/middleware/auth';
+
+// Import router factories
 import authRoutes from './routes/auth';
-import patientRoutes from './routes/patients';
-import medicationRoutes from './routes/medications';
-import drugRoutes from './routes/drugs';
+import { createPatientRouter } from '../shared/routes/patients';
+import { createMedicationRouter } from '../shared/routes/medications';
+import { createDrugRouter } from '../shared/routes/drugs';
 
 // Load environment variables
 dotenv.config();
@@ -17,8 +27,20 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Initialize services
+const medicationService = new MedicationService({ db: adminDb });
+const patientService = new PatientService({ db: adminDb });
+const accessService = new AccessService({ db: adminDb });
+const drugService = new DrugService();
+const rxImageService = new RxImageService();
+const dailyMedService = new DailyMedService();
+
+// Initialize middleware
+const authenticateToken = createAuthMiddleware({
+  verifyIdToken: (token) => adminAuth.verifyIdToken(token)
+});
+
 // Security middleware
-// Configure helmet to allow OAuth popups (Firebase Google sign-in)
 app.use(helmet({
   crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
   crossOriginEmbedderPolicy: false,
@@ -27,7 +49,7 @@ app.use(helmet({
 // CORS configuration
 app.use(cors({
   origin: process.env.NODE_ENV === 'production'
-    ? ['https://claritystream-uldp9.web.app', 'https://your-domain.com'] // Update with your production domain
+    ? ['https://claritystream-uldp9.web.app', 'https://your-domain.com'] 
     : ['http://localhost:3000', 'http://localhost:3001', 'https://claritystream-uldp9.web.app'],
   credentials: true,
 }));
@@ -49,9 +71,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // API routes
 app.use('/api/auth', authRoutes);
-app.use('/api/patients', patientRoutes);
-app.use('/api/medications', medicationRoutes);
-app.use('/api/drugs', drugRoutes);
+app.use('/api/patients', createPatientRouter(patientService, accessService, authenticateToken));
+app.use('/api/medications', createMedicationRouter(medicationService, accessService, authenticateToken));
+app.use('/api/drugs', createDrugRouter(drugService, rxImageService, dailyMedService, authenticateToken));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

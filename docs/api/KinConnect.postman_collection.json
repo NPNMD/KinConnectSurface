@@ -1,0 +1,893 @@
+{
+	"info": {
+		"_postman_id": "kinconnect-api-collection",
+		"name": "KinConnect API",
+		"description": "Complete API collection for the KinConnect medication management platform.\n\n## Setup Instructions\n\n1. Import this collection into Postman\n2. Create a new environment with the following variables:\n   - `baseUrl`: Your API base URL (e.g., `http://localhost:5001/kinconnect-dev/us-central1/api`)\n   - `authToken`: Your Firebase ID token (obtained after login)\n3. All requests will automatically use the `{{authToken}}` variable for authentication\n\n## Getting Your Auth Token\n\n1. Login to KinConnect in your browser\n2. Open browser dev tools > Application > IndexedDB > firebaseLocalStorage\n3. Copy the `stsTokenManager.accessToken` value\n4. Set it as the `authToken` environment variable in Postman\n\n## Testing\n\nMost requests include test scripts that validate responses. Check the \"Tests\" tab after running a request to see results.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"description": "User authentication and profile management endpoints",
+			"item": [
+				{
+					"name": "Get User Profile",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/auth/profile",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "profile"]
+						},
+						"description": "Get or create the authenticated user's profile. This endpoint will create a new user profile if one doesn't exist."
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response has success field\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('success');",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"});",
+									"",
+									"pm.test(\"Response contains user data\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('data');",
+									"    pm.expect(jsonData.data).to.have.property('id');",
+									"    pm.expect(jsonData.data).to.have.property('email');",
+									"    pm.expect(jsonData.data).to.have.property('name');",
+									"});"
+								]
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Patients",
+			"description": "Patient profile management endpoints",
+			"item": [
+				{
+					"name": "Get Patient Profile",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/patients/profile",
+							"host": ["{{baseUrl}}"],
+							"path": ["patients", "profile"]
+						},
+						"description": "Get the authenticated user's patient profile"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response has success field\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('success');",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Create Patient Profile",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"dateOfBirth\": \"1980-01-01\",\n  \"gender\": \"male\",\n  \"address\": \"123 Main St, City, State 12345\",\n  \"phoneNumber\": \"+1234567890\",\n  \"emergencyContact\": \"Jane Doe - +1987654321\",\n  \"medicalConditions\": [\"Hypertension\", \"Type 2 Diabetes\"],\n  \"allergies\": [\"Penicillin\"]\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/patients/profile",
+							"host": ["{{baseUrl}}"],
+							"path": ["patients", "profile"]
+						},
+						"description": "Create a new patient profile"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"Status code is 201\", function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"",
+									"pm.test(\"Profile created successfully\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.expect(jsonData.data).to.have.property('id');",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Update Patient Profile",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phoneNumber\": \"+1234567891\",\n  \"address\": \"456 Oak Ave, City, State 12345\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/patients/profile",
+							"host": ["{{baseUrl}}"],
+							"path": ["patients", "profile"]
+						},
+						"description": "Update existing patient profile or create if it doesn't exist"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Medications",
+			"description": "Medication management endpoints",
+			"item": [
+				{
+					"name": "List Medications",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/medications",
+							"host": ["{{baseUrl}}"],
+							"path": ["medications"]
+						},
+						"description": "Get all medications for the authenticated user"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response contains medications array\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.expect(jsonData.data).to.be.an('array');",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Create Medication",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Lisinopril\",\n  \"genericName\": \"Lisinopril\",\n  \"brandName\": \"Prinivil\",\n  \"rxcui\": \"104377\",\n  \"dosage\": \"10mg\",\n  \"strength\": \"10mg\",\n  \"dosageForm\": \"tablet\",\n  \"frequency\": \"Once daily\",\n  \"route\": \"oral\",\n  \"instructions\": \"Take with food in the morning\",\n  \"prescribedBy\": \"Dr. Smith\",\n  \"prescribedDate\": \"2024-01-01\",\n  \"isActive\": true,\n  \"isPRN\": false,\n  \"pharmacy\": \"CVS Pharmacy\",\n  \"refillsRemaining\": 3,\n  \"sideEffects\": [\"Dizziness\", \"Dry cough\"],\n  \"notes\": \"Monitor blood pressure weekly\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/medications",
+							"host": ["{{baseUrl}}"],
+							"path": ["medications"]
+						},
+						"description": "Create a new medication record"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"Status code is 201\", function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"",
+									"pm.test(\"Medication created\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.expect(jsonData.data).to.have.property('id');",
+									"    pm.environment.set('medicationId', jsonData.data.id);",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Update Medication",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"dosage\": \"20mg\",\n  \"strength\": \"20mg\",\n  \"refillsRemaining\": 2\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/medications/{{medicationId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["medications", "{{medicationId}}"]
+						},
+						"description": "Update an existing medication"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Medication",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/medications/{{medicationId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["medications", "{{medicationId}}"]
+						},
+						"description": "Delete a medication"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Medication Reminders",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/medications/{{medicationId}}/reminders",
+							"host": ["{{baseUrl}}"],
+							"path": ["medications", "{{medicationId}}", "reminders"]
+						},
+						"description": "Get all reminders for a medication"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Medication Reminder",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reminderTime\": \"08:00\",\n  \"days\": [\"monday\", \"tuesday\", \"wednesday\", \"thursday\", \"friday\"],\n  \"isActive\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/medications/{{medicationId}}/reminders",
+							"host": ["{{baseUrl}}"],
+							"path": ["medications", "{{medicationId}}", "reminders"]
+						},
+						"description": "Create a new reminder for a medication"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"Status code is 201\", function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"",
+									"pm.test(\"Reminder created\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.environment.set('reminderId', jsonData.data.id);",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Update Medication Reminder",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reminderTime\": \"09:00\",\n  \"isActive\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/medications/reminders/{{reminderId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["medications", "reminders", "{{reminderId}}"]
+						},
+						"description": "Update a medication reminder"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Medication Reminder",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/medications/reminders/{{reminderId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["medications", "reminders", "{{reminderId}}"]
+						},
+						"description": "Delete a medication reminder"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Drug Search",
+			"description": "Drug search and information endpoints using RxNorm and DailyMed APIs",
+			"item": [
+				{
+					"name": "Search Drugs",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/drugs/search?q=lisinopril&limit=20",
+							"host": ["{{baseUrl}}"],
+							"path": ["drugs", "search"],
+							"query": [
+								{
+									"key": "q",
+									"value": "lisinopril",
+									"description": "Drug name to search (minimum 2 characters)"
+								},
+								{
+									"key": "limit",
+									"value": "20",
+									"description": "Maximum number of results"
+								}
+							]
+						},
+						"description": "Search for drugs by name using RxNorm API"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response contains search results\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.expect(jsonData.data).to.be.an('array');",
+									"    if (jsonData.data.length > 0) {",
+									"        pm.environment.set('rxcui', jsonData.data[0].rxcui);",
+									"    }",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Get Drug Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/drugs/{{rxcui}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["drugs", "{{rxcui}}"]
+						},
+						"description": "Get detailed information about a drug by RXCUI"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Drug Interactions",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/drugs/{{rxcui}}/interactions",
+							"host": ["{{baseUrl}}"],
+							"path": ["drugs", "{{rxcui}}", "interactions"]
+						},
+						"description": "Get drug-drug interactions for a specific RXCUI"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Drug Images",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/drugs/{{rxcui}}/images",
+							"host": ["{{baseUrl}}"],
+							"path": ["drugs", "{{rxcui}}", "images"]
+						},
+						"description": "Get images of a drug by RXCUI"
+					},
+					"response": []
+				},
+				{
+					"name": "Search Drug Images by Name",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/drugs/images/search?name=Lisinopril",
+							"host": ["{{baseUrl}}"],
+							"path": ["drugs", "images", "search"],
+							"query": [
+								{
+									"key": "name",
+									"value": "Lisinopril"
+								}
+							]
+						},
+						"description": "Search for drug images by drug name"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Clinical Information",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/drugs/{{rxcui}}/clinical-info",
+							"host": ["{{baseUrl}}"],
+							"path": ["drugs", "{{rxcui}}", "clinical-info"]
+						},
+						"description": "Get clinical information (indications, dosage, warnings) from DailyMed"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Spelling Suggestions",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/drugs/suggestions/lisino",
+							"host": ["{{baseUrl}}"],
+							"path": ["drugs", "suggestions", "lisino"]
+						},
+						"description": "Get spelling suggestions for a drug search term"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Related Drugs",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/drugs/{{rxcui}}/related",
+							"host": ["{{baseUrl}}"],
+							"path": ["drugs", "{{rxcui}}", "related"]
+						},
+						"description": "Get related drugs (brand names, generics, etc.)"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Invitations",
+			"description": "Patient invitation and family group joining endpoints",
+			"item": [
+				{
+					"name": "Send Invitation",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"patient@example.com\",\n  \"patientName\": \"Jane Smith\",\n  \"message\": \"I'd like to help manage your medications\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/invitations/send",
+							"host": ["{{baseUrl}}"],
+							"path": ["invitations", "send"]
+						},
+						"description": "Send an invitation to a patient to join your family group"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"Status code is 201\", function () {",
+									"    pm.response.to.have.status(201);",
+									"});",
+									"",
+									"pm.test(\"Invitation sent\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"    pm.expect(jsonData.data).to.have.property('invitationId');",
+									"    pm.environment.set('invitationId', jsonData.data.invitationId);",
+									"});"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Get Invitation Details",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/invitations/{{invitationId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["invitations", "{{invitationId}}"]
+						},
+						"description": "Get details of a specific invitation (no auth required)"
+					},
+					"response": []
+				},
+				{
+					"name": "Accept Invitation",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/invitations/{{invitationId}}/accept",
+							"host": ["{{baseUrl}}"],
+							"path": ["invitations", "{{invitationId}}", "accept"]
+						},
+						"description": "Accept an invitation and join the family group"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Sent Invitations",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/invitations/sent",
+							"host": ["{{baseUrl}}"],
+							"path": ["invitations", "sent"]
+						},
+						"description": "Get all invitations sent by the authenticated user"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Family",
+			"description": "Family group management endpoints",
+			"item": [
+				{
+					"name": "Get Family Group",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{authToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/family/group",
+							"host": ["{{baseUrl}}"],
+							"path": ["family", "group"]
+						},
+						"description": "Get the family group for the authenticated user"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response has success field\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('success');",
+									"});"
+								]
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "System",
+			"description": "System and health check endpoints",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/health",
+							"host": ["{{baseUrl}}"],
+							"path": ["health"]
+						},
+						"description": "Check API health status (no auth required)"
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"API is healthy\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.success).to.be.true;",
+									"});"
+								]
+							}
+						}
+					]
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:5001/kinconnect-dev/us-central1/api",
+			"type": "string"
+		},
+		{
+			"key": "authToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "medicationId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "reminderId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "invitationId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "rxcui",
+			"value": "104377",
+			"type": "string"
+		}
+	]
+}

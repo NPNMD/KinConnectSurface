@@ -49,6 +49,19 @@ service cloud.firestore {
       allow write: if request.auth != null;
     }
     
+    // Audit logs - write-only via server, admin read access only
+    // Note: In production, implement role-based access for admin users
+    match /audit_logs/{logId} {
+      // Deny all client-side writes (logs are created server-side only)
+      allow write: if false;
+      
+      // Allow users to read their own audit logs
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      
+      // TODO: Add admin role check for full audit log access
+      // allow read: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
     // Allow authenticated users to read/write their own data by default
     match /{document=**} {
       allow read, write: if request.auth != null;

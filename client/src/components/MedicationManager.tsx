@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Calendar, Pill, Save, X, AlertTriangle, CheckCircle, Info } from 'lucide-react';
-import { Medication, NewMedication } from '@shared/types';
+import { Plus, Edit, Trash2, Calendar, Pill, Save, X, AlertTriangle, CheckCircle, Info, Clock, Bell } from 'lucide-react';
+import { Medication, NewMedication, MedicationReminder, NewMedicationReminder } from '@shared/types';
 import { DrugConcept, drugApiService } from '@/lib/drugApi';
+import { apiClient } from '@/lib/api';
 import MedicationSearch from './MedicationSearch';
 
 interface MedicationManagerProps {
   patientId: string;
   medications: Medication[];
-  onAddMedication: (medication: NewMedication) => Promise<void>;
+  onAddMedication: (medication: NewMedication) => Promise<Medication | void>;
   onUpdateMedication: (id: string, medication: Partial<Medication>) => Promise<void>;
   onDeleteMedication: (id: string) => Promise<void>;
   isLoading?: boolean;
@@ -65,6 +66,25 @@ const COMMON_DOSAGE_FORMS = [
   'gel', 'patch', 'inhaler', 'drops', 'spray', 'powder', 'suppository', 'lozenge'
 ];
 
+// Weekdays for reminders
+const WEEKDAYS = [
+  { value: 'monday', label: 'Mon' },
+  { value: 'tuesday', label: 'Tue' },
+  { value: 'wednesday', label: 'Wed' },
+  { value: 'thursday', label: 'Thu' },
+  { value: 'friday', label: 'Fri' },
+  { value: 'saturday', label: 'Sat' },
+  { value: 'sunday', label: 'Sun' }
+] as const;
+
+type DayOfWeek = typeof WEEKDAYS[number]['value'];
+
+interface ReminderFormData {
+  id?: string;
+  time: string;
+  days: DayOfWeek[];
+}
+
 // Common routes for validation
 const MEDICATION_ROUTES = [
   { value: 'oral', label: 'Oral (by mouth)' },
@@ -96,6 +116,40 @@ export default function MedicationManager({
   const [isCheckingInteractions, setIsCheckingInteractions] = useState(false);
   const [relatedDrugs, setRelatedDrugs] = useState<DrugConcept[]>([]);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  
+  // Reminder state
+  const [reminders, setReminders] = useState<ReminderFormData[]>([]);
+  const [initialReminders, setInitialReminders] = useState<MedicationReminder[]>([]);
+  const [showReminderForm, setShowReminderForm] = useState(false);
+
+  const addReminder = () => {
+    setReminders(prev => [...prev, { time: '08:00', days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] }]);
+  };
+
+  const removeReminder = (index: number) => {
+    setReminders(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const updateReminder = (index: number, field: keyof ReminderFormData, value: any) => {
+    setReminders(prev => prev.map((reminder, i) => {
+      if (i === index) {
+        return { ...reminder, [field]: value };
+      }
+      return reminder;
+    }));
+  };
+
+  const toggleDay = (reminderIndex: number, day: DayOfWeek) => {
+    setReminders(prev => prev.map((reminder, i) => {
+      if (i === reminderIndex) {
+        const days = reminder.days.includes(day)
+          ? reminder.days.filter(d => d !== day)
+          : [...reminder.days, day];
+        return { ...reminder, days };
+      }
+      return reminder;
+    }));
+  };
 
   const handleDrugSelect = async (drug: DrugConcept) => {
     console.log('🔍 Selected drug:', drug);
@@ -292,14 +346,48 @@ export default function MedicationManager({
 
       console.log('🔍 MedicationManager: Prepared medication data:', medicationData);
 
+      let savedMedicationId: string | undefined;
+
       if (editingMedicationId) {
         console.log('🔍 MedicationManager: Updating medication:', editingMedicationId);
         await onUpdateMedication(editingMedicationId, medicationData);
-        setEditingMedicationId(null);
+        savedMedicationId = editingMedicationId;
       } else {
         console.log('🔍 MedicationManager: Adding new medication');
-        await onAddMedication(medicationData);
+        const newMedication = await onAddMedication(medicationData);
+        if (newMedication) {
+            savedMedicationId = newMedication.id;
+        }
         setIsAddingMedication(false);
+      }
+
+      // Save Reminders
+      if (savedMedicationId) {
+        // 1. Delete removed reminders
+        const currentReminderIds = reminders.map(r => r.id).filter(Boolean);
+        const remindersToDelete = initialReminders.filter(r => !currentReminderIds.includes(r.id));
+        
+        await Promise.all(remindersToDelete.map(r => 
+          apiClient.delete(`/api/medications/reminders/${r.id}`)
+        ));
+
+        // 2. Create or update reminders
+        await Promise.all(reminders.map(r => {
+          if (r.id) {
+            // Update
+             return apiClient.put(`/api/medications/reminders/${r.id}`, {
+              reminderTime: r.time,
+              days: r.days
+            });
+          } else {
+            // Create
+            return apiClient.post(`/api/medications/${savedMedicationId}/reminders`, {
+              reminderTime: r.time,
+              days: r.days,
+              isActive: true
+            });
+          }
+        }));
       }
 
       console.log('✅ MedicationManager: Medication saved successfully');
@@ -312,7 +400,7 @@ export default function MedicationManager({
     }
   };
 
-  const handleEdit = (medication: Medication) => {
+  const handleEdit = async (medication: Medication) => {
     setFormData({
       name: medication.name,
       genericName: medication.genericName || '',
@@ -347,6 +435,25 @@ export default function MedicationManager({
     });
     setEditingMedicationId(medication.id);
     setIsAddingMedication(true);
+
+    // Fetch reminders
+    try {
+      const response = await apiClient.get<MedicationReminder[]>(`/api/medications/${medication.id}/reminders`);
+      if (response.success && response.data) {
+        setInitialReminders(response.data);
+        setReminders(response.data.map(r => ({
+          id: r.id,
+          time: r.reminderTime,
+          days: r.days as DayOfWeek[]
+        })));
+      } else {
+        setInitialReminders([]);
+        setReminders([]);
+      }
+    } catch (error) {
+      console.error('Error fetching reminders:', error);
+      setReminders([]);
+    }
   };
 
   const handleCancel = () => {
@@ -357,6 +464,8 @@ export default function MedicationManager({
     setDrugInteractions([]);
     setRelatedDrugs([]);
     setDuplicateWarning(null);
+    setReminders([]);
+    setInitialReminders([]);
   };
 
   const handleDelete = async (medicationId: string) => {
@@ -565,6 +674,80 @@ export default function MedicationManager({
                   <p className="mt-1 text-sm text-red-600">{validationErrors.frequency}</p>
                 )}
               </div>
+
+              {/* Reminder Settings */}
+              {!formData.isPRN && (
+                <div className="md:col-span-2 bg-blue-50 p-4 rounded-lg border border-blue-100">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center space-x-2">
+                      <Bell className="w-5 h-5 text-blue-600" />
+                      <h5 className="font-medium text-blue-900">Reminders</h5>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addReminder}
+                      className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center space-x-1"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Add Reminder Time</span>
+                    </button>
+                  </div>
+
+                  {reminders.length === 0 ? (
+                    <p className="text-sm text-blue-600 italic">No reminders set. Add times to get notified.</p>
+                  ) : (
+                    <div className="space-y-4">
+                      {reminders.map((reminder, index) => (
+                        <div key={index} className="bg-white p-3 rounded-md border border-blue-200 shadow-sm">
+                          <div className="flex items-start justify-between">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full mr-4">
+                              <div>
+                                <label className="text-xs font-medium text-gray-500 mb-1 block">Time</label>
+                                <div className="flex items-center space-x-2">
+                                  <Clock className="w-4 h-4 text-gray-400" />
+                                  <input
+                                    type="time"
+                                    value={reminder.time}
+                                    onChange={(e) => updateReminder(index, 'time', e.target.value)}
+                                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                                  />
+                                </div>
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-gray-500 mb-1 block">Days</label>
+                                <div className="flex flex-wrap gap-1">
+                                  {WEEKDAYS.map(day => (
+                                    <button
+                                      key={day.value}
+                                      type="button"
+                                      onClick={() => toggleDay(index, day.value)}
+                                      className={`px-2 py-1 text-xs rounded-full border ${
+                                        reminder.days.includes(day.value)
+                                          ? 'bg-blue-100 text-blue-700 border-blue-200'
+                                          : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
+                                      }`}
+                                    >
+                                      {day.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeReminder(index)}
+                              className="text-gray-400 hover:text-red-500 p-1"
+                              title="Remove reminder"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="label">Route</label>

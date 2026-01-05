@@ -168,7 +168,7 @@ export default function PatientProfile() {
   }, [user?.id]);
 
   // Medication management functions
-  const handleAddMedication = async (medication: NewMedication) => {
+  const handleAddMedication = async (medication: NewMedication): Promise<Medication | void> => {
     try {
       setIsLoadingMedications(true);
       const response = await apiClient.post<{ success: boolean; data: Medication }>(
@@ -187,6 +187,7 @@ export default function PatientProfile() {
           updatedAt: new Date(response.data.updatedAt),
         };
         setMedications(prev => [...prev, medicationWithDates]);
+        return medicationWithDates;
       }
     } catch (error) {
       console.error('Error adding medication:', error);

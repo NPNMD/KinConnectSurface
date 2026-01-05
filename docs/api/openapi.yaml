@@ -1,0 +1,1879 @@
+openapi: 3.0.3
+info:
+  title: KinConnect API
+  description: |
+    KinConnect is a comprehensive medication management platform that helps patients and caregivers 
+    manage medications, track adherence, and coordinate care within family groups.
+    
+    ## Features
+    - **Medication Management**: Create, update, and track medications with reminders
+    - **Drug Search**: Search RxNorm database for drug information, interactions, and images
+    - **Family Groups**: Invite and manage family members with role-based access
+    - **Patient Profiles**: Comprehensive patient health information management
+    - **Audit Logging**: Track all access and modifications for compliance
+    
+    ## Authentication
+    All API endpoints require Firebase Authentication using Bearer tokens in the Authorization header:
+    ```
+    Authorization: Bearer <firebase-id-token>
+    ```
+    
+    ## Rate Limiting
+    API requests are limited to 100 requests per 15-minute window per IP address.
+    
+    ## Versioning
+    Current API version: v1
+    
+  version: 1.0.0
+  contact:
+    name: KinConnect Support
+    email: support@kinconnect.app
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:5001/{project-id}/us-central1/api
+    description: Local Development Server
+    variables:
+      project-id:
+        default: kinconnect-dev
+        description: Firebase Project ID
+  - url: https://us-central1-{project-id}.cloudfunctions.net/api
+    description: Production Server
+    variables:
+      project-id:
+        default: kinconnect-prod
+        description: Firebase Project ID
+
+tags:
+  - name: Authentication
+    description: User authentication and profile management
+  - name: Patients
+    description: Patient profile management
+  - name: Medications
+    description: Medication CRUD operations and reminders
+  - name: Drugs
+    description: Drug search and drug information from RxNorm and DailyMed
+  - name: Invitations
+    description: Patient invitation system for family groups
+  - name: Family
+    description: Family group management
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ==================== AUTHENTICATION ====================
+  /auth/profile:
+    get:
+      tags:
+        - Authentication
+      summary: Get or create user profile
+      description: Retrieves the authenticated user's profile, creating one if it doesn't exist
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+              examples:
+                success:
+                  value:
+                    success: true
+                    data:
+                      id: "user123"
+                      email: "john.doe@example.com"
+                      name: "John Doe"
+                      profilePicture: "https://example.com/photo.jpg"
+                      userType: "patient"
+                      createdAt: "2024-01-01T00:00:00Z"
+                      updatedAt: "2024-01-01T00:00:00Z"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ==================== PATIENTS ====================
+  /patients/profile:
+    get:
+      tags:
+        - Patients
+      summary: Get patient profile
+      description: Retrieves the authenticated user's patient profile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Patient profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Patient'
+              examples:
+                success:
+                  value:
+                    success: true
+                    data:
+                      id: "patient123"
+                      userId: "user123"
+                      dateOfBirth: "1980-01-01"
+                      gender: "male"
+                      address: "123 Main St, City, State 12345"
+                      phoneNumber: "+1234567890"
+                      emergencyContact: "Jane Doe - +1987654321"
+                      medicalConditions: ["Hypertension", "Type 2 Diabetes"]
+                      allergies: ["Penicillin", "Peanuts"]
+                      createdAt: "2024-01-01T00:00:00Z"
+                      updatedAt: "2024-01-01T00:00:00Z"
+                no_profile:
+                  value:
+                    success: true
+                    data: null
+                    message: "No patient profile found"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    
+    post:
+      tags:
+        - Patients
+      summary: Create patient profile
+      description: Creates a new patient profile for the authenticated user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatientInput'
+            examples:
+              basic:
+                value:
+                  dateOfBirth: "1980-01-01"
+                  gender: "male"
+                  phoneNumber: "+1234567890"
+              complete:
+                value:
+                  dateOfBirth: "1980-01-01"
+                  gender: "male"
+                  address: "123 Main St, City, State 12345"
+                  phoneNumber: "+1234567890"
+                  emergencyContact: "Jane Doe - +1987654321"
+                  medicalConditions: ["Hypertension", "Type 2 Diabetes"]
+                  allergies: ["Penicillin"]
+      responses:
+        '201':
+          description: Patient profile created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Patient'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    
+    put:
+      tags:
+        - Patients
+      summary: Update or create patient profile
+      description: Updates existing patient profile or creates one if it doesn't exist
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatientInput'
+      responses:
+        '200':
+          description: Patient profile updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Patient'
+        '201':
+          description: Patient profile created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Patient'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ==================== MEDICATIONS ====================
+  /medications:
+    get:
+      tags:
+        - Medications
+      summary: List all medications
+      description: Retrieves all medications for the authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Medications retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Medication'
+              examples:
+                success:
+                  value:
+                    success: true
+                    data:
+                      - id: "med123"
+                        patientId: "user123"
+                        name: "Lisinopril"
+                        genericName: "Lisinopril"
+                        brandName: "Prinivil"
+                        rxcui: "104377"
+                        dosage: "10mg"
+                        frequency: "Once daily"
+                        instructions: "Take with food"
+                        prescribedBy: "Dr. Smith"
+                        prescribedDate: "2024-01-01T00:00:00Z"
+                        isActive: true
+                        createdAt: "2024-01-01T00:00:00Z"
+                        updatedAt: "2024-01-01T00:00:00Z"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    
+    post:
+      tags:
+        - Medications
+      summary: Create a new medication
+      description: Creates a new medication record for the authenticated user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicationInput'
+            examples:
+              basic:
+                value:
+                  name: "Lisinopril"
+                  dosage: "10mg"
+                  frequency: "Once daily"
+                  instructions: "Take with food"
+                  prescribedBy: "Dr. Smith"
+                  isActive: true
+              complete:
+                value:
+                  name: "Lisinopril"
+                  genericName: "Lisinopril"
+                  brandName: "Prinivil"
+                  rxcui: "104377"
+                  ndc: "0378-0710-93"
+                  dosage: "10mg"
+                  strength: "10mg"
+                  dosageForm: "tablet"
+                  frequency: "Once daily"
+                  route: "oral"
+                  instructions: "Take with food in the morning"
+                  prescribedBy: "Dr. Smith"
+                  prescribedDate: "2024-01-01"
+                  startDate: "2024-01-01"
+                  isActive: true
+                  isPRN: false
+                  pharmacy: "CVS Pharmacy"
+                  prescriptionNumber: "RX123456"
+                  refillsRemaining: 3
+                  sideEffects: ["Dizziness", "Dry cough"]
+                  notes: "Monitor blood pressure weekly"
+      responses:
+        '201':
+          description: Medication created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Medication'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /medications/{id}:
+    put:
+      tags:
+        - Medications
+      summary: Update a medication
+      description: Updates an existing medication record
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Medication ID
+          schema:
+            type: string
+          example: "med123"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicationInput'
+      responses:
+        '200':
+          description: Medication updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Medication'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    
+    delete:
+      tags:
+        - Medications
+      summary: Delete a medication
+      description: Deletes a medication record
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Medication ID
+          schema:
+            type: string
+          example: "med123"
+      responses:
+        '200':
+          description: Medication deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                success: true
+                message: "Medication deleted successfully"
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /medications/{medicationId}/reminders:
+    get:
+      tags:
+        - Medications
+      summary: Get medication reminders
+      description: Retrieves all reminders for a specific medication
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: medicationId
+          in: path
+          required: true
+          description: Medication ID
+          schema:
+            type: string
+          example: "med123"
+      responses:
+        '200':
+          description: Reminders retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/MedicationReminder'
+              examples:
+                success:
+                  value:
+                    success: true
+                    data:
+                      - id: "reminder123"
+                        medicationId: "med123"
+                        patientId: "user123"
+                        reminderTime: "08:00"
+                        days: ["monday", "tuesday", "wednesday", "thursday", "friday"]
+                        isActive: true
+                        createdAt: "2024-01-01T00:00:00Z"
+                        updatedAt: "2024-01-01T00:00:00Z"
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    
+    post:
+      tags:
+        - Medications
+      summary: Create medication reminder
+      description: Creates a new reminder for a medication
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: medicationId
+          in: path
+          required: true
+          description: Medication ID
+          schema:
+            type: string
+          example: "med123"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicationReminderInput'
+            examples:
+              daily:
+                value:
+                  reminderTime: "08:00"
+                  days: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+                  isActive: true
+              weekdays:
+                value:
+                  reminderTime: "09:00"
+                  days: ["monday", "tuesday", "wednesday", "thursday", "friday"]
+                  isActive: true
+      responses:
+        '201':
+          description: Reminder created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MedicationReminder'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /medications/reminders/{reminderId}:
+    put:
+      tags:
+        - Medications
+      summary: Update medication reminder
+      description: Updates an existing medication reminder
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: reminderId
+          in: path
+          required: true
+          description: Reminder ID
+          schema:
+            type: string
+          example: "reminder123"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicationReminderInput'
+      responses:
+        '200':
+          description: Reminder updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MedicationReminder'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    
+    delete:
+      tags:
+        - Medications
+      summary: Delete medication reminder
+      description: Deletes a medication reminder
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: reminderId
+          in: path
+          required: true
+          description: Reminder ID
+          schema:
+            type: string
+          example: "reminder123"
+      responses:
+        '200':
+          description: Reminder deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                success: true
+                message: "Reminder deleted successfully"
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ==================== DRUG SEARCH ====================
+  /drugs/search:
+    get:
+      tags:
+        - Drugs
+      summary: Search for drugs
+      description: Search for drugs by name using the RxNorm API
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Drug name search query (minimum 2 characters)
+          schema:
+            type: string
+            minLength: 2
+          example: "lisinopril"
+        - name: limit
+          in: query
+          description: Maximum number of results to return
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          example: 20
+      responses:
+        '200':
+          description: Drug search results
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DrugSearchResult'
+              examples:
+                success:
+                  value:
+                    success: true
+                    data:
+                      - rxcui: "104377"
+                        name: "Lisinopril"
+                        tty: "IN"
+                      - rxcui: "314076"
+                        name: "Lisinopril 10 MG Oral Tablet"
+                        tty: "SCD"
+                    message: "Found 2 drug(s)"
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '503':
+          description: Drug search service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                success: false
+                error: "Drug search service temporarily unavailable"
+
+  /drugs/{rxcui}:
+    get:
+      tags:
+        - Drugs
+      summary: Get drug details
+      description: Get detailed information about a drug by RXCUI
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: rxcui
+          in: path
+          required: true
+          description: RxNorm Concept Unique Identifier
+          schema:
+            type: string
+            pattern: '^\d+$'
+          example: "104377"
+      responses:
+        '200':
+          description: Drug details retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DrugDetails'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '503':
+          description: Drug details service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /drugs/{rxcui}/interactions:
+    get:
+      tags:
+        - Drugs
+      summary: Get drug interactions
+      description: Get drug-drug interactions for a specific RXCUI
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: rxcui
+          in: path
+          required: true
+          description: RxNorm Concept Unique Identifier
+          schema:
+            type: string
+            pattern: '^\d+$'
+          example: "104377"
+      responses:
+        '200':
+          description: Drug interactions retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DrugInteraction'
+              examples:
+                success:
+                  value:
+                    success: true
+                    data:
+                      - drugName: "Potassium"
+                        rxcui: "8588"
+                        severity: "major"
+                        description: "May increase risk of hyperkalemia"
+                    message: "Found 1 interaction(s)"
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '503':
+          description: Drug interactions service unavailable
+
+  /drugs/{rxcui}/images:
+    get:
+      tags:
+        - Drugs
+      summary: Get drug images
+      description: Get images of a drug by RXCUI from RxImage
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: rxcui
+          in: path
+          required: true
+          description: RxNorm Concept Unique Identifier
+          schema:
+            type: string
+            pattern: '^\d+$'
+          example: "104377"
+      responses:
+        '200':
+          description: Drug images retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DrugImage'
+              examples:
+                success:
+                  value:
+                    success: true
+                    data:
+                      - imageUrl: "https://rximage.nlm.nih.gov/image/images/gallery/original/55111-0710-01_RXNAVIMAGE10_B959C5DD.jpg"
+                        ndc: "55111-0710"
+                        name: "Lisinopril 10 MG Oral Tablet"
+                    message: "Found 1 image(s)"
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /drugs/images/search:
+    get:
+      tags:
+        - Drugs
+      summary: Search drug images by name
+      description: Search for drug images by drug name
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: name
+          in: query
+          required: true
+          description: Drug name
+          schema:
+            type: string
+          example: "Lisinopril"
+      responses:
+        '200':
+          description: Drug images retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DrugImage'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /drugs/{rxcui}/clinical-info:
+    get:
+      tags:
+        - Drugs
+      summary: Get clinical information
+      description: Get clinical information for a drug from DailyMed
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: rxcui
+          in: path
+          required: true
+          description: RxNorm Concept Unique Identifier
+          schema:
+            type: string
+            pattern: '^\d+$'
+          example: "104377"
+      responses:
+        '200':
+          description: Clinical information retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ClinicalInformation'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /drugs/suggestions/{term}:
+    get:
+      tags:
+        - Drugs
+      summary: Get spelling suggestions
+      description: Get spelling suggestions for a drug search term
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: term
+          in: path
+          required: true
+          description: Search term (minimum 2 characters)
+          schema:
+            type: string
+            minLength: 2
+          example: "lisino"
+      responses:
+        '200':
+          description: Spelling suggestions retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          type: string
+              examples:
+                success:
+                  value:
+                    success: true
+                    data: ["lisinopril"]
+                    message: "Found 1 suggestion(s)"
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /drugs/{rxcui}/related:
+    get:
+      tags:
+        - Drugs
+      summary: Get related drugs
+      description: Get related drugs (brand names, generics, etc.)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: rxcui
+          in: path
+          required: true
+          description: RxNorm Concept Unique Identifier
+          schema:
+            type: string
+            pattern: '^\d+$'
+          example: "104377"
+      responses:
+        '200':
+          description: Related drugs retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DrugSearchResult'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  # ==================== INVITATIONS ====================
+  /invitations/send:
+    post:
+      tags:
+        - Invitations
+      summary: Send patient invitation
+      description: Send an invitation to a patient to join a family group
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvitationInput'
+            examples:
+              basic:
+                value:
+                  email: "patient@example.com"
+                  patientName: "Jane Smith"
+              with_message:
+                value:
+                  email: "patient@example.com"
+                  patientName: "Jane Smith"
+                  message: "I'd like to help manage your medications"
+      responses:
+        '201':
+          description: Invitation sent successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Invitation'
+              examples:
+                success:
+                  value:
+                    success: true
+                    data:
+                      invitationId: "inv123"
+                      inviterUid: "user123"
+                      inviterName: "John Doe"
+                      inviterEmail: "john@example.com"
+                      patientEmail: "patient@example.com"
+                      patientName: "Jane Smith"
+                      message: "I'd like to help manage your medications"
+                      status: "pending"
+                      createdAt: "2024-01-01T00:00:00Z"
+                      expiresAt: "2024-01-08T00:00:00Z"
+                    message: "Invitation sent successfully"
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /invitations/{invitationId}:
+    get:
+      tags:
+        - Invitations
+      summary: Get invitation details
+      description: Get details of a specific invitation (no auth required for accepting invitations)
+      parameters:
+        - name: invitationId
+          in: path
+          required: true
+          description: Invitation ID
+          schema:
+            type: string
+          example: "inv123"
+      security: []
+      responses:
+        '200':
+          description: Invitation details retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Invitation'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '410':
+          description: Invitation expired or already accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              examples:
+                expired:
+                  value:
+                    success: false
+                    error: "Invitation has expired"
+                accepted:
+                  value:
+                    success: false
+                    error: "Invitation has already been accepted"
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /invitations/{invitationId}/accept:
+    post:
+      tags:
+        - Invitations
+      summary: Accept invitation
+      description: Accept an invitation and join the family group
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: invitationId
+          in: path
+          required: true
+          description: Invitation ID
+          schema:
+            type: string
+          example: "inv123"
+      responses:
+        '200':
+          description: Invitation accepted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                success: true
+                message: "Invitation accepted successfully and family group updated"
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '410':
+          description: Invitation expired or already accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /invitations/sent:
+    get:
+      tags:
+        - Invitations
+      summary: Get sent invitations
+      description: Get all invitations sent by the authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Sent invitations retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Invitation'
+              examples:
+                success:
+                  value:
+                    success: true
+                    data:
+                      - id: "inv123"
+                        inviterUid: "user123"
+                        inviterName: "John Doe"
+                        patientEmail: "patient@example.com"
+                        patientName: "Jane Smith"
+                        status: "pending"
+                        createdAt: "2024-01-01T00:00:00Z"
+                        expiresAt: "2024-01-08T00:00:00Z"
+                    message: "Sent invitations retrieved successfully"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ==================== FAMILY ====================
+  /family/group:
+    get:
+      tags:
+        - Family
+      summary: Get family group
+      description: Get the family group for the authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Family group retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/FamilyGroup'
+              examples:
+                success:
+                  value:
+                    success: true
+                    data:
+                      id: "family123"
+                      createdBy: "user123"
+                      name: "John Doe's Family"
+                      members:
+                        - uid: "user123"
+                          email: "john@example.com"
+                          name: "John Doe"
+                          role: "admin"
+                          joinedAt: "2024-01-01T00:00:00Z"
+                        - uid: "user456"
+                          email: "jane@example.com"
+                          name: "Jane Smith"
+                          role: "member"
+                          joinedAt: "2024-01-02T00:00:00Z"
+                      createdAt: "2024-01-01T00:00:00Z"
+                      updatedAt: "2024-01-02T00:00:00Z"
+                    message: "Family group retrieved successfully"
+                no_group:
+                  value:
+                    success: true
+                    data: null
+                    message: "User is not part of any family group"
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ==================== HEALTH ====================
+  /health:
+    get:
+      tags:
+        - System
+      summary: Health check
+      description: Check API health status
+      security: []
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                success: true
+                message: "Functions API healthy"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Firebase ID token obtained from Firebase Authentication
+
+  schemas:
+    # ==================== CORE TYPES ====================
+    ApiResponse:
+      type: object
+      required:
+        - success
+      properties:
+        success:
+          type: boolean
+          description: Indicates if the request was successful
+        message:
+          type: string
+          description: Human-readable message about the result
+        error:
+          type: string
+          description: Error message if request failed
+        data:
+          description: Response data (type varies by endpoint)
+
+    # ==================== USER & PATIENT ====================
+    User:
+      type: object
+      required:
+        - id
+        - email
+        - name
+        - userType
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          description: User ID (Firebase UID)
+        email:
+          type: string
+          format: email
+          description: User email address
+        name:
+          type: string
+          description: User's full name
+        profilePicture:
+          type: string
+          format: uri
+          description: URL to user's profile picture
+        userType:
+          type: string
+          enum: [patient, family_member, caregiver, healthcare_provider]
+          description: Type of user account
+        familyGroupId:
+          type: string
+          description: ID of the user's family group
+        createdAt:
+          type: string
+          format: date-time
+          description: Timestamp when user was created
+        updatedAt:
+          type: string
+          format: date-time
+          description: Timestamp when user was last updated
+
+    Patient:
+      type: object
+      required:
+        - id
+        - userId
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          description: Patient profile ID
+        userId:
+          type: string
+          description: Associated user ID
+        dateOfBirth:
+          type: string
+          format: date
+          description: Patient's date of birth
+        gender:
+          type: string
+          enum: [male, female, other, prefer_not_to_say]
+          description: Patient's gender
+        address:
+          type: string
+          description: Patient's address
+        phoneNumber:
+          type: string
+          description: Patient's phone number
+        emergencyContact:
+          type: string
+          description: Emergency contact information
+        medicalConditions:
+          type: array
+          items:
+            type: string
+          description: List of medical conditions
+        allergies:
+          type: array
+          items:
+            type: string
+          description: List of allergies
+        createdAt:
+          type: string
+          format: date-time
+          description: Timestamp when profile was created
+        updatedAt:
+          type: string
+          format: date-time
+          description: Timestamp when profile was last updated
+
+    PatientInput:
+      type: object
+      properties:
+        dateOfBirth:
+          type: string
+          format: date
+        gender:
+          type: string
+          enum: [male, female, other, prefer_not_to_say]
+        address:
+          type: string
+        phoneNumber:
+          type: string
+        emergencyContact:
+          type: string
+        medicalConditions:
+          type: array
+          items:
+            type: string
+        allergies:
+          type: array
+          items:
+            type: string
+
+    # ==================== MEDICATION ====================
+    Medication:
+      type: object
+      required:
+        - id
+        - patientId
+        - name
+        - dosage
+        - frequency
+        - instructions
+        - prescribedBy
+        - prescribedDate
+        - isActive
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          description: Medication ID
+        patientId:
+          type: string
+          description: Patient ID this medication belongs to
+        name:
+          type: string
+          description: Medication name
+        genericName:
+          type: string
+          description: Generic name of the medication
+        brandName:
+          type: string
+          description: Brand name of the medication
+        rxcui:
+          type: string
+          description: RxNorm Concept Unique Identifier
+        ndc:
+          type: string
+          description: National Drug Code
+        dosage:
+          type: string
+          description: Dosage amount (e.g., "10mg")
+        strength:
+          type: string
+          description: Medication strength
+        dosageForm:
+          type: string
+          description: Form of medication (tablet, capsule, liquid, etc.)
+        frequency:
+          type: string
+          description: How often to take (e.g., "Once daily")
+        route:
+          type: string
+          description: Route of administration (oral, topical, injection, etc.)
+        instructions:
+          type: string
+          description: Specific instructions for taking the medication
+        prescribedBy:
+          type: string
+          description: Name of prescribing physician
+        prescribedDate:
+          type: string
+          format: date-time
+          description: Date medication was prescribed
+        startDate:
+          type: string
+          format: date-time
+          description: Date to start taking medication
+        endDate:
+          type: string
+          format: date-time
+          description: Date to stop taking medication
+        isActive:
+          type: boolean
+          description: Whether medication is currently active
+        isPRN:
+          type: boolean
+          description: Whether medication is taken "as needed"
+        maxDailyDose:
+          type: string
+          description: Maximum daily dose
+        sideEffects:
+          type: array
+          items:
+            type: string
+          description: Known side effects
+        notes:
+          type: string
+          description: Additional notes
+        pharmacy:
+          type: string
+          description: Pharmacy name
+        prescriptionNumber:
+          type: string
+          description: Prescription number
+        refillsRemaining:
+          type: integer
+          description: Number of refills remaining
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    MedicationInput:
+      type: object
+      required:
+        - name
+        - dosage
+        - frequency
+        - instructions
+        - prescribedBy
+        - isActive
+      properties:
+        name:
+          type: string
+        genericName:
+          type: string
+        brandName:
+          type: string
+        rxcui:
+          type: string
+        ndc:
+          type: string
+        dosage:
+          type: string
+        strength:
+          type: string
+        dosageForm:
+          type: string
+        frequency:
+          type: string
+        route:
+          type: string
+        instructions:
+          type: string
+        prescribedBy:
+          type: string
+        prescribedDate:
+          type: string
+          format: date
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        isActive:
+          type: boolean
+        isPRN:
+          type: boolean
+        maxDailyDose:
+          type: string
+        sideEffects:
+          type: array
+          items:
+            type: string
+        notes:
+          type: string
+        pharmacy:
+          type: string
+        prescriptionNumber:
+          type: string
+        refillsRemaining:
+          type: integer
+
+    MedicationReminder:
+      type: object
+      required:
+        - id
+        - medicationId
+        - patientId
+        - reminderTime
+        - days
+        - isActive
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          description: Reminder ID
+        medicationId:
+          type: string
+          description: Associated medication ID
+        patientId:
+          type: string
+          description: Associated patient ID
+        reminderTime:
+          type: string
+          pattern: '^([0-1][0-9]|2[0-3]):[0-5][0-9]$'
+          description: Time of day for reminder (HH:MM format)
+          example: "08:00"
+        days:
+          type: array
+          items:
+            type: string
+            enum: [monday, tuesday, wednesday, thursday, friday, saturday, sunday]
+          description: Days of the week for reminder
+        isActive:
+          type: boolean
+          description: Whether reminder is active
+        lastNotified:
+          type: string
+          format: date-time
+          description: Last time notification was sent
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    MedicationReminderInput:
+      type: object
+      required:
+        - reminderTime
+        - days
+        - isActive
+      properties:
+        reminderTime:
+          type: string
+          pattern: '^([0-1][0-9]|2[0-3]):[0-5][0-9]$'
+          example: "08:00"
+        days:
+          type: array
+          items:
+            type: string
+            enum: [monday, tuesday, wednesday, thursday, friday, saturday, sunday]
+        isActive:
+          type: boolean
+
+    # ==================== DRUG SEARCH ====================
+    DrugSearchResult:
+      type: object
+      required:
+        - rxcui
+        - name
+      properties:
+        rxcui:
+          type: string
+          description: RxNorm Concept Unique Identifier
+        name:
+          type: string
+          description: Drug name
+        synonym:
+          type: string
+          description: Synonym for the drug
+        tty:
+          type: string
+          description: Term type (IN, SBD, SCD, GPCK, etc.)
+        language:
+          type: string
+          description: Language of the term
+
+    DrugDetails:
+      type: object
+      properties:
+        rxcui:
+          type: string
+        name:
+          type: string
+        synonym:
+          type: string
+        tty:
+          type: string
+        language:
+          type: string
+        suppress:
+          type: string
+        umlscui:
+          type: string
+
+    DrugInteraction:
+      type: object
+      required:
+        - drugName
+        - rxcui
+        - description
+      properties:
+        drugName:
+          type: string
+          description: Name of the interacting drug
+        rxcui:
+          type: string
+          description: RXCUI of the interacting drug
+        severity:
+          type: string
+          enum: [minor, moderate, major]
+          description: Severity of the interaction
+        description:
+          type: string
+          description: Description of the interaction
+        source:
+          type: string
+          description: Source of the interaction information
+
+    DrugImage:
+      type: object
+      required:
+        - imageUrl
+      properties:
+        imageUrl:
+          type: string
+          format: uri
+          description: URL to the drug image
+        ndc:
+          type: string
+          description: National Drug Code
+        name:
+          type: string
+          description: Drug name
+
+    ClinicalInformation:
+      type: object
+      properties:
+        setid:
+          type: string
+          description: DailyMed Set ID
+        title:
+          type: string
+          description: Drug title
+        published_date:
+          type: string
+          format: date
+          description: Publication date
+        indications_and_usage:
+          type: string
+          description: Indications and usage information
+        dosage_and_administration:
+          type: string
+          description: Dosage and administration instructions
+        warnings_and_cautions:
+          type: string
+          description: Warnings and precautions
+        adverse_reactions:
+          type: string
+          description: Adverse reactions
+        drug_interactions:
+          type: string
+          description: Drug interactions information
+
+    # ==================== INVITATIONS & FAMILY ====================
+    Invitation:
+      type: object
+      required:
+        - inviterUid
+        - inviterName
+        - inviterEmail
+        - patientEmail
+        - patientName
+        - status
+        - createdAt
+        - expiresAt
+      properties:
+        id:
+          type: string
+          description: Invitation ID
+        invitationId:
+          type: string
+          description: Invitation ID (alternative field name)
+        inviterUid:
+          type: string
+          description: UID of the user sending the invitation
+        inviterName:
+          type: string
+          description: Name of the inviter
+        inviterEmail:
+          type: string
+          format: email
+          description: Email of the inviter
+        patientEmail:
+          type: string
+          format: email
+          description: Email of the invited patient
+        patientName:
+          type: string
+          description: Name of the invited patient
+        message:
+          type: string
+          description: Optional message from inviter
+        status:
+          type: string
+          enum: [pending, accepted, rejected, expired]
+          description: Status of the invitation
+        acceptedBy:
+          type: string
+          description: UID of user who accepted the invitation
+        acceptedAt:
+          type: string
+          format: date-time
+          description: Timestamp when invitation was accepted
+        createdAt:
+          type: string
+          format: date-time
+          description: Timestamp when invitation was created
+        expiresAt:
+          type: string
+          format: date-time
+          description: Timestamp when invitation expires
+
+    InvitationInput:
+      type: object
+      required:
+        - email
+        - patientName
+      properties:
+        email:
+          type: string
+          format: email
+          description: Email address of the patient to invite
+        patientName:
+          type: string
+          description: Full name of the patient
+        message:
+          type: string
+          description: Optional personal message
+
+    FamilyGroup:
+      type: object
+      required:
+        - id
+        - createdBy
+        - name
+        - members
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          description: Family group ID
+        createdBy:
+          type: string
+          description: UID of the user who created the group
+        name:
+          type: string
+          description: Name of the family group
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/FamilyMember'
+          description: List of family group members
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    FamilyMember:
+      type: object
+      required:
+        - uid
+        - email
+        - name
+        - role
+        - joinedAt
+      properties:
+        uid:
+          type: string
+          description: User ID
+        email:
+          type: string
+          format: email
+          description: Member email
+        name:
+          type: string
+          description: Member name
+        role:
+          type: string
+          enum: [admin, member]
+          description: Role in family group
+        joinedAt:
+          type: string
+          format: date-time
+          description: Timestamp when member joined
+
+  # ==================== RESPONSES ====================
+  responses:
+    UnauthorizedError:
+      description: Authentication required or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiResponse'
+          examples:
+            missing_token:
+              value:
+                success: false
+                error: "Authorization header required"
+            invalid_token:
+              value:
+                success: false
+                error: "Invalid or expired token"
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiResponse'
+          examples:
+            not_found:
+              value:
+                success: false
+                error: "Resource not found"
+
+    BadRequestError:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiResponse'
+          examples:
+            validation_error:
+              value:
+                success: false
+                error: "Invalid request parameters"
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiResponse'
+          examples:
+            server_error:
+              value:
+                success: false
+                error: "Internal server error"
