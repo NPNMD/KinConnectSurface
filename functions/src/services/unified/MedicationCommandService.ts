@@ -62,6 +62,7 @@ export interface CreateMedicationCommandRequest {
     isIndefinite: boolean;
     dosageAmount: string;
     scheduleInstructions?: string;
+    timezone?: string;
     
     // New flexible scheduling options
     usePatientTimePreferences?: boolean; // Use patient's time bucket preferences

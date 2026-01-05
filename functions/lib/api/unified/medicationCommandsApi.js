@@ -442,17 +442,30 @@ router.get('/:commandId', async (req, res) => {
  */
 router.put('/:commandId', async (req, res) => {
     try {
-        console.log('📝 PUT /medication-commands/:id - Updating medication:', req.params.commandId);
+        const { commandId } = req.params;
+        // Frontend sends { updates: {...}, reason: "...", notifyFamily: false }
+        // Backend should extract updates from req.body.updates
+        const updates = req.body.updates || req.body; // Support both formats
         const userId = req.user?.uid;
+        console.log('📝 [BACKEND] PUT /medication-commands/:id - Received update request:', {
+            commandId,
+            userId,
+            requestBody: JSON.stringify(req.body, null, 2),
+            hasUpdatesKey: !!req.body.updates,
+            updatesFromBody: req.body.updates ? 'req.body.updates' : 'req.body',
+            hasScheduleData: !!updates.scheduleData,
+            hasReminderSettings: !!updates.reminderSettings,
+            scheduleTimes: updates.scheduleData?.times,
+            reminderEnabled: updates.reminderSettings?.enabled,
+            updatesKeys: Object.keys(updates)
+        });
         if (!userId) {
             return res.status(401).json({
                 success: false,
                 error: 'Authentication required'
             });
         }
-        const { commandId } = req.params;
-        const updates = req.body;
-        // Get current command to check permissions
+        // Get current command to check permissions and detect schedule changes
         const currentResult = await getCommandService().getCommand(commandId);
         if (!currentResult.success || !currentResult.data) {
             return res.status(404).json({
@@ -460,18 +473,77 @@ router.put('/:commandId', async (req, res) => {
                 error: 'Medication not found'
             });
         }
+        const currentCommand = currentResult.data;
         // Check access permissions
-        if (currentResult.data.patientId !== userId) {
+        if (currentCommand.patientId !== userId) {
             // TODO: Add family access validation here
             return res.status(403).json({
                 success: false,
                 error: 'Access denied'
             });
         }
-        // Execute update
+        // Map frontend format (scheduleData, reminderSettings) to command format (schedule, reminders)
+        const mappedUpdates = { ...updates };
+        if (updates.scheduleData) {
+            mappedUpdates.schedule = {
+                ...currentCommand.schedule,
+                ...updates.scheduleData,
+                // Ensure dates are Date objects
+                startDate: updates.scheduleData.startDate
+                    ? (updates.scheduleData.startDate instanceof Date ? updates.scheduleData.startDate : new Date(updates.scheduleData.startDate))
+                    : currentCommand.schedule.startDate,
+                endDate: updates.scheduleData.endDate !== undefined
+                    ? (updates.scheduleData.endDate === null ? null : (updates.scheduleData.endDate instanceof Date ? updates.scheduleData.endDate : new Date(updates.scheduleData.endDate)))
+                    : currentCommand.schedule.endDate
+            };
+            delete mappedUpdates.scheduleData;
+        }
+        if (updates.reminderSettings) {
+            mappedUpdates.reminders = {
+                ...currentCommand.reminders,
+                ...updates.reminderSettings
+            };
+            delete mappedUpdates.reminderSettings;
+        }
+        if (updates.medicationData) {
+            mappedUpdates.medication = {
+                ...currentCommand.medication,
+                ...updates.medicationData
+            };
+            delete mappedUpdates.medicationData;
+        }
+        if (updates.status) {
+            mappedUpdates.status = {
+                ...currentCommand.status,
+                ...updates.status
+            };
+        }
+        // Detect if schedule times or reminder settings changed
+        const scheduleChanged = (updates.scheduleData?.times !== undefined &&
+            JSON.stringify(updates.scheduleData.times) !== JSON.stringify(currentCommand.schedule.times)) ||
+            (updates.reminderSettings?.enabled !== undefined &&
+                updates.reminderSettings.enabled !== currentCommand.reminders.enabled) ||
+            (updates.scheduleData?.frequency !== undefined &&
+                updates.scheduleData.frequency !== currentCommand.schedule.frequency);
+        console.log('🔍 [BACKEND] Schedule change detection:', {
+            scheduleChanged,
+            currentTimes: currentCommand.schedule.times,
+            newTimes: updates.scheduleData?.times,
+            timesChanged: updates.scheduleData?.times !== undefined &&
+                JSON.stringify(updates.scheduleData.times) !== JSON.stringify(currentCommand.schedule.times),
+            currentRemindersEnabled: currentCommand.reminders.enabled,
+            newRemindersEnabled: updates.reminderSettings?.enabled,
+            remindersChanged: updates.reminderSettings?.enabled !== undefined &&
+                updates.reminderSettings.enabled !== currentCommand.reminders.enabled,
+            currentFrequency: currentCommand.schedule.frequency,
+            newFrequency: updates.scheduleData?.frequency,
+            frequencyChanged: updates.scheduleData?.frequency !== undefined &&
+                updates.scheduleData.frequency !== currentCommand.schedule.frequency
+        });
+        // Execute update with mapped format
         const result = await getCommandService().updateCommand({
             commandId,
-            updates,
+            updates: mappedUpdates,
             updatedBy: userId,
             reason: 'User update via API'
         });
@@ -482,12 +554,54 @@ router.put('/:commandId', async (req, res) => {
                 validation: result.validation
             });
         }
-        res.json({
+        // Regenerate calendar events if schedule changed
+        let regenerationResult = null;
+        if (scheduleChanged && result.data) {
+            console.log('🔄 [BACKEND] Schedule changed, regenerating calendar events...', {
+                commandId,
+                updatedCommandSchedule: result.data.schedule,
+                updatedCommandReminders: result.data.reminders
+            });
+            const orchestrator = new MedicationOrchestrator_1.MedicationOrchestrator();
+            regenerationResult = await orchestrator.regenerateScheduledEvents(commandId);
+            console.log('🔄 [BACKEND] Regeneration result:', {
+                success: regenerationResult.success,
+                created: regenerationResult.created,
+                error: regenerationResult.error
+            });
+            if (!regenerationResult.success) {
+                console.warn('⚠️ [BACKEND] Failed to regenerate events:', regenerationResult.error);
+                // Don't fail the update, but log the warning
+            }
+            else {
+                console.log(`✅ [BACKEND] Regenerated events: created ${regenerationResult.created}`);
+            }
+        }
+        else {
+            console.log('ℹ️ [BACKEND] No schedule change detected, skipping event regeneration');
+        }
+        // Frontend expects { data: { command: MedicationCommand, workflow: {...} } }
+        // But updateCommand returns { data: MedicationCommand } directly
+        const responseData = {
             success: true,
-            data: result.data,
+            data: {
+                command: result.data, // Wrap command in data.command for frontend compatibility
+                workflow: regenerationResult ? {
+                    eventsCreated: regenerationResult.created
+                } : undefined
+            },
             validation: result.validation,
             message: 'Medication updated successfully'
+        };
+        console.log('✅ [BACKEND] Sending success response:', {
+            success: responseData.success,
+            commandId: responseData.data?.command?.id,
+            scheduleTimes: responseData.data?.command?.schedule?.times,
+            remindersEnabled: responseData.data?.command?.reminders?.enabled,
+            eventsCreated: responseData.data?.workflow?.eventsCreated,
+            hasCommand: !!responseData.data?.command
         });
+        res.json(responseData);
     }
     catch (error) {
         console.error('❌ Error in PUT /medication-commands/:id:', error);

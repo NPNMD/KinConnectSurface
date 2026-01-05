@@ -1,10 +1,10 @@
 import { apiClient, API_ENDPOINTS } from './api';
+import { unifiedMedicationApi } from './unifiedMedicationApi';
 import type {
   UnifiedCalendarEvent,
   DeleteMedicalEventRequest,
   DeleteMedicalEventResponse,
   MedicalEvent,
-  MedicationCalendarEvent,
   ApiResponse
 } from '@shared/types';
 
@@ -12,45 +12,24 @@ import type {
  * Transform medical event to unified calendar event
  */
 function transformMedicalEvent(event: MedicalEvent): UnifiedCalendarEvent {
-  // DEBUG: Log transformation input
-  console.log('🔍 DEBUG: Transforming medical event:', {
-    id: event.id,
-    startDateTime: event.startDateTime,
-    startDateTimeType: typeof event.startDateTime,
-    isDate: event.startDateTime instanceof Date
-  });
-  
   // Robust date conversion helper
   const ensureDate = (value: any, fieldName: string): Date => {
-    console.log(`🔍 DEBUG: Converting ${fieldName}:`, {
-      value,
-      type: typeof value,
-      isDate: value instanceof Date,
-      hasToDate: typeof value?.toDate === 'function'
-    });
-    
     if (!value) {
-      console.warn(`⚠️ ${fieldName} is null/undefined, using current date`);
       return new Date();
     }
     if (value instanceof Date) {
-      console.log(`✅ ${fieldName} is already a Date`);
       return value;
     }
     if (typeof value === 'object' && typeof value.toDate === 'function') {
-      console.log(`✅ ${fieldName} has toDate() method (Firestore Timestamp)`);
       return value.toDate();
     }
     if (typeof value === 'string' || typeof value === 'number') {
-      console.log(`✅ ${fieldName} is string/number, converting with new Date()`);
       return new Date(value);
     }
-    
-    console.error(`❌ ${fieldName} has unexpected type, using current date as fallback`);
     return new Date();
   };
   
-  const transformed = {
+  return {
     id: event.id,
     type: 'medical' as const,
     patientId: event.patientId,
@@ -74,41 +53,51 @@ function transformMedicalEvent(event: MedicalEvent): UnifiedCalendarEvent {
     createdAt: ensureDate(event.createdAt, 'createdAt'),
     updatedAt: ensureDate(event.updatedAt, 'updatedAt')
   };
-  
-  console.log('🔍 DEBUG: Transformed event dates:', {
-    id: transformed.id,
-    startDateTime: transformed.startDateTime,
-    startDateTimeType: typeof transformed.startDateTime,
-    isDate: transformed.startDateTime instanceof Date,
-    canCallToLocaleTimeString: typeof transformed.startDateTime.toLocaleTimeString === 'function'
-  });
-  
-  return transformed;
 }
 
 /**
- * Transform medication event to unified calendar event
+ * Transform medication event from view API to unified calendar event
  */
-function transformMedicationEvent(event: MedicationCalendarEvent): UnifiedCalendarEvent {
-  const scheduledDateTime = (event.scheduledDateTime as any)?.toDate?.() || new Date(event.scheduledDateTime);
+function transformMedicationViewEvent(event: any): UnifiedCalendarEvent {
+  // Ensure dates are Date objects
+  const ensureDate = (val: any) => val instanceof Date ? val : new Date(val);
+  
+  const scheduledTime = ensureDate(event.scheduledTime);
+  
+  // Determine status for coloring
+  let status = event.status || 'scheduled';
+  if (event.actualTime) status = 'taken';
+  if (event.minutesLate > 0 && !event.actualTime) status = 'late';
   
   return {
-    id: event.id,
+    id: event.eventId,
     type: 'medication',
-    patientId: event.patientId,
+    patientId: event.patientId || '', // Might need to be passed in or inferred
     title: `💊 ${event.medicationName}`,
-    description: `${event.dosageAmount}${event.instructions ? ` - ${event.instructions}` : ''}`,
-    startDateTime: scheduledDateTime,
-    endDateTime: new Date(scheduledDateTime.getTime() + 15 * 60000), // 15 min duration
+    description: `${event.dosageAmount}${event.notes ? ` - ${event.notes}` : ''}`,
+    startDateTime: scheduledTime,
+    endDateTime: new Date(scheduledTime.getTime() + 15 * 60000), // 15 min duration
     isAllDay: false,
-    medicationEvent: event,
-    color: getMedicationStatusColor(event.status),
+    medicationEvent: {
+      id: event.eventId,
+      medicationId: event.commandId,
+      medicationName: event.medicationName,
+      patientId: event.patientId || '',
+      scheduledDateTime: scheduledTime,
+      actualTakenDateTime: event.actualTime ? ensureDate(event.actualTime) : undefined,
+      status: status,
+      dosageAmount: event.dosageAmount,
+      instructions: event.notes,
+      createdAt: new Date(), // Fallback as this might not be in view model
+      updatedAt: new Date()
+    },
+    color: getMedicationStatusColor(status),
     icon: '💊',
     priority: 'medium',
     canEdit: false, // Medication events are read-only in calendar
     canDelete: false, // Medication events cannot be deleted from calendar
-    createdAt: (event.createdAt as any)?.toDate?.() || new Date(event.createdAt),
-    updatedAt: (event.updatedAt as any)?.toDate?.() || new Date(event.updatedAt)
+    createdAt: new Date(),
+    updatedAt: new Date()
   };
 }
 
@@ -178,6 +167,7 @@ function getEventTypeIcon(eventType: string): string {
 
 /**
  * Get unified calendar events from both medical and medication sources
+ * Now uses the Unified Views API for medications
  */
 export async function getUnifiedCalendarEvents(
   patientId: string,
@@ -187,47 +177,55 @@ export async function getUnifiedCalendarEvents(
   try {
     console.log('📅 Fetching unified calendar events for patient:', patientId);
 
-    // Fetch medical events
-    const medicalEventsResponse = await apiClient.get<ApiResponse<MedicalEvent[]>>(
+    // Fetch medical events (Existing API)
+    const medicalEventsPromise = apiClient.get<ApiResponse<MedicalEvent[]>>(
       API_ENDPOINTS.MEDICAL_EVENTS(patientId)
     );
 
-    // Fetch medication calendar events
-    const medicationEventsResponse = await apiClient.get<ApiResponse<MedicationCalendarEvent[]>>(
-      `/medication-calendar/events?patientId=${patientId}`
+    // Fetch medication events (Unified Views API)
+    const params = new URLSearchParams();
+    params.append('patientId', patientId);
+    if (startDate) params.append('startDate', startDate.toISOString());
+    if (endDate) params.append('endDate', endDate.toISOString());
+    params.append('view', 'month'); // Fetch whole month to be safe
+
+    const medicationEventsPromise = apiClient.get<ApiResponse<any>>(
+      `${API_ENDPOINTS.UNIFIED_CALENDAR}?${params.toString()}`
     );
 
-    const medicalEvents: MedicalEvent[] = medicalEventsResponse.success && medicalEventsResponse.data
-      ? medicalEventsResponse.data
-      : [];
-    
-    const medicationEvents: MedicationCalendarEvent[] = medicationEventsResponse.success && medicationEventsResponse.data
-      ? medicationEventsResponse.data
-      : [];
+    const [medicalResponse, medicationResponse] = await Promise.all([
+      medicalEventsPromise,
+      medicationEventsPromise
+    ]);
 
-    console.log('📅 Fetched', medicalEvents.length, 'medical events and', medicationEvents.length, 'medication events');
+    const medicalEvents: MedicalEvent[] = medicalResponse.success && medicalResponse.data
+      ? medicalResponse.data
+      : [];
     
-    // DEBUG: Log the actual data structure of the first medical event
-    if (medicalEvents.length > 0) {
-      const firstEvent = medicalEvents[0];
-      console.log('🔍 DEBUG: First medical event raw data:', {
-        id: firstEvent.id,
-        startDateTime: firstEvent.startDateTime,
-        startDateTimeType: typeof firstEvent.startDateTime,
-        startDateTimeConstructor: firstEvent.startDateTime?.constructor?.name,
-        isDate: firstEvent.startDateTime instanceof Date,
-        hasToDate: typeof (firstEvent.startDateTime as any)?.toDate === 'function',
-        rawValue: JSON.stringify(firstEvent.startDateTime)
+    // Handle unified view response structure
+    // The endpoint returns { eventsByDate: { 'YYYY-MM-DD': [...] } }
+    const medicationViewData = medicationResponse.success && medicationResponse.data 
+      ? medicationResponse.data 
+      : { eventsByDate: {} };
+      
+    const medicationEvents: any[] = [];
+    if (medicationViewData.eventsByDate) {
+      Object.values(medicationViewData.eventsByDate).forEach((dayEvents: any) => {
+        if (Array.isArray(dayEvents)) {
+          medicationEvents.push(...dayEvents);
+        }
       });
     }
+
+    console.log('📅 Fetched', medicalEvents.length, 'medical events and', medicationEvents.length, 'medication events');
 
     // Transform and combine events
     const unifiedEvents: UnifiedCalendarEvent[] = [
       ...medicalEvents.map(transformMedicalEvent),
-      ...medicationEvents.map(transformMedicationEvent)
+      ...medicationEvents.map(event => transformMedicationViewEvent({ ...event, patientId }))
     ];
 
-    // Filter by date range if provided
+    // Filter by date range if provided (double check, though API should have filtered)
     let filteredEvents = unifiedEvents;
     if (startDate || endDate) {
       filteredEvents = unifiedEvents.filter(event => {

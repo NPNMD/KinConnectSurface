@@ -88,6 +88,11 @@ export default function UnscheduledMedicationsAlert({
                 hasValidSchedule = true;
                 continue; // Skip to next medication - this one is properly scheduled
               }
+            } else if ((medication as any).times && Array.isArray((medication as any).times) && (medication as any).times.length > 0) {
+              // Check for flattened unified format (from Medications.tsx)
+              console.log('✅ Medication has schedule times configured (flattened format), skipping calendar validation:', medication.name);
+              hasValidSchedule = true;
+              continue;
             }
             
             try {
@@ -167,6 +172,11 @@ export default function UnscheduledMedicationsAlert({
                     unscheduled.push(medication);
                   }
                 }
+              } else if ((medication as any).times && Array.isArray((medication as any).times) && (medication as any).times.length > 0) {
+                  // Fallback check for flattened unified format
+                  console.log('✅ Medication has schedule times configured (flattened format fallback), skipping calendar validation:', medication.name);
+                  hasValidSchedule = true;
+                  continue;
               } else {
                 // Legacy medication without valid schedule
                 console.log('❌ No valid active schedules for legacy medication:', medication.name);

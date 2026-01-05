@@ -163,57 +163,59 @@ router.get('/today-buckets', async (req, res) => {
       }
 
       // Find scheduled event for today
-      const scheduledEvent = medicationEvents.find(e => 
+      const scheduledEvents = medicationEvents.filter(e => 
         e.eventType === MEDICATION_EVENT_TYPES.DOSE_SCHEDULED
       );
 
-      if (scheduledEvent && scheduledEvent.timing.scheduledFor) {
-        const scheduledTime = scheduledEvent.timing.scheduledFor;
-        const minutesUntilDue = Math.floor((scheduledTime.getTime() - now.getTime()) / (1000 * 60));
-        
-        const bucketItem = {
-          commandId: command.id,
-          eventId: scheduledEvent.id,
-          medicationName: command.medication.name,
-          dosageAmount: command.schedule.dosageAmount,
-          scheduledTime,
-          minutesUntilDue,
-          isOverdue: minutesUntilDue < 0,
-          minutesOverdue: minutesUntilDue < 0 ? Math.abs(minutesUntilDue) : 0,
-          gracePeriodEnd: scheduledEvent.timing.gracePeriodEnd,
-          instructions: command.medication.instructions,
-          timeSlot: command.preferences.timeSlot
-        };
+      for (const scheduledEvent of scheduledEvents) {
+        if (scheduledEvent && scheduledEvent.timing.scheduledFor) {
+          const scheduledTime = scheduledEvent.timing.scheduledFor;
+          const minutesUntilDue = Math.floor((scheduledTime.getTime() - now.getTime()) / (1000 * 60));
+          
+          const bucketItem = {
+            commandId: command.id,
+            eventId: scheduledEvent.id,
+            medicationName: command.medication.name,
+            dosageAmount: command.schedule.dosageAmount,
+            scheduledTime,
+            minutesUntilDue,
+            isOverdue: minutesUntilDue < 0,
+            minutesOverdue: minutesUntilDue < 0 ? Math.abs(minutesUntilDue) : 0,
+            gracePeriodEnd: scheduledEvent.timing.gracePeriodEnd,
+            instructions: command.medication.instructions,
+            timeSlot: command.preferences.timeSlot
+          };
 
-        // Classify into appropriate bucket
-        if (minutesUntilDue < 0) {
-          buckets.overdue.push(bucketItem);
-        } else if (minutesUntilDue <= 15) {
-          buckets.now.push(bucketItem);
-        } else if (minutesUntilDue <= 60) {
-          buckets.dueSoon.push(bucketItem);
-        } else {
-          // Classify by time slot
-          switch (command.preferences.timeSlot) {
-            case 'morning':
-              buckets.morning.push(bucketItem);
-              break;
-            case 'lunch': // Updated from 'noon'
-              buckets.lunch.push(bucketItem);
-              break;
-            case 'evening':
-              buckets.evening.push(bucketItem);
-              break;
-            case 'beforeBed': // Updated from 'bedtime'
-              buckets.beforeBed.push(bucketItem);
-              break;
-            default:
-              // Determine by time
-              const hour = scheduledTime.getHours();
-              if (hour >= 6 && hour < 11) buckets.morning.push(bucketItem);
-              else if (hour >= 11 && hour < 15) buckets.lunch.push(bucketItem); // Updated from 'noon'
-              else if (hour >= 17 && hour < 21) buckets.evening.push(bucketItem);
-              else buckets.beforeBed.push(bucketItem); // Updated from 'bedtime'
+          // Classify into appropriate bucket
+          if (minutesUntilDue < 0) {
+            buckets.overdue.push(bucketItem);
+          } else if (minutesUntilDue <= 15) {
+            buckets.now.push(bucketItem);
+          } else if (minutesUntilDue <= 60) {
+            buckets.dueSoon.push(bucketItem);
+          } else {
+            // Classify by time slot
+            switch (command.preferences.timeSlot) {
+              case 'morning':
+                buckets.morning.push(bucketItem);
+                break;
+              case 'lunch': // Updated from 'noon'
+                buckets.lunch.push(bucketItem);
+                break;
+              case 'evening':
+                buckets.evening.push(bucketItem);
+                break;
+              case 'beforeBed': // Updated from 'bedtime'
+                buckets.beforeBed.push(bucketItem);
+                break;
+              default:
+                // Determine by time
+                const hour = scheduledTime.getHours();
+                if (hour >= 6 && hour < 11) buckets.morning.push(bucketItem);
+                else if (hour >= 11 && hour < 15) buckets.lunch.push(bucketItem); // Updated from 'noon'
+                else if (hour >= 17 && hour < 21) buckets.evening.push(bucketItem);
+                else buckets.beforeBed.push(bucketItem); // Updated from 'bedtime'
+            }
           }
         }
       }

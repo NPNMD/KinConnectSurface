@@ -25,7 +25,7 @@ import type {
   PatientMedicationPreferences
 } from '@shared/types';
 import { unifiedMedicationApi } from '@/lib/unifiedMedicationApi';
-import { createSmartRefresh } from '@/lib/requestDebouncer';
+import { createSmartRefreshWithMount } from '@/lib/requestDebouncer';
 import { useFamily } from '@/contexts/FamilyContext';
 import LoadingSpinner from './LoadingSpinner';
 import QuickActionButtons from '@/components/QuickActionButtons';
@@ -67,7 +67,8 @@ export default function TimeBucketView({
   const { hasPermission, userRole, activePatientAccess } = useFamily();
 
   // Create smart refresh function with shorter interval for user actions
-  const smartLoadTodaysBuckets = createSmartRefresh(
+  // Use smartRefreshWithMount to allow bypassing cache on initial load
+  const smartLoadTodaysBuckets = createSmartRefreshWithMount(
     async () => {
       try {
         setIsLoading(true);
@@ -157,8 +158,16 @@ export default function TimeBucketView({
   );
 
   const loadTodaysBuckets = async () => {
-    const result = await smartLoadTodaysBuckets();
+    // If we don't have buckets data yet, force a fresh load (bypass cache)
+    // This prevents getting stuck in loading state if another component (like Dashboard)
+    // recently fetched this data and the global debouncer is blocking us.
+    const bypassCache = !buckets;
+    
+    const result = await smartLoadTodaysBuckets(bypassCache);
+    
     // If smart refresh skipped the call, don't change loading state
+    // But if buckets is null (and we somehow skipped despite bypass), ensure we turn off loading?
+    // Actually with bypass=true, result should never be null unless fn throws/returns null.
     if (result === null && buckets) {
       console.log('🚫 Skipped redundant bucket refresh');
     }

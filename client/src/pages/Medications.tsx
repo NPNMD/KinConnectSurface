@@ -1,18 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFamily } from '@/contexts/FamilyContext';
 import {
-  Heart,
-  ArrowLeft,
-  Pill,
-  Calendar,
   AlertTriangle,
-  User,
-  Users,
   TrendingUp,
+  Pill
 } from 'lucide-react';
 import { Medication, NewMedication } from '@shared/types';
-import { createSmartRefresh, createDebouncedFunction, clearRequestCache } from '@/lib/requestDebouncer';
 import { unifiedMedicationApi } from '@/lib/unifiedMedicationApi';
 import MedicationManager from '@/components/MedicationManager';
 import TimeBucketView from '@/components/TimeBucketView';
@@ -24,6 +18,8 @@ import { ViewOnlyBanner } from '@/components/ViewOnlyBanner';
 import PRNQuickAccess from '@/components/PRNQuickAccess';
 import PRNFloatingButton from '@/components/PRNFloatingButton';
 import { showSuccess, showError } from '@/utils/toast';
+import Header from '@/components/Header';
+import MobileNav from '@/components/MobileNav';
 
 // Enhanced error types for better error handling
 type ErrorType = 'validation' | 'network' | 'server' | 'timeout' | 'unknown';
@@ -43,8 +39,8 @@ export default function Medications() {
     activePatientAccess,
     hasPermission
   } = useFamily();
-  const [medications, setMedications] = useState<Medication[]>([]);
-  const [isLoadingMedications, setIsLoadingMedications] = useState(false);
+  const queryClient = useQueryClient();
+  
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [showMissedModal, setShowMissedModal] = useState(false);
   const [missedMedicationsCount, setMissedMedicationsCount] = useState(0);
@@ -63,9 +59,68 @@ export default function Medications() {
   
   // Enhanced error state management
   const [currentError, setCurrentError] = useState<EnhancedError | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
   const errorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const MAX_RETRY_ATTEMPTS = 3;
+
+  const effectivePatientId = getEffectivePatientId();
+
+  // Use React Query for fetching medications
+  const { 
+    data: medications = [], 
+    isLoading: isLoadingMedications,
+    refetch: refetchMedications
+  } = useQuery({
+    queryKey: ['medications', effectivePatientId],
+    queryFn: async () => {
+      if (!effectivePatientId) return [];
+      
+      const response = await unifiedMedicationApi.getMedications({
+        patientId: effectivePatientId,
+        isActive: true // Only show active medications by default
+      });
+
+      if (response.success && response.data) {
+        // Convert unified medication format to legacy format for compatibility
+        return response.data.map(med => ({
+          id: med.id,
+          patientId: med.patientId,
+          name: med.medication.name,
+          genericName: med.medication.genericName,
+          brandName: med.medication.brandName,
+          rxcui: med.medication.rxcui,
+          dosage: med.medication.dosage,
+          strength: med.medication.strength,
+          dosageForm: med.medication.dosageForm,
+          route: med.medication.route,
+          instructions: med.medication.instructions,
+          prescribedBy: med.medication.prescribedBy,
+          prescribedDate: med.metadata.createdAt,
+          pharmacy: med.medication.pharmacy,
+          prescriptionNumber: med.medication.prescriptionNumber,
+          refillsRemaining: med.medication.refillsRemaining,
+          maxDailyDose: med.medication.maxDailyDose,
+          sideEffects: med.medication.sideEffects,
+          notes: med.medication.notes,
+          frequency: mapUnifiedFrequencyToLegacy(med.schedule.frequency),
+          times: med.schedule.times,
+          daysOfWeek: med.schedule.daysOfWeek,
+          dayOfMonth: med.schedule.dayOfMonth,
+          startDate: med.schedule.startDate,
+          endDate: med.schedule.endDate,
+          isIndefinite: med.schedule.endDate ? false : true,
+          hasReminders: med.reminders.enabled,
+          reminderTimes: med.reminders.minutesBefore.map(String), // Convert numbers to strings for compatibility
+          isActive: med.status.isActive,
+          isPRN: med.status.isPRN,
+          createdAt: med.metadata.createdAt,
+          updatedAt: med.metadata.updatedAt,
+        }));
+      }
+      return [];
+    },
+    enabled: !!effectivePatientId,
+    staleTime: 1000 * 60, // 1 minute
+  });
 
   // Helper function to parse and categorize errors
   const parseError = (error: any): EnhancedError => {
@@ -174,108 +229,21 @@ export default function Medications() {
       }
     };
   }, []);
-  
-
-  // Create smart refresh function for medications
-  const smartLoadMedications = createSmartRefresh(
-    async () => {
-      try {
-        setIsLoadingMedications(true);
-        const effectivePatientId = getEffectivePatientId();
-        if (!effectivePatientId) return;
-
-        // Use unified API for consistent single source of truth
-        const response = await unifiedMedicationApi.getMedications({
-          patientId: effectivePatientId,
-          isActive: true // Only show active medications by default
-        });
-
-        if (response.success && response.data) {
-          // Convert unified medication format to legacy format for compatibility
-          const medicationsWithDates = response.data.map(med => ({
-            id: med.id,
-            patientId: med.patientId,
-            name: med.medication.name,
-            genericName: med.medication.genericName,
-            brandName: med.medication.brandName,
-            rxcui: med.medication.rxcui,
-            dosage: med.medication.dosage,
-            strength: med.medication.strength,
-            dosageForm: med.medication.dosageForm,
-            route: med.medication.route,
-            instructions: med.medication.instructions,
-            prescribedBy: med.medication.prescribedBy,
-            prescribedDate: med.metadata.createdAt,
-            pharmacy: med.medication.pharmacy,
-            prescriptionNumber: med.medication.prescriptionNumber,
-            refillsRemaining: med.medication.refillsRemaining,
-            maxDailyDose: med.medication.maxDailyDose,
-            sideEffects: med.medication.sideEffects,
-            notes: med.medication.notes,
-            frequency: mapUnifiedFrequencyToLegacy(med.schedule.frequency),
-            times: med.schedule.times,
-            daysOfWeek: med.schedule.daysOfWeek,
-            dayOfMonth: med.schedule.dayOfMonth,
-            startDate: med.schedule.startDate,
-            endDate: med.schedule.endDate,
-            isIndefinite: med.schedule.endDate ? false : true,
-            hasReminders: med.reminders.enabled,
-            reminderTimes: med.reminders.minutesBefore.map(String), // Convert numbers to strings for compatibility
-            isActive: med.status.isActive,
-            isPRN: med.status.isPRN,
-            createdAt: med.metadata.createdAt,
-            updatedAt: med.metadata.updatedAt,
-          }));
-          setMedications(medicationsWithDates);
-        }
-      } catch (error) {
-        console.error('Error loading medications:', error);
-      } finally {
-        setIsLoadingMedications(false);
-      }
-    },
-    60000, // 1 minute minimum between calls
-    'medications_list'
-  );
-
-  // Load medications function with smart refresh
-  const loadMedications = async () => {
-    const result = await smartLoadMedications();
-    if (result === null && medications.length > 0) {
-      console.log('🚫 Skipped redundant medications refresh');
-    }
-  };
-
-  // Load medications on component mount
-  useEffect(() => {
-    const effectivePatientId = getEffectivePatientId();
-    if (effectivePatientId) {
-      loadMedications();
-    }
-  }, [getEffectivePatientId()]);
 
   // Load missed medications count and adherence stats
   useEffect(() => {
-    const effectivePatientId = getEffectivePatientId();
     if (effectivePatientId) {
       loadMissedMedicationsCount();
       loadAdherenceStats();
     }
-  }, [getEffectivePatientId()]);
+  }, [effectivePatientId]);
 
   const loadMissedMedicationsCount = async () => {
     try {
-      const patientId = getEffectivePatientId();
-      if (!patientId) return;
-
-      // Get missed medications from last 7 days
-      const endDate = new Date();
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - 7);
+      if (!effectivePatientId) return;
 
       // Note: getMissedMedications not yet implemented in unified API
       // This will need to be added or use a different approach
-      console.warn('getMissedMedications not yet available in unified API');
       const response = { success: false, data: [] };
 
       if (response.success && response.data) {
@@ -290,22 +258,18 @@ export default function Medications() {
     try {
       // Use unified API's comprehensive adherence method
       const response = await unifiedMedicationApi.getComprehensiveAdherence({
-        patientId: getEffectivePatientId() || undefined
+        patientId: effectivePatientId || undefined
       });
       
       // Map to expected format
       if (response.success && response.data) {
-        response.data = {
-          summary: {
-            totalMedications: response.data.totalMedications || 0,
-            overallAdherenceRate: response.data.overallAdherenceRate || 0,
-            totalTakenDoses: response.data.totalTakenDoses || 0,
-            totalMissedDoses: response.data.totalMissedDoses || 0
-          }
+        const summaryData = {
+          totalMedications: response.data.summary?.totalMedications || response.data.totalMedications || 0,
+          overallAdherenceRate: response.data.summary?.overallAdherenceRate || response.data.overallAdherenceRate || 0,
+          totalTakenDoses: response.data.summary?.totalTakenDoses || response.data.totalTakenDoses || 0,
+          totalMissedDoses: response.data.summary?.totalMissedDoses || response.data.totalMissedDoses || 0
         };
-      }
-      if (response.success && response.data) {
-        setAdherenceStats(response.data.summary);
+        setAdherenceStats(summaryData);
       }
     } catch (error) {
       console.error('Error loading adherence stats:', error);
@@ -316,40 +280,41 @@ export default function Medications() {
     // Refresh counts and stats after action
     loadMissedMedicationsCount();
     loadAdherenceStats();
-    loadMedications();
+    refetchMedications();
     setRefreshTrigger(prev => prev + 1);
   };
 
-  // Listen for medication schedule updates with debounced refresh
+  // Listen for medication schedule updates
   useEffect(() => {
-    const debouncedRefresh = createDebouncedFunction(
-      async () => {
-        console.log('🔍 Medications: Refreshing medications after schedule update');
-        await loadMedications();
-      },
-      2000, // 2 second debounce
-      'medications_schedule_update'
-    );
-
     const handleScheduleUpdate = () => {
       console.log('🔍 Medications: Received schedule update event');
-      debouncedRefresh();
+      refetchMedications();
     };
 
     window.addEventListener('medicationScheduleUpdated', handleScheduleUpdate);
     
     return () => {
       window.removeEventListener('medicationScheduleUpdated', handleScheduleUpdate);
-      debouncedRefresh.cancel();
     };
-  }, []);
+  }, [refetchMedications]);
+
+  // Helper method to map unified frequency to legacy frequency
+  const mapUnifiedFrequencyToLegacy = (unifiedFrequency: string): string => {
+    switch (unifiedFrequency) {
+      case 'daily': return 'daily';
+      case 'twice_daily': return 'twice_daily';
+      case 'three_times_daily': return 'three_times_daily';
+      case 'four_times_daily': return 'four_times_daily';
+      case 'weekly': return 'weekly';
+      case 'monthly': return 'monthly';
+      case 'as_needed': return 'as_needed';
+      default: return 'daily';
+    }
+  };
 
   // Medication management functions with enhanced error handling
   const handleAddMedication = async (medication: NewMedication, attemptNumber: number = 0): Promise<void> => {
-    let createdMedication: Medication | null = null;
-    
     try {
-      setIsLoadingMedications(true);
       clearError(); // Clear any previous errors
       setScheduleCreationStatus({ isCreating: true, success: null, message: 'Adding medication and creating schedule...' });
       
@@ -360,20 +325,7 @@ export default function Medications() {
         timestamp: new Date().toISOString()
       });
       
-      console.log('🔍 [Medications] Request payload:', {
-        name: medication.name,
-        frequency: medication.frequency,
-        hasReminders: medication.hasReminders,
-        reminderTimes: medication.reminderTimes,
-        reminderTimesIsArray: Array.isArray(medication.reminderTimes),
-        reminderTimesLength: medication.reminderTimes?.length,
-        isPRN: medication.isPRN,
-        usePatientTimePreferences: !medication.isPRN,
-        fullMedicationObject: JSON.stringify(medication, null, 2)
-      });
-      
       // Use unified API to create medication with schedule in one call
-      const startTime = performance.now();
       const response = await unifiedMedicationApi.createMedication({
         name: medication.name,
         genericName: medication.genericName,
@@ -388,16 +340,7 @@ export default function Medications() {
         hasReminders: medication.hasReminders,
         usePatientTimePreferences: !medication.isPRN // Use patient preferences unless PRN
       });
-      const endTime = performance.now();
 
-      console.log('🔍 [Medications] API Response:', {
-        success: response.success,
-        hasData: !!response.data,
-        error: response.error,
-        responseTime: `${(endTime - startTime).toFixed(2)}ms`,
-        fullResponse: JSON.stringify(response, null, 2)
-      });
-      
       if (!response.success || !response.data) {
         // Parse the error for better handling
         const enhancedError = parseError({
@@ -424,67 +367,6 @@ export default function Medications() {
         throw enhancedError;
       }
       
-      // Handle both response formats: simplified {id, timestamp} or full {command, workflow}
-      const unifiedCommand = response.data.command;
-      
-      if (unifiedCommand) {
-        // Full response format with command object
-        createdMedication = {
-          id: unifiedCommand.id,
-          patientId: unifiedCommand.patientId,
-          name: unifiedCommand.medication.name,
-          genericName: unifiedCommand.medication.genericName,
-          brandName: unifiedCommand.medication.brandName,
-          rxcui: unifiedCommand.medication.rxcui,
-          dosage: unifiedCommand.medication.dosage,
-          strength: unifiedCommand.medication.strength,
-          dosageForm: unifiedCommand.medication.dosageForm,
-          route: unifiedCommand.medication.route,
-          instructions: unifiedCommand.medication.instructions,
-          prescribedBy: unifiedCommand.medication.prescribedBy,
-          prescribedDate: unifiedCommand.medication.prescribedDate || new Date(),
-          startDate: unifiedCommand.schedule.startDate,
-          endDate: unifiedCommand.schedule.endDate,
-          isActive: unifiedCommand.status.isActive,
-          isPRN: unifiedCommand.status.isPRN,
-          maxDailyDose: unifiedCommand.medication.maxDailyDose,
-          sideEffects: unifiedCommand.medication.sideEffects,
-          notes: unifiedCommand.medication.notes,
-          pharmacy: unifiedCommand.medication.pharmacy,
-          prescriptionNumber: unifiedCommand.medication.prescriptionNumber,
-          refillsRemaining: unifiedCommand.medication.refillsRemaining,
-          hasReminders: unifiedCommand.reminders.enabled,
-          reminderTimes: unifiedCommand.schedule.times,
-          frequency: mapUnifiedFrequencyToLegacy(unifiedCommand.schedule.frequency),
-          createdAt: unifiedCommand.metadata.createdAt,
-          updatedAt: unifiedCommand.metadata.updatedAt,
-        };
-      } else {
-        // Simplified response format with just {id, timestamp}
-        // Create a minimal medication object and rely on refresh to get full data
-        console.log('📝 [Medications] Received simplified response, will refresh to get full data');
-        const simplifiedData = response.data as any; // Type assertion for simplified response
-        createdMedication = {
-          id: simplifiedData.id,
-          patientId: medication.patientId,
-          name: medication.name,
-          genericName: medication.genericName,
-          dosage: medication.dosage,
-          instructions: medication.instructions,
-          prescribedBy: medication.prescribedBy,
-          prescribedDate: medication.prescribedDate || new Date(),
-          frequency: medication.frequency,
-          isActive: true,
-          isPRN: medication.isPRN || false,
-          hasReminders: medication.hasReminders || false,
-          reminderTimes: medication.reminderTimes || [],
-          createdAt: simplifiedData.timestamp ? new Date(simplifiedData.timestamp) : new Date(),
-          updatedAt: simplifiedData.timestamp ? new Date(simplifiedData.timestamp) : new Date(),
-        };
-      }
-      
-      console.log('✅ Medications: Medication and schedule created successfully:', createdMedication?.id);
-      
       setScheduleCreationStatus({
         isCreating: false,
         success: true,
@@ -493,19 +375,14 @@ export default function Medications() {
       
       showSuccess('Medication added and reminders scheduled successfully!');
       
-      // Clear cache to force fresh fetch after mutation
-      clearRequestCache('medications_list');
+      // Invalidate queries to trigger refresh
+      await queryClient.invalidateQueries({ queryKey: ['medications'] });
+      await queryClient.invalidateQueries({ queryKey: ['todayMedicationBuckets'] });
       
-      // Update local state optimistically
-      if (createdMedication) {
-        setMedications(prev => [...prev, createdMedication!]);
-      }
-      
-      // Refresh related data - cache is cleared so this will force a fresh fetch
-      await loadMedications();
-      setRefreshTrigger(prev => prev + 1);
+      // Refresh related data
       loadMissedMedicationsCount();
       loadAdherenceStats();
+      setRefreshTrigger(prev => prev + 1);
       
       // Clear success message after 5 seconds
       setTimeout(() => {
@@ -544,42 +421,20 @@ export default function Medications() {
       });
       
       throw enhancedError; // Re-throw to let the component handle the error
-    } finally {
-      setIsLoadingMedications(false);
     }
   };
 
   const handleUpdateMedication = async (id: string, updates: Partial<Medication>) => {
     try {
-      setIsLoadingMedications(true);
-      
-      // Map legacy frequency to unified format
-      const mapFrequencyToUnified = (frequency: string): 'daily' | 'twice_daily' | 'three_times_daily' | 'four_times_daily' | 'weekly' | 'monthly' | 'as_needed' => {
-        const freq = frequency.toLowerCase();
-        if (freq.includes('twice') || freq.includes('bid')) return 'twice_daily';
-        if (freq.includes('three') || freq.includes('tid')) return 'three_times_daily';
-        if (freq.includes('four') || freq.includes('qid')) return 'four_times_daily';
-        if (freq.includes('weekly')) return 'weekly';
-        if (freq.includes('monthly')) return 'monthly';
-        if (freq.includes('needed') || freq.includes('prn')) return 'as_needed';
-        return 'daily';
-      };
-
       // Get default times for frequency if reminderTimes not provided
       const getDefaultTimesForFrequency = (frequency: string): string[] => {
         switch (frequency) {
-          case 'daily':
-            return ['08:00'];
-          case 'twice_daily':
-            return ['08:00', '20:00'];
-          case 'three_times_daily':
-            return ['08:00', '14:00', '20:00'];
-          case 'four_times_daily':
-            return ['08:00', '12:00', '16:00', '20:00'];
-          case 'as_needed':
-            return [];
-          default:
-            return ['08:00'];
+          case 'daily': return ['08:00'];
+          case 'twice_daily': return ['08:00', '20:00'];
+          case 'three_times_daily': return ['08:00', '14:00', '20:00'];
+          case 'four_times_daily': return ['08:00', '12:00', '16:00', '20:00'];
+          case 'as_needed': return [];
+          default: return ['08:00'];
         }
       };
 
@@ -594,8 +449,7 @@ export default function Medications() {
         }
       } else if (updates.frequency) {
         // If frequency is provided but no reminderTimes, use defaults
-        const unifiedFreq = mapFrequencyToUnified(updates.frequency);
-        scheduleTimes = getDefaultTimesForFrequency(unifiedFreq);
+        scheduleTimes = getDefaultTimesForFrequency(updates.frequency);
       }
 
       // Map legacy updates to unified format
@@ -612,9 +466,19 @@ export default function Medications() {
       if (updates.instructions !== undefined) unifiedUpdates.medicationData.instructions = updates.instructions;
       if (updates.prescribedBy !== undefined) unifiedUpdates.medicationData.prescribedBy = updates.prescribedBy;
 
-      // Schedule data
+      const mapFrequencyToUnifiedType = (frequency: string): 'daily' | 'twice_daily' | 'three_times_daily' | 'four_times_daily' | 'weekly' | 'monthly' | 'as_needed' => {
+        const freq = frequency.toLowerCase();
+        if (freq.includes('twice') || freq.includes('bid')) return 'twice_daily';
+        if (freq.includes('three') || freq.includes('tid')) return 'three_times_daily';
+        if (freq.includes('four') || freq.includes('qid')) return 'four_times_daily';
+        if (freq.includes('weekly')) return 'weekly';
+        if (freq.includes('monthly')) return 'monthly';
+        if (freq.includes('needed') || freq.includes('prn')) return 'as_needed';
+        return 'daily';
+      };
+
       if (updates.frequency !== undefined) {
-        unifiedUpdates.scheduleData.frequency = mapFrequencyToUnified(updates.frequency);
+        unifiedUpdates.scheduleData.frequency = mapFrequencyToUnifiedType(updates.frequency);
       }
       if (scheduleTimes !== undefined) {
         unifiedUpdates.scheduleData.times = scheduleTimes;
@@ -625,7 +489,6 @@ export default function Medications() {
       // Reminder settings
       if (updates.hasReminders !== undefined) {
         unifiedUpdates.reminderSettings.enabled = updates.hasReminders;
-        // Include reminder settings only if reminders are enabled
         if (updates.hasReminders) {
           unifiedUpdates.reminderSettings.minutesBefore = [15, 5];
           unifiedUpdates.reminderSettings.notificationMethods = ['browser', 'push'];
@@ -636,78 +499,31 @@ export default function Medications() {
       if (updates.isActive !== undefined) unifiedUpdates.status.isActive = updates.isActive;
       if (updates.isPRN !== undefined) unifiedUpdates.status.isPRN = updates.isPRN;
 
-      // Remove empty objects to avoid sending unnecessary data
+      // Remove empty objects
       if (Object.keys(unifiedUpdates.medicationData).length === 0) delete unifiedUpdates.medicationData;
       if (Object.keys(unifiedUpdates.scheduleData).length === 0) delete unifiedUpdates.scheduleData;
       if (Object.keys(unifiedUpdates.reminderSettings).length === 0) delete unifiedUpdates.reminderSettings;
       if (Object.keys(unifiedUpdates.status).length === 0) delete unifiedUpdates.status;
 
-      console.log('🔍 [Medications] Updating medication with unified format:', {
-        id,
-        unifiedUpdates,
-        originalUpdates: updates
-      });
-
       const response = await unifiedMedicationApi.updateMedication(id, unifiedUpdates, {
         reason: 'Updated by user from medications page'
       });
       
-      if (response.success && response.data?.command) {
-        // Convert unified format back to legacy format for compatibility
-        const unifiedCommand = response.data.command;
-        const medicationWithDates = {
-          id: unifiedCommand.id,
-          patientId: unifiedCommand.patientId,
-          name: unifiedCommand.medication.name,
-          genericName: unifiedCommand.medication.genericName,
-          brandName: unifiedCommand.medication.brandName,
-          rxcui: unifiedCommand.medication.rxcui,
-          dosage: unifiedCommand.medication.dosage,
-          strength: unifiedCommand.medication.strength,
-          dosageForm: unifiedCommand.medication.dosageForm,
-          route: unifiedCommand.medication.route,
-          instructions: unifiedCommand.medication.instructions,
-          prescribedBy: unifiedCommand.medication.prescribedBy,
-          prescribedDate: unifiedCommand.medication.prescribedDate || new Date(),
-          startDate: unifiedCommand.schedule.startDate,
-          endDate: unifiedCommand.schedule.endDate,
-          isActive: unifiedCommand.status.isActive,
-          isPRN: unifiedCommand.status.isPRN,
-          maxDailyDose: unifiedCommand.medication.maxDailyDose,
-          sideEffects: unifiedCommand.medication.sideEffects,
-          notes: unifiedCommand.medication.notes,
-          pharmacy: unifiedCommand.medication.pharmacy,
-          prescriptionNumber: unifiedCommand.medication.prescriptionNumber,
-          refillsRemaining: unifiedCommand.medication.refillsRemaining,
-          hasReminders: unifiedCommand.reminders.enabled,
-          reminderTimes: unifiedCommand.schedule.times,
-          frequency: mapUnifiedFrequencyToLegacy(unifiedCommand.schedule.frequency),
-          createdAt: unifiedCommand.metadata.createdAt,
-          updatedAt: unifiedCommand.metadata.updatedAt,
-        };
-        setMedications(prev =>
-          prev.map(med =>
-            med.id === id ? medicationWithDates : med
-          )
-        );
+      if (response.success) {
         showSuccess('Medication updated successfully!');
-        
-        // Clear cache to force fresh fetch after mutation
-        clearRequestCache('medications_list');
-        await loadMedications();
+        await queryClient.invalidateQueries({ queryKey: ['medications'] });
+        await queryClient.invalidateQueries({ queryKey: ['todayMedicationBuckets'] });
+      } else {
+        throw new Error(response.error || 'Failed to update medication');
       }
     } catch (error) {
       console.error('Error updating medication:', error);
       throw error;
-    } finally {
-      setIsLoadingMedications(false);
     }
   };
 
   const handleDeleteMedication = async (id: string) => {
     try {
-      setIsLoadingMedications(true);
-
       // Use unified API for consistent deletion with proper cascade cleanup
       const response = await unifiedMedicationApi.deleteMedication(id, false, {
         reason: 'Deleted by user from medications page'
@@ -715,84 +531,55 @@ export default function Medications() {
 
       if (response.success) {
         console.log('✅ Medication deleted successfully with cascade cleanup');
-
-        // Clear cache to force fresh fetch after mutation
-        clearRequestCache('medications_list');
-
-        // Update local state immediately
-        setMedications(prev => prev.filter(med => med.id !== id));
-
         showSuccess('Medication deleted successfully!');
 
-        // Force immediate refresh to ensure UI is in sync - cache is cleared so this will force a fresh fetch
-        await loadMedications();
+        await queryClient.invalidateQueries({ queryKey: ['medications'] });
+        await queryClient.invalidateQueries({ queryKey: ['todayMedicationBuckets'] });
 
         // Refresh related data
         loadMissedMedicationsCount();
         loadAdherenceStats();
         setRefreshTrigger(prev => prev + 1);
       } else {
-        // If backend delete failed, don't remove from UI
         throw new Error(response.error || 'Failed to delete medication from server');
       }
     } catch (error) {
       console.error('Error deleting medication:', error);
-      // Show user-friendly error message
       showError('Failed to delete medication. Please try again or contact support if the problem persists.');
       throw error;
-    } finally {
-      setIsLoadingMedications(false);
-    }
-  };
-
-  // Helper method to map unified frequency to legacy frequency
-  const mapUnifiedFrequencyToLegacy = (unifiedFrequency: string): string => {
-    switch (unifiedFrequency) {
-      case 'daily': return 'daily';
-      case 'twice_daily': return 'twice_daily';
-      case 'three_times_daily': return 'three_times_daily';
-      case 'four_times_daily': return 'four_times_daily';
-      case 'weekly': return 'weekly';
-      case 'monthly': return 'monthly';
-      case 'as_needed': return 'as_needed';
-      default: return 'daily';
     }
   };
 
   // Get active medications
-  const activeMedications = medications.filter(med => med.isActive);
+  const activeMedications = useMemo(() => medications.filter(med => med.isActive), [medications]);
 
   return (
     <div className="min-h-screen bg-gray-50 overflow-x-hidden pb-safe">
       {/* View-Only Banner */}
       <ViewOnlyBanner />
       
-      {/* Simplified Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
-        <div className="px-4 py-3 max-w-full">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <Link
-                to="/dashboard"
-                className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </Link>
-              <div className="flex items-center space-x-2">
-                <Pill className="w-6 h-6 text-primary-600" />
-                <span className="text-lg font-bold text-gray-900">Medications</span>
-              </div>
-            </div>
-            
-            <div className="flex items-center space-x-2 text-sm text-gray-600">
-              <span>{activeMedications.length} active medication{activeMedications.length !== 1 ? 's' : ''}</span>
-            </div>
-          </div>
-        </div>
-      </header>
+      {/* Enhanced Header */}
+      <Header />
 
       {/* Main Content */}
-      <main className="px-4 py-4 pb-24 sm:pb-20 max-w-full overflow-x-hidden">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24 sm:pb-20">
+        
+        {/* Page Title Section */}
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <Pill className="w-8 h-8 text-primary-600" />
+              Medications
+            </h1>
+            <p className="text-gray-600 mt-1">
+              Manage prescriptions, schedule, and adherence
+            </p>
+          </div>
+          <div className="flex items-center space-x-2 text-sm text-gray-600 bg-white px-3 py-1.5 rounded-lg border border-gray-200 shadow-sm self-start sm:self-auto">
+            <span className="font-medium">{activeMedications.length}</span> active medication{activeMedications.length !== 1 ? 's' : ''}
+          </div>
+        </div>
+
         {/* Simplified Alert Section */}
         {missedMedicationsCount > 0 && (
           <div className="mb-6">
@@ -826,7 +613,7 @@ export default function Medications() {
         {/* Enhanced Adherence Dashboard */}
         {adherenceStats && (
           <div className="mb-6">
-            <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
                 <h3 className="text-lg font-semibold text-gray-900 flex items-center space-x-2">
                   <TrendingUp className="w-5 h-5 text-blue-600" />
@@ -842,7 +629,7 @@ export default function Medications() {
               
               {showAdherenceDashboard ? (
                 <AdherenceDashboard
-                  patientId={getEffectivePatientId() || undefined}
+                  patientId={effectivePatientId || undefined}
                   timeRange="month"
                   showFamilyView={userRole === 'family_member'}
                   compactMode={false}
@@ -887,9 +674,9 @@ export default function Medications() {
 
         {/* Migration Trigger */}
         <MedicationMigrationTrigger
-          patientId={getEffectivePatientId() || undefined}
+          patientId={effectivePatientId || undefined}
           onMigrationComplete={() => {
-            loadMedications();
+            refetchMedications();
             setRefreshTrigger(prev => prev + 1);
             loadMissedMedicationsCount();
             loadAdherenceStats();
@@ -901,7 +688,7 @@ export default function Medications() {
           medications={medications}
           onSchedulesCreated={() => {
             // Refresh medications and today's view after schedules are created
-            loadMedications();
+            refetchMedications();
             setRefreshTrigger(prev => prev + 1);
             loadMissedMedicationsCount();
             loadAdherenceStats();
@@ -915,7 +702,7 @@ export default function Medications() {
             onMedicationAction={(medId, action) => {
               console.log('PRN medication action:', { medId, action });
               // Refresh data after PRN action
-              loadMedications();
+              refetchMedications();
               setRefreshTrigger(prev => prev + 1);
               loadMissedMedicationsCount();
               loadAdherenceStats();
@@ -937,14 +724,14 @@ export default function Medications() {
               </button>
             )}
           </div>
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
             <TimeBucketView
-              patientId={getEffectivePatientId() || ''}
+              patientId={effectivePatientId || ''}
               date={new Date()}
               onMedicationAction={(eventId, action) => {
                 console.log('Medication action performed:', { eventId, action });
                 setTimeout(() => {
-                  loadMedications();
+                  refetchMedications();
                   setRefreshTrigger(prev => prev + 1);
                 }, 1000);
               }}
@@ -955,10 +742,10 @@ export default function Medications() {
         </div>
 
         {/* Enhanced Medication Management Section */}
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
           {hasPermission('canEdit') ? (
             <MedicationManager
-              patientId={getEffectivePatientId() || ''}
+              patientId={effectivePatientId || ''}
               medications={activeMedications}
               onAddMedication={handleAddMedication}
               onUpdateMedication={handleUpdateMedication}
@@ -979,72 +766,21 @@ export default function Medications() {
       </main>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="mobile-nav-container">
-        <div className="flex items-center justify-between">
-          <Link
-            to="/dashboard"
-            className="flex-1 flex flex-col items-center space-y-1 py-2 px-1 min-h-[56px] text-rose-600 hover:text-rose-700 transition-colors active:bg-rose-50 rounded-lg"
-          >
-            <div className="bg-rose-100 p-2 rounded-lg">
-              <Heart className="w-5 h-5" />
-            </div>
-            <span className="text-xs font-medium">Home</span>
-          </Link>
-          
-          <Link
-            to="/medications"
-            className="flex-1 flex flex-col items-center space-y-1 py-2 px-1 min-h-[56px] text-blue-600 hover:text-blue-700 transition-colors active:bg-blue-50 rounded-lg"
-          >
-            <div className="bg-blue-100 p-2 rounded-lg">
-              <Pill className="w-5 h-5" />
-            </div>
-            <span className="text-xs font-medium">Meds</span>
-          </Link>
-          
-          <Link
-            to="/calendar"
-            className="flex-1 flex flex-col items-center space-y-1 py-2 px-1 min-h-[56px] text-purple-600 hover:text-purple-700 transition-colors active:bg-purple-50 rounded-lg"
-          >
-            <div className="bg-purple-100 p-2 rounded-lg">
-              <Calendar className="w-5 h-5" />
-            </div>
-            <span className="text-xs font-medium">Calendar</span>
-          </Link>
-          
-          <Link
-            to="/profile"
-            className="flex-1 flex flex-col items-center space-y-1 py-2 px-1 min-h-[56px] text-green-600 hover:text-green-700 transition-colors active:bg-green-50 rounded-lg"
-          >
-            <div className="bg-green-100 p-2 rounded-lg">
-              <User className="w-5 h-5" />
-            </div>
-            <span className="text-xs font-medium">Profile</span>
-          </Link>
-          
-          <Link
-            to="/family/invite"
-            className="flex-1 flex flex-col items-center space-y-1 py-2 px-1 min-h-[56px] text-amber-600 hover:text-amber-700 transition-colors active:bg-amber-50 rounded-lg"
-          >
-            <div className="bg-amber-100 p-2 rounded-lg">
-              <Users className="w-5 h-5" />
-            </div>
-            <span className="text-xs font-medium">Family</span>
-          </Link>
-        </div>
-      </nav>
+      <MobileNav />
 
-      {/* PRN Floating Action Button */}
-      <PRNFloatingButton
-        medications={medications}
-        onMedicationAction={(medId, action) => {
-          console.log('PRN FAB action:', { medId, action });
-          // Refresh data after PRN action
-          loadMedications();
-          setRefreshTrigger(prev => prev + 1);
-          loadMissedMedicationsCount();
-          loadAdherenceStats();
-        }}
-      />
+      {/* PRN Floating Action Button - Mobile Only or Strategic Placement */}
+      <div className="md:hidden">
+        <PRNFloatingButton
+          medications={medications}
+          onMedicationAction={(medId, action) => {
+            console.log('PRN FAB action:', { medId, action });
+            refetchMedications();
+            setRefreshTrigger(prev => prev + 1);
+            loadMissedMedicationsCount();
+            loadAdherenceStats();
+          }}
+        />
+      </div>
 
       {/* Missed Medications Modal */}
       <MissedMedicationsModal

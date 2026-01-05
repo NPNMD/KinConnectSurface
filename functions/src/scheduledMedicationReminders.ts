@@ -167,6 +167,16 @@ export const scheduledMedicationReminders = functions
 
           const command = commandDoc.data()!;
           
+          // Check if medication is active and not discontinued/paused
+          if (!command.status?.isActive || 
+              command.status?.current === 'discontinued' || 
+              command.status?.current === 'paused' ||
+              command.status?.current === 'held') {
+            console.log(`ℹ️ Command ${scheduledEvent.commandId} is ${command.status?.current}, skipping reminder`);
+            results.skipped++;
+            continue;
+          }
+
           // Check if reminders are enabled
           if (!command.reminders?.enabled) {
             results.skipped++;
@@ -175,19 +185,19 @@ export const scheduledMedicationReminders = functions
 
           // Check if we should send a reminder based on minutesBefore configuration
           const reminderMinutes = command.reminders.minutesBefore || [15, 5];
-          const shouldSendReminder = reminderMinutes.some((minutes: number) => {
-            // Send reminder if we're within 2 minutes of the reminder time
-            const targetReminderTime = minutes;
-            return Math.abs(minutesUntilDue - targetReminderTime) <= 2;
+          
+          // Find which reminder time we are close to (within 4 minutes to ensure we catch it with 5-min cron)
+          const targetReminderTime = reminderMinutes.find((minutes: number) => {
+            return Math.abs(minutesUntilDue - minutes) <= 4;
           });
 
-          if (!shouldSendReminder) {
-            // Not time to send reminder yet
+          if (targetReminderTime === undefined) {
+            // Not time to send any reminder yet
             continue;
           }
 
-          // Check if reminder already sent for this event
-          const reminderSentKey = `${scheduledEvent.id}_${Math.floor(minutesUntilDue / 5) * 5}`; // Round to 5-minute buckets
+          // Check if reminder already sent for this SPECIFIC reminder time
+          const reminderSentKey = `${scheduledEvent.id}_reminder_${targetReminderTime}`;
           const reminderCheckDoc = await firestore
             .collection('medication_reminder_sent_log')
             .doc(reminderSentKey)
@@ -199,7 +209,7 @@ export const scheduledMedicationReminders = functions
             continue;
           }
 
-          console.log(`🔔 Sending reminder for ${scheduledEvent.context.medicationName}`);
+          console.log(`🔔 Sending ${targetReminderTime}-minute reminder for ${scheduledEvent.context.medicationName}`);
           console.log(`   - Scheduled: ${scheduledFor.toISOString()}`);
           console.log(`   - Minutes until due: ${minutesUntilDue}`);
           console.log(`   - Reminder window: ${reminderMinutes.join(', ')} minutes before`);

@@ -59,6 +59,7 @@ const MedicationEventService_1 = require("./MedicationEventService");
 const MedicationNotificationService_1 = require("./MedicationNotificationService");
 const MedicationTransactionManager_1 = require("./MedicationTransactionManager");
 const MedicationUndoService_1 = require("./MedicationUndoService");
+const dateUtils_1 = require("../../utils/dateUtils");
 class MedicationOrchestrator {
     commandService;
     eventService;
@@ -741,8 +742,16 @@ class MedicationOrchestrator {
                             console.warn(`⚠️ Invalid time values: ${time} (hours: ${hours}, minutes: ${minutes}), skipping`);
                             continue;
                         }
-                        const eventDateTime = new Date(currentDate);
-                        eventDateTime.setHours(hours, minutes, 0, 0);
+                        let eventDateTime;
+                        if (command.schedule.timezone) {
+                            // Use timezone-aware date construction
+                            eventDateTime = (0, dateUtils_1.getUtcFromLocal)(currentDate, time, command.schedule.timezone);
+                        }
+                        else {
+                            // Fallback to server time (existing behavior)
+                            eventDateTime = new Date(currentDate);
+                            eventDateTime.setHours(hours, minutes, 0, 0);
+                        }
                         // Only create future events
                         if (eventDateTime > new Date()) {
                             events.push({
@@ -798,6 +807,36 @@ class MedicationOrchestrator {
                 return false; // PRN medications don't have scheduled events
             default:
                 return false;
+        }
+    }
+    /**
+     * Regenerate scheduled events for a medication command
+     * Used by daily maintenance to keep event window current
+     */
+    async regenerateScheduledEvents(commandId) {
+        try {
+            const command = await this.commandService.getCommand(commandId);
+            if (!command.success || !command.data) {
+                return { success: false, created: 0, error: 'Command not found' };
+            }
+            // Only regenerate for active, non-PRN medications with reminders
+            if (!command.data.status.isActive || command.data.status.isPRN || !command.data.reminders.enabled) {
+                return { success: true, created: 0 };
+            }
+            // Delete future scheduled events using the service method
+            await this.eventService.deleteFutureScheduledEvents(commandId);
+            // Generate new events for next 30 days
+            const correlationId = (0, unifiedMedicationSchema_1.generateCorrelationId)();
+            const events = await this.generateScheduledDoseEvents(command.data, correlationId);
+            return { success: true, created: events.length };
+        }
+        catch (error) {
+            console.error('Error regenerating scheduled events:', error);
+            return {
+                success: false,
+                created: 0,
+                error: error instanceof Error ? error.message : 'Unknown error'
+            };
         }
     }
     /**

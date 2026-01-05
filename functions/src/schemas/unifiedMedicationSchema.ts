@@ -56,6 +56,7 @@ export interface MedicationCommand {
     isIndefinite: boolean;
     dosageAmount: string;
     scheduleInstructions?: string;
+    timezone?: string; // IANA timezone (e.g., "America/Chicago")
     
     // Flexible time scheduling configuration (optional for backward compatibility)
     flexibleScheduling?: FlexibleScheduleConfiguration;

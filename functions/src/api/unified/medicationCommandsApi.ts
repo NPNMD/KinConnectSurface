@@ -692,9 +692,7 @@ router.put('/:commandId', async (req, res) => {
       
       console.log('🔄 [BACKEND] Regeneration result:', {
         success: regenerationResult.success,
-        deleted: regenerationResult.deleted,
         created: regenerationResult.created,
-        eventIds: regenerationResult.eventIds,
         error: regenerationResult.error
       });
       
@@ -702,31 +700,33 @@ router.put('/:commandId', async (req, res) => {
         console.warn('⚠️ [BACKEND] Failed to regenerate events:', regenerationResult.error);
         // Don't fail the update, but log the warning
       } else {
-        console.log(`✅ [BACKEND] Regenerated events: deleted ${regenerationResult.deleted}, created ${regenerationResult.created}`);
+        console.log(`✅ [BACKEND] Regenerated events: created ${regenerationResult.created}`);
       }
     } else {
       console.log('ℹ️ [BACKEND] No schedule change detected, skipping event regeneration');
     }
 
+    // Frontend expects { data: { command: MedicationCommand, workflow: {...} } }
+    // But updateCommand returns { data: MedicationCommand } directly
     const responseData = {
       success: true,
-      data: result.data,
+      data: {
+        command: result.data, // Wrap command in data.command for frontend compatibility
+        workflow: regenerationResult ? {
+          eventsCreated: regenerationResult.created
+        } : undefined
+      },
       validation: result.validation,
-      workflow: regenerationResult ? {
-        eventsDeleted: regenerationResult.deleted,
-        eventsCreated: regenerationResult.created,
-        eventIds: regenerationResult.eventIds
-      } : undefined,
       message: 'Medication updated successfully'
     };
 
     console.log('✅ [BACKEND] Sending success response:', {
       success: responseData.success,
-      commandId: responseData.data?.id,
-      scheduleTimes: responseData.data?.schedule?.times,
-      remindersEnabled: responseData.data?.reminders?.enabled,
-      eventsDeleted: responseData.workflow?.eventsDeleted,
-      eventsCreated: responseData.workflow?.eventsCreated
+      commandId: responseData.data?.command?.id,
+      scheduleTimes: responseData.data?.command?.schedule?.times,
+      remindersEnabled: responseData.data?.command?.reminders?.enabled,
+      eventsCreated: responseData.data?.workflow?.eventsCreated,
+      hasCommand: !!responseData.data?.command
     });
 
     res.json(responseData);

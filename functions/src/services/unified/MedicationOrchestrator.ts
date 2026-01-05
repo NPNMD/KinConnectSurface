@@ -33,6 +33,7 @@ import { MedicationEventService, CreateEventRequest } from './MedicationEventSer
 import { MedicationNotificationService, NotificationRequest } from './MedicationNotificationService';
 import { MedicationTransactionManager } from './MedicationTransactionManager';
 import { MedicationUndoService } from './MedicationUndoService';
+import { getUtcFromLocal } from '../../utils/dateUtils';
 
 export interface CreateMedicationWorkflowRequest {
   patientId: string;
@@ -55,6 +56,7 @@ export interface CreateMedicationWorkflowRequest {
     startDate: Date;
     endDate?: Date;
     dosageAmount: string;
+    timezone?: string;
   };
   reminderSettings?: {
     enabled: boolean;
@@ -628,6 +630,16 @@ export class MedicationOrchestrator {
 
       console.log('✅ Phase 2 complete: Status change transaction executed');
 
+      // Phase 2.5: Cleanup future scheduled events if status is not active
+      if (statusChange.newStatus !== 'active') {
+        console.log(`🧹 Phase 2.5: Cleaning up future events for status ${statusChange.newStatus}`);
+        await this.eventService.deleteFutureScheduledEvents(commandId);
+      } else if (previousStatus !== 'active' && statusChange.newStatus === 'active') {
+        // If resuming (non-active -> active), regenerate events
+        console.log('🔄 Phase 2.5: Regenerating events for resumed medication');
+        await this.regenerateScheduledEvents(commandId);
+      }
+
       // Phase 3: Send notifications if requested
       let notificationsSent = 0;
       
@@ -947,11 +959,22 @@ export class MedicationOrchestrator {
               continue;
             }
 
-            const eventDateTime = new Date(currentDate);
-            eventDateTime.setHours(hours, minutes, 0, 0);
+            let eventDateTime: Date;
             
+            if (command.schedule.timezone) {
+              // Use timezone-aware date construction
+              eventDateTime = getUtcFromLocal(currentDate, time, command.schedule.timezone);
+              console.log(`🕒 Timezone aware date: Local ${currentDate.toDateString()} ${time} ${command.schedule.timezone} -> UTC ${eventDateTime.toISOString()}`);
+            } else {
+              // Fallback to server time (existing behavior)
+              eventDateTime = new Date(currentDate);
+              eventDateTime.setHours(hours, minutes, 0, 0);
+              console.log(`🕒 Server time fallback: ${eventDateTime.toISOString()} (hours: ${hours}, minutes: ${minutes})`);
+            }
+            
+            const now = new Date();
             // Only create future events
-            if (eventDateTime > new Date()) {
+            if (eventDateTime > now) {
               events.push({
                 commandId: command.id,
                 patientId: command.patientId,
@@ -1017,70 +1040,39 @@ export class MedicationOrchestrator {
   }
 
   /**
-   * Regenerate scheduled dose events for a medication command
-   * Used when schedule times are updated
+   * Regenerate scheduled events for a medication command
+   * Used by daily maintenance to keep event window current
    */
   async regenerateScheduledEvents(commandId: string): Promise<{
     success: boolean;
-    eventIds: string[];
-    deleted: number;
     created: number;
     error?: string;
   }> {
     try {
-      console.log('🔄 MedicationOrchestrator: Regenerating scheduled events for command:', commandId);
-
-      // Get the updated command
-      const commandResult = await this.commandService.getCommand(commandId);
-      if (!commandResult.success || !commandResult.data) {
-        return {
-          success: false,
-          eventIds: [],
-          deleted: 0,
-          created: 0,
-          error: 'Command not found'
-        };
+      const command = await this.commandService.getCommand(commandId);
+      if (!command.success || !command.data) {
+        return { success: false, created: 0, error: 'Command not found' };
       }
 
-      const command = commandResult.data;
-
-      // Check if reminders are enabled and schedule has times
-      if (!command.reminders.enabled || !command.schedule.times || command.schedule.times.length === 0) {
-        console.log('⚠️ Reminders disabled or no schedule times, deleting future events only');
-        const deleteResult = await this.eventService.deleteFutureScheduledEvents(commandId);
-        return {
-          success: true,
-          eventIds: [],
-          deleted: deleteResult.data?.deleted || 0,
-          created: 0
-        };
+      // Only regenerate for active, non-PRN medications with reminders
+      if (!command.data.status.isActive || command.data.status.isPRN || !command.data.reminders.enabled) {
+        return { success: true, created: 0 };
       }
 
-      // Delete existing future scheduled events
-      const deleteResult = await this.eventService.deleteFutureScheduledEvents(commandId);
-      const deletedCount = deleteResult.data?.deleted || 0;
+      // Delete future scheduled events using the service method
+      await this.eventService.deleteFutureScheduledEvents(commandId);
 
-      // Generate new scheduled events
+      // Generate new events for next 30 days
       const correlationId = generateCorrelationId();
-      const newEventIds = await this.generateScheduledDoseEvents(command, correlationId);
-
-      console.log(`✅ Regenerated events: deleted ${deletedCount}, created ${newEventIds.length}`);
-
-      return {
-        success: true,
-        eventIds: newEventIds,
-        deleted: deletedCount,
-        created: newEventIds.length
-      };
-
+      const events = await this.generateScheduledDoseEvents(command.data, correlationId);
+      
+      return { success: true, created: events.length };
     } catch (error) {
-      console.error('❌ MedicationOrchestrator: Error regenerating scheduled events:', error);
+      console.error('Error regenerating scheduled events:', error);
       return {
         success: false,
-        eventIds: [],
-        deleted: 0,
         created: 0,
-        error: error instanceof Error ? error.message : 'Failed to regenerate scheduled events'
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   }

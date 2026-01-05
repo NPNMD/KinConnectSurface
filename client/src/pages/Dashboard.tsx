@@ -29,7 +29,8 @@ import {
   Stethoscope,
   Mic,
   CalendarPlus,
-  ExternalLink
+  ExternalLink,
+  LayoutDashboard
 } from 'lucide-react';
 import { apiClient, API_ENDPOINTS } from '@/lib/api';
 import { unifiedMedicationApi } from '@/lib/unifiedMedicationApi';
@@ -44,6 +45,9 @@ import { ViewOnlyBanner } from '@/components/ViewOnlyBanner';
 import Onboarding from '@/components/Onboarding';
 import { showSuccess, showError } from '@/utils/toast';
 import type { VisitSummary, MedicationCalendarEvent, MedicalEvent, Medication, TodayMedicationBuckets } from '@shared/types';
+
+import Header from '@/components/Header';
+import MobileNav from '@/components/MobileNav';
 
 export default function Dashboard() {
   const { user, firebaseUser, refreshUser } = useAuth();
@@ -743,397 +747,418 @@ export default function Dashboard() {
       {/* View-Only Banner */}
       <ViewOnlyBanner />
       
-      {/* Mobile-First Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40" role="banner">
-        <div className="px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Heart className="w-6 h-6 text-primary-600" />
-              <span className="text-lg font-bold text-gray-900">FamMedicalCare</span>
-            </div>
-            
-            {/* Patient Switcher for Family Members */}
-            <div className="flex-1 flex justify-center">
-              <PatientSwitcher />
-            </div>
-            
-            <div className="flex items-center space-x-2">
-              <button
-                className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
-                aria-label="View notifications"
-              >
-                <Bell className="w-5 h-5" />
-              </button>
-              
-              {firebaseUser?.photoURL && (
-                <img
-                  src={firebaseUser.photoURL}
-                  alt="Profile"
-                  className="w-8 h-8 rounded-full"
-                />
+      {/* Enhanced Header for Desktop & Mobile */}
+      <Header />
+
+      {/* Main Content - Responsive Layout */}
+      <main id="main-content" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 pb-20 md:pb-8">
+        
+        {/* Welcome Section - Desktop Enhanced */}
+        <div className="mb-8 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-1">
+              {userRole === 'family_member' && activePatientAccess ? (
+                <>Welcome back, {user?.name?.split(' ')[0] || 'there'}! 👋</>
+              ) : (
+                <>Welcome back, {user?.name?.split(' ')[0] || 'there'}! 👋</>
               )}
-              
-              <button
-                onClick={handleSignOut}
-                className="p-2 text-gray-400 hover:text-red-600 transition-colors"
-                aria-label="Sign out"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            </div>
+            </h1>
+            <p className="text-gray-600 text-sm md:text-base">
+              {userRole === 'family_member' && activePatientAccess ? (
+                <>Viewing <span className="font-semibold text-primary-700">{activePatientAccess.patientName}'s</span> health overview for today</>
+              ) : (
+                <>Here's your health overview for today</>
+              )}
+            </p>
           </div>
-        </div>
-      </header>
-
-      {/* Main Content - Mobile Optimized */}
-      <main id="main-content" className="px-4 py-4 pb-20">
-        {/* Welcome Section */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 mb-1">
-            {userRole === 'family_member' && activePatientAccess ? (
-              <>Welcome back, {user?.name?.split(' ')[0] || 'there'}! 👋</>
-            ) : (
-              <>Welcome back, {user?.name?.split(' ')[0] || 'there'}! 👋</>
-            )}
-          </h1>
-          <p className="text-gray-600 text-sm">
-            {userRole === 'family_member' && activePatientAccess ? (
-              <>Viewing {activePatientAccess.patientName}'s health overview for today</>
-            ) : (
-              <>Here's your health overview for today</>
-            )}
-          </p>
+          
+          <PermissionGate requiredPermission="canCreate">
+            <button
+              onClick={() => setShowVisitRecording(true)}
+              className="flex items-center justify-center space-x-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm w-full md:w-auto"
+              aria-label="Record a new visit summary"
+            >
+              <Mic className="w-4 h-4" />
+              <span>Record New Visit</span>
+            </button>
+          </PermissionGate>
         </div>
 
-        {/* Recent Events Section */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-gray-900">Recent Events</h2>
-            <div className="flex items-center space-x-2">
-              <PermissionGate requiredPermission="canCreate">
-                <button
-                  onClick={() => setShowVisitRecording(true)}
-                  className="flex items-center space-x-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors"
-                  aria-label="Record a new visit summary"
-                >
-                  <Mic className="w-4 h-4" />
-                  <span>Record Visit</span>
-                </button>
-              </PermissionGate>
-              {recentVisitSummaries.length > 0 && (
+        {/* Responsive Grid Layout */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
+          
+          {/* Left Column (Main Content) - 8/12 width on large screens */}
+          <div className="lg:col-span-8 space-y-6">
+            
+            {/* Actionable Events (Priority) */}
+            {actionableEvents.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <AlertCircle className="w-5 h-5 text-orange-500" />
+                    Action Required
+                  </h2>
+                </div>
+                
+                <div className="grid gap-4">
+                  {actionableEvents.slice(0, 3).map((event) => (
+                    <div key={event.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow">
+                      <div className="flex items-start gap-4">
+                        <div className={`p-3 rounded-full flex-shrink-0 ${
+                          event.urgency === 'urgent' ? 'bg-red-100 text-red-600' :
+                          event.urgency === 'high' ? 'bg-orange-100 text-orange-600' :
+                          'bg-blue-100 text-blue-600'
+                        }`}>
+                          {event.type === 'follow_up_appointment' ? <Calendar className="w-5 h-5" /> :
+                           event.type.includes('medication') ? <Pill className="w-5 h-5" /> :
+                           <AlertCircle className="w-5 h-5" />}
+                        </div>
+                        
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h3 className="font-semibold text-gray-900">{event.title}</h3>
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium uppercase ${
+                              event.urgency === 'urgent' ? 'bg-red-100 text-red-800' :
+                              event.urgency === 'high' ? 'bg-orange-100 text-orange-800' :
+                              'bg-blue-100 text-blue-800'
+                            }`}>
+                              {event.urgency}
+                            </span>
+                          </div>
+                          <p className="text-gray-600 text-sm mb-3">{event.description}</p>
+                          
+                          <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                            {event.dueDate && (
+                              <span className="flex items-center gap-1">
+                                <Clock className="w-3.5 h-3.5" />
+                                Due: {new Date(event.dueDate).toLocaleDateString()}
+                              </span>
+                            )}
+                            {event.providerName && (
+                              <span className="flex items-center gap-1">
+                                <User className="w-3.5 h-3.5" />
+                                {event.providerName}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          {event.actionable && event.dueDate && hasPermission('canCreate') && (
+                            <button
+                              onClick={() => handleAddToCalendar(event)}
+                              className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                              title="Add to Calendar"
+                            >
+                              <CalendarPlus className="w-5 h-5" />
+                            </button>
+                          )}
+                          {event.type.includes('medication') && (
+                            <Link
+                              to="/medications"
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Manage Medication"
+                            >
+                              <ExternalLink className="w-5 h-5" />
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Today's Medications */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <Pill className="w-5 h-5 text-primary-600" />
+                  Today's Medications
+                </h2>
+                
+                <div className="flex items-center gap-2">
+                  <div className="hidden sm:flex rounded-lg border border-gray-200 bg-white text-xs overflow-hidden">
+                    {[
+                      { key: 'active', label: 'Active' },
+                      { key: 'inactive', label: 'Past' },
+                      { key: 'all', label: 'All' }
+                    ].map(filter => (
+                      <button
+                        key={filter.key}
+                        onClick={() => setMedicationFilter(filter.key as any)}
+                        className={`px-3 py-1.5 font-medium transition-colors ${
+                          medicationFilter === filter.key
+                            ? 'bg-primary-600 text-white'
+                            : 'hover:bg-gray-50 text-gray-600'
+                        }`}
+                      >
+                        {filter.label}
+                      </button>
+                    ))}
+                  </div>
+                  <Link
+                    to="/medications"
+                    className="text-sm font-medium text-primary-600 hover:text-primary-700 flex items-center gap-1"
+                  >
+                    View All <ChevronRight className="w-4 h-4" />
+                  </Link>
+                </div>
+              </div>
+              
+              <div className="p-4">
+                {loadingMedications ? (
+                  <div className="flex justify-center py-12">
+                    <LoadingSpinner size="md" />
+                  </div>
+                ) : todaysMedications ? (
+                  <TimeBucketView
+                    patientId={getEffectivePatientId() || ''}
+                    date={new Date()}
+                    onMedicationAction={handleMedicationAction}
+                    compactMode={false} // Use standard mode for better desktop experience
+                    refreshTrigger={refreshTrigger}
+                  />
+                ) : (
+                  <div className="text-center py-12">
+                    <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Pill className="w-6 h-6 text-gray-400" />
+                    </div>
+                    <p className="text-gray-500 font-medium">No medications scheduled for today</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Recent Visit Summaries (Desktop Layout) */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-blue-600" />
+                  Recent Visits
+                </h2>
                 <Link
                   to="/visit-summaries"
-                  className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                  className="text-sm font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1"
                 >
-                  View All
+                  View All <ChevronRight className="w-4 h-4" />
                 </Link>
+              </div>
+              
+              <div className="divide-y divide-gray-100">
+                {loadingVisitSummaries ? (
+                  <div className="p-8 flex justify-center">
+                    <LoadingSpinner size="sm" />
+                  </div>
+                ) : recentVisitSummaries.length > 0 ? (
+                  recentVisitSummaries.slice(0, 3).map((summary) => (
+                    <Link
+                      key={summary.id}
+                      to={`/visit-summary/${summary.id}`}
+                      className="block p-4 hover:bg-gray-50 transition-colors group"
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className="w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0 group-hover:bg-blue-200 transition-colors">
+                          <FileText className="w-6 h-6 text-blue-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-1">
+                            <h3 className="font-semibold text-gray-900 truncate">
+                              {summary.visitType.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())} Visit
+                            </h3>
+                            <span className="text-xs text-gray-500 whitespace-nowrap">
+                              {new Date(summary.visitDate).toLocaleDateString()}
+                            </span>
+                          </div>
+                          
+                          <div className="flex items-center gap-3 text-sm text-gray-600 mb-2">
+                            {summary.providerName && (
+                              <span className="flex items-center gap-1">
+                                <User className="w-3.5 h-3.5" />
+                                {summary.providerName}
+                              </span>
+                            )}
+                            {summary.aiProcessedSummary?.urgencyLevel && (
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium uppercase ${
+                                summary.aiProcessedSummary.urgencyLevel === 'urgent' ? 'bg-red-100 text-red-800' :
+                                summary.aiProcessedSummary.urgencyLevel === 'high' ? 'bg-orange-100 text-orange-800' :
+                                'bg-blue-100 text-blue-800'
+                              }`}>
+                                {summary.aiProcessedSummary.urgencyLevel} Priority
+                              </span>
+                            )}
+                          </div>
+                          
+                          {summary.aiProcessedSummary?.keyPoints && summary.aiProcessedSummary.keyPoints.length > 0 && (
+                            <p className="text-sm text-gray-500 line-clamp-2">
+                              {summary.aiProcessedSummary.keyPoints[0]}
+                            </p>
+                          )}
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-400 self-center" />
+                      </div>
+                    </Link>
+                  ))
+                ) : (
+                  <div className="p-8 text-center text-gray-500">
+                    <p>No recent visits recorded.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+          </div>
+
+          {/* Right Column (Sidebar) - 4/12 width on large screens */}
+          <div className="lg:col-span-4 space-y-6">
+            
+            {/* Upcoming Appointments Card */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <Calendar className="w-5 h-5 text-purple-600" />
+                  Upcoming
+                </h2>
+                <Link to="/calendar" className="text-purple-600 hover:text-purple-700">
+                  <Plus className="w-5 h-5" />
+                </Link>
+              </div>
+              
+              <div className="divide-y divide-gray-100">
+                {loadingCalendar ? (
+                  <div className="p-8 flex justify-center">
+                    <LoadingSpinner size="sm" />
+                  </div>
+                ) : upcomingAppointments.length > 0 ? (
+                  upcomingAppointments.map((appointment) => (
+                    <div key={appointment.id} className="p-4 hover:bg-gray-50 transition-colors">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-1 text-center min-w-[3rem] bg-purple-50 rounded p-1">
+                          <span className="block text-xs font-bold text-purple-700 uppercase">
+                            {new Date(appointment.startDateTime).toLocaleDateString('en-US', { month: 'short' })}
+                          </span>
+                          <span className="block text-lg font-bold text-purple-900 leading-none">
+                            {new Date(appointment.startDateTime).getDate()}
+                          </span>
+                        </div>
+                        
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-medium text-gray-900 text-sm truncate">{appointment.title}</h3>
+                          <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                            <Clock className="w-3.5 h-3.5" />
+                            {formatTime(appointment.startDateTime)}
+                          </div>
+                          {appointment.location && (
+                            <div className="flex items-center gap-2 text-xs text-gray-500 mt-1 truncate">
+                              <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
+                              {appointment.location}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-8 text-center">
+                    <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Calendar className="w-6 h-6 text-gray-400" />
+                    </div>
+                    <p className="text-sm text-gray-500">No appointments coming up.</p>
+                  </div>
+                )}
+              </div>
+              
+              {upcomingAppointments.length > 0 && (
+                <div className="p-3 bg-gray-50 border-t border-gray-200 text-center">
+                  <Link to="/calendar" className="text-sm font-medium text-purple-600 hover:text-purple-700">
+                    View Full Calendar
+                  </Link>
+                </div>
               )}
             </div>
-          </div>
-          
-          {loadingVisitSummaries ? (
-            <div className="bg-white rounded-lg p-4 border border-gray-200">
-              <div className="flex items-center justify-center py-4">
-                <LoadingSpinner size="sm" />
-                <span className="ml-2 text-gray-600 text-sm">Loading recent events...</span>
-              </div>
-            </div>
-          ) : recentVisitSummaries.length > 0 || actionableEvents.length > 0 ? (
-            <div className="space-y-3">
-              {/* Actionable Events */}
-              {actionableEvents.slice(0, 3).map((event) => (
-                <div key={event.id} className="bg-white rounded-lg p-4 border border-gray-200">
-                  <div className="flex items-start space-x-3">
-                    <div className="flex-shrink-0 mt-1">
-                      <div className={`p-2 rounded-full ${
-                        event.urgency === 'urgent' ? 'bg-red-100' :
-                        event.urgency === 'high' ? 'bg-orange-100' :
-                        'bg-blue-100'
-                      }`}>
-                        {event.type === 'follow_up_appointment' ? (
-                          <Calendar className={`w-4 h-4 ${
-                            event.urgency === 'urgent' ? 'text-red-600' :
-                            event.urgency === 'high' ? 'text-orange-600' :
-                            'text-blue-600'
-                          }`} />
-                        ) : event.type === 'new_medication' || event.type === 'stop_medication' ? (
-                          <Pill className={`w-4 h-4 ${
-                            event.urgency === 'urgent' ? 'text-red-600' :
-                            event.urgency === 'high' ? 'text-orange-600' :
-                            'text-blue-600'
-                          }`} />
-                        ) : (
-                          <AlertCircle className={`w-4 h-4 ${
-                            event.urgency === 'urgent' ? 'text-red-600' :
-                            event.urgency === 'high' ? 'text-orange-600' :
-                            'text-blue-600'
-                          }`} />
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center space-x-2 mb-1">
-                        <h3 className="font-medium text-gray-900 text-sm">
-                          {event.title}
-                        </h3>
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                          event.urgency === 'urgent' ? 'bg-red-100 text-red-800' :
-                          event.urgency === 'high' ? 'bg-orange-100 text-orange-800' :
-                          event.urgency === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-blue-100 text-blue-800'
-                        }`}>
-                          {event.urgency}
-                        </span>
-                      </div>
-                      <p className="text-sm text-gray-600 mb-2">
-                        {event.description}
-                      </p>
-                      <div className="flex items-center space-x-4 text-xs text-gray-500">
-                        {event.dueDate && (
-                          <span className="flex items-center space-x-1">
-                            <Clock className="w-3 h-3" />
-                            <span>{new Date(event.dueDate).toLocaleDateString()}</span>
-                          </span>
-                        )}
-                        {event.providerName && (
-                          <span className="flex items-center space-x-1">
-                            <User className="w-3 h-3" />
-                            <span>{event.providerName}</span>
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex flex-col space-y-2">
-                      {event.actionable && event.dueDate && hasPermission('canCreate') && (
-                        <button
-                          onClick={() => handleAddToCalendar(event)}
-                          className="flex items-center space-x-1 px-3 py-1 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 transition-colors"
-                          aria-label={`Add ${event.title} to calendar`}
-                        >
-                          <CalendarPlus className="w-3 h-3" />
-                          <span>Add to Calendar</span>
-                        </button>
-                      )}
-                      {event.type.includes('medication') && (
-                        <Link
-                          to="/medications"
-                          className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white text-xs rounded-md hover:bg-blue-700 transition-colors"
-                          aria-label={`Manage ${event.title} medication`}
-                        >
-                          <ExternalLink className="w-3 h-3" />
-                          <span>Manage</span>
-                        </Link>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
 
-              {/* Recent Visit Summaries */}
-              {recentVisitSummaries.slice(0, 2).map((summary) => (
-                <Link
-                  key={summary.id}
-                  to={`/visit-summary/${summary.id}`}
-                  className="block bg-white rounded-lg p-4 border border-gray-200 hover:shadow-md hover:border-blue-300 transition-all duration-200 cursor-pointer"
-                >
-                  <div className="flex items-start space-x-3">
-                    <div className="flex-shrink-0 mt-1">
-                      <FileText className="w-5 h-5 text-blue-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center space-x-2 mb-1">
-                        <h3 className="font-medium text-gray-900 text-sm">
-                          {summary.visitType.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())} Visit
-                        </h3>
-                        {summary.aiProcessedSummary?.urgencyLevel && (
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                            summary.aiProcessedSummary.urgencyLevel === 'urgent' ? 'bg-red-100 text-red-800' :
-                            summary.aiProcessedSummary.urgencyLevel === 'high' ? 'bg-orange-100 text-orange-800' :
-                            'bg-blue-100 text-blue-800'
-                          }`}>
-                            {summary.aiProcessedSummary.urgencyLevel}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center space-x-4 text-xs text-gray-500 mb-2">
-                        <span className="flex items-center space-x-1">
-                          <Calendar className="w-3 h-3" />
-                          <span>{new Date(summary.visitDate).toLocaleDateString()}</span>
-                        </span>
-                        {summary.providerName && (
-                          <span className="flex items-center space-x-1">
-                            <User className="w-3 h-3" />
-                            <span>{summary.providerName}</span>
-                          </span>
-                        )}
-                      </div>
-                      {summary.aiProcessedSummary?.keyPoints && summary.aiProcessedSummary.keyPoints.length > 0 && (
-                        <p className="text-sm text-gray-600 line-clamp-2">
-                          {summary.aiProcessedSummary.keyPoints[0]}
-                        </p>
-                      )}
-                      {summary.inputMethod === 'voice' && summary.voiceTranscriptionId && (
-                        <div className="mt-2 flex items-center space-x-2 text-xs text-blue-600">
-                          <Mic className="w-3 h-3" />
-                          <span>Voice recording available</span>
-                        </div>
-                      )}
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0 mt-1" />
-                  </div>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <div className="bg-white rounded-lg p-6 border border-gray-200 text-center">
-              <FileText className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-              <p className="text-gray-500 text-sm mb-3">Nothing new in the last 30 days</p>
-              <PermissionGate requiredPermission="canCreate">
-                <button
-                  onClick={() => setShowVisitRecording(true)}
-                  className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors mx-auto"
-                  aria-label={userRole === 'family_member' && activePatientAccess
-                    ? `Record visit for ${activePatientAccess.patientName}`
-                    : 'Record your first visit'
-                  }
-                >
-                  <Mic className="w-4 h-4" />
-                  <span>
-                    {userRole === 'family_member' && activePatientAccess
-                      ? `Record Visit for ${activePatientAccess.patientName}`
-                      : 'Record Your First Visit'
-                    }
+            {/* Quick Stats / Info Card */}
+            <div className="bg-gradient-to-br from-primary-600 to-primary-700 rounded-xl shadow-md p-6 text-white">
+              <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                <Activity className="w-5 h-5" />
+                Health Summary
+              </h3>
+              
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-primary-100 text-sm">Medications Taken</span>
+                  <span className="font-bold text-xl">
+                    {todaysMedications?.completed?.filter(e => e.status === 'taken').length || 0}
+                    <span className="text-primary-300 text-sm font-normal"> / {
+                      (todaysMedications ? 
+                        (todaysMedications.now.length + 
+                         todaysMedications.dueSoon.length + 
+                         todaysMedications.morning.length + 
+                         todaysMedications.noon.length + 
+                         todaysMedications.evening.length + 
+                         todaysMedications.bedtime.length +
+                         todaysMedications.overdue.length +
+                         todaysMedications.completed.length) : 0)
+                    }</span>
                   </span>
-                </button>
-              </PermissionGate>
-            </div>
-          )}
-        </div>
-
-        {/* Today's Medications Section */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-gray-900">Today's Medications</h2>
-            <div className="flex items-center space-x-2">
-              {/* Filter Tabs */}
-              <div className="flex rounded-lg border border-gray-200 bg-white text-xs">
-                {[
-                  { key: 'active', label: 'Active' },
-                  { key: 'inactive', label: 'Past/Inactive' },
-                  { key: 'all', label: 'All' }
-                ].map(filter => (
-                  <button
-                    key={filter.key}
-                    onClick={() => setMedicationFilter(filter.key as any)}
-                    className={`px-2 py-1 font-medium transition-colors first:rounded-l-lg last:rounded-r-lg ${
-                      medicationFilter === filter.key
-                        ? 'bg-primary-600 text-white'
-                        : 'bg-white text-gray-600 hover:bg-gray-50'
-                    }`}
-                    aria-label={`Filter medications: ${filter.label}`}
-                    aria-pressed={medicationFilter === filter.key}
-                  >
-                    {filter.label}
-                  </button>
-                ))}
-              </div>
-              <Link
-                to="/medications"
-                className="text-sm text-primary-600 hover:text-primary-700 font-medium"
-              >
-                View All
-              </Link>
-            </div>
-          </div>
-          
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            {loadingMedications ? (
-              <div className="flex items-center justify-center py-8">
-                <LoadingSpinner size="sm" />
-                <span className="ml-2 text-gray-600 text-sm">Loading today's medications...</span>
-              </div>
-            ) : todaysMedications ? (
-              <TimeBucketView
-                patientId={getEffectivePatientId() || ''}
-                date={new Date()}
-                onMedicationAction={handleMedicationAction}
-                compactMode={true}
-                refreshTrigger={refreshTrigger}
-              />
-            ) : (
-              <div className="text-center py-8">
-                <Pill className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                <p className="text-gray-500 text-sm">No medications scheduled for today</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Upcoming Appointments Section */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-gray-900">Upcoming Appointments</h2>
-            <Link 
-              to="/calendar" 
-              className="text-sm text-primary-600 hover:text-primary-700 font-medium"
-            >
-              View Calendar
-            </Link>
-          </div>
-          
-          {loadingCalendar ? (
-            <div className="bg-white rounded-lg p-4 border border-gray-200">
-              <div className="flex items-center justify-center py-4">
-                <LoadingSpinner size="sm" />
-                <span className="ml-2 text-gray-600 text-sm">Loading appointments...</span>
-              </div>
-            </div>
-          ) : upcomingAppointments.length > 0 ? (
-            <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-200">
-              {upcomingAppointments.map((appointment) => (
-                <div key={appointment.id} className="p-4">
-                  <div className="flex items-start space-x-3">
-                    <div className="flex-shrink-0 mt-1">
-                      {getEventTypeIcon(appointment.eventType)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-medium text-gray-900 text-sm">
-                        {appointment.title}
-                      </h3>
-                      <div className="flex items-center space-x-4 text-xs text-gray-500 mt-1">
-                        <span className="flex items-center space-x-1">
-                          <Calendar className="w-3 h-3" />
-                          <span>{formatDate(appointment.startDateTime)}</span>
-                        </span>
-                        <span className="flex items-center space-x-1">
-                          <Clock className="w-3 h-3" />
-                          <span>{formatTime(appointment.startDateTime)}</span>
-                        </span>
-                      </div>
-                      {appointment.providerName && (
-                        <div className="flex items-center space-x-1 mt-1">
-                          <User className="w-3 h-3 text-gray-400" />
-                          <span className="text-xs text-gray-600">{appointment.providerName}</span>
-                        </div>
-                      )}
-                      {appointment.location && (
-                        <div className="flex items-center space-x-1 mt-1">
-                          <MapPin className="w-3 h-3 text-gray-400" />
-                          <span className="text-xs text-gray-600 truncate">{appointment.location}</span>
-                        </div>
-                      )}
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0 mt-1" />
-                  </div>
                 </div>
-              ))}
+                
+                <div className="w-full bg-primary-800 rounded-full h-2">
+                  <div 
+                    className="bg-white rounded-full h-2 transition-all duration-500"
+                    style={{ 
+                      width: `${(() => {
+                        const total = (todaysMedications ? 
+                          (todaysMedications.now.length + 
+                           todaysMedications.dueSoon.length + 
+                           todaysMedications.morning.length + 
+                           todaysMedications.noon.length + 
+                           todaysMedications.evening.length + 
+                           todaysMedications.bedtime.length +
+                           todaysMedications.overdue.length +
+                           todaysMedications.completed.length) : 0);
+                        const taken = todaysMedications?.completed?.filter(e => e.status === 'taken').length || 0;
+                        return total > 0 ? (taken / total) * 100 : 0;
+                      })()}%` 
+                    }}
+                  />
+                </div>
+                
+                <div className="pt-4 border-t border-primary-500/50 mt-4">
+                  <p className="text-sm text-primary-100 italic">
+                    "Consistent medication adherence is key to better health outcomes."
+                  </p>
+                </div>
+              </div>
             </div>
-          ) : (
-            <div className="bg-white rounded-lg p-6 border border-gray-200 text-center">
-              <Calendar className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-              <p className="text-gray-500 text-sm">No upcoming appointments in the next 30 days</p>
+
+            {/* Quick Actions Links */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Quick Links</h3>
+              <nav className="space-y-2">
+                <Link to="/profile" className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors">
+                  <div className="bg-green-100 p-1.5 rounded-md text-green-600">
+                    <User className="w-4 h-4" />
+                  </div>
+                  <span className="text-sm font-medium">My Profile</span>
+                </Link>
+                <Link to="/family-management" className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors">
+                  <div className="bg-amber-100 p-1.5 rounded-md text-amber-600">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <span className="text-sm font-medium">Manage Family</span>
+                </Link>
+                <Link to="/settings" className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors">
+                  <div className="bg-gray-100 p-1.5 rounded-md text-gray-600">
+                    <Settings className="w-4 h-4" />
+                  </div>
+                  <span className="text-sm font-medium">Settings</span>
+                </Link>
+              </nav>
             </div>
-          )}
+
+          </div>
         </div>
 
         {/* Onboarding Modal */}
@@ -1162,71 +1187,15 @@ export default function Dashboard() {
         )}
       </main>
 
-      {/* Mobile Bottom Navigation */}
-      <nav className="mobile-nav-container" role="navigation" aria-label="Main navigation">
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => {
-              console.log('🏠 Home button clicked - forcing dashboard refresh');
-              // Force refresh all data by bypassing smart refresh cache
-              smartFetchVisitSummaries(true);
-              setTimeout(() => smartFetchTodaysMedications(true), 200);
-            }}
-            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-rose-600 hover:text-rose-700 transition-colors"
-            aria-label="Home - Refresh dashboard"
-            aria-current="page"
-          >
-            <div className="bg-rose-100 p-1.5 rounded-lg">
-              <Heart className="w-5 h-5" />
-            </div>
-            <span className="text-xs font-medium">Home</span>
-          </button>
-          
-          <Link
-            to="/medications"
-            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-blue-600 hover:text-blue-700 transition-colors"
-            aria-label="Go to medications page"
-          >
-            <div className="bg-blue-100 p-1.5 rounded-lg">
-              <Pill className="w-5 h-5" />
-            </div>
-            <span className="text-xs">Medications</span>
-          </Link>
-          
-          <Link
-            to="/calendar"
-            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-purple-600 hover:text-purple-700 transition-colors"
-            aria-label="Go to calendar page"
-          >
-            <div className="bg-purple-100 p-1.5 rounded-lg">
-              <Calendar className="w-5 h-5" />
-            </div>
-            <span className="text-xs">Calendar</span>
-          </Link>
-          
-          <Link
-            to="/profile"
-            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-green-600 hover:text-green-700 transition-colors"
-            aria-label="Go to profile page"
-          >
-            <div className="bg-green-100 p-1.5 rounded-lg">
-              <User className="w-5 h-5" />
-            </div>
-            <span className="text-xs">Profile</span>
-          </Link>
-          
-          <Link
-            to={userRole === 'patient' ? "/family-management" : "/family/invite"}
-            className="flex-1 flex flex-col items-center space-y-0.5 py-1 px-1 text-amber-600 hover:text-amber-700 transition-colors"
-            aria-label="Go to family management page"
-          >
-            <div className="bg-amber-100 p-1.5 rounded-lg">
-              <Users className="w-5 h-5" />
-            </div>
-            <span className="text-xs">Family</span>
-          </Link>
-        </div>
-      </nav>
+      {/* Mobile Bottom Navigation - Hidden on Desktop */}
+      <MobileNav 
+        onHomeClick={() => {
+          console.log('🏠 Home button clicked - forcing dashboard refresh');
+          // Force refresh all data by bypassing smart refresh cache
+          smartFetchVisitSummaries(true);
+          setTimeout(() => smartFetchTodaysMedications(true), 200);
+        }} 
+      />
     </div>
   );
 }

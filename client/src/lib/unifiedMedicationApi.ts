@@ -515,7 +515,8 @@ export class UnifiedMedicationApi {
           ...(medicationData.endDate ? { endDate: medicationData.endDate } : {}),
           dosageAmount: medicationData.dosage,
           usePatientTimePreferences: medicationData.usePatientTimePreferences ?? true,
-          flexibleScheduling: false // Explicitly set default to prevent undefined
+          flexibleScheduling: false, // Explicitly set default to prevent undefined
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
         },
         reminderSettings: {
           enabled: medicationData.hasReminders ?? true,
@@ -1566,12 +1567,17 @@ export class UnifiedMedicationApi {
         throw new Error(result.error || `HTTP ${response.status}`);
       }
 
+      // Handle both response formats: {data: {command: ...}} or {data: command}
+      const command = result.data?.command || result.data;
+      const workflow = result.data?.workflow || result.workflow;
+
       console.log('✅ [UnifiedMedicationApi] Medication updated successfully:', {
-        commandId: result.data?.command?.id,
-        scheduleTimes: result.data?.command?.schedule?.times,
-        remindersEnabled: result.data?.command?.reminders?.enabled,
-        eventsDeleted: result.data?.workflow?.eventsDeleted,
-        eventsCreated: result.data?.workflow?.eventsCreated
+        commandId: command?.id,
+        scheduleTimes: command?.schedule?.times,
+        remindersEnabled: command?.reminders?.enabled,
+        eventsDeleted: workflow?.eventsDeleted,
+        eventsCreated: workflow?.eventsCreated,
+        responseFormat: result.data?.command ? 'wrapped' : 'direct'
       });
 
       return result;

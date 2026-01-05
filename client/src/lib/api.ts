@@ -140,11 +140,7 @@ class ApiClient {
     }
     
     // High priority for critical data
-    if (endpoint.includes('/medication-calendar/events/') && endpoint.includes('/taken')) {
-      return 'high';
-    }
-    
-    if (endpoint.includes('/today-buckets') || endpoint.includes('/auth/profile')) {
+    if (endpoint.includes('/medication-views/') || endpoint.includes('/auth/profile')) {
       return 'high';
     }
     
@@ -184,7 +180,7 @@ class ApiClient {
    */
   private getCacheTTL(endpoint: string): number {
     // Short cache for frequently changing data
-    if (endpoint.includes('/medication-calendar/events')) {
+    if (endpoint.includes('/medication-views/')) {
       return 30000; // 30 seconds
     }
     
@@ -236,22 +232,6 @@ class ApiClient {
       return this.requestWithFallback<T>(endpoint, { method: 'GET' }, async () => {
         const medications = this.getLocalStorageData(STORAGE_KEYS.MEDICATIONS, []);
         return { success: true, data: medications } as T;
-      });
-    }
-
-    // Special handling for medication calendar events
-    if (endpoint.includes('/medication-calendar/events')) {
-      return this.requestWithFallback<T>(endpoint, { method: 'GET' }, async () => {
-        console.warn('Medication calendar API unavailable, returning empty events');
-        return { success: true, data: [], message: 'Medication calendar temporarily unavailable' } as T;
-      });
-    }
-
-    // Special handling for medication adherence
-    if (endpoint.includes('/medication-calendar/adherence')) {
-      return this.requestWithFallback<T>(endpoint, { method: 'GET' }, async () => {
-        console.warn('Medication adherence API unavailable, returning empty data');
-        return { success: true, data: [], message: 'Medication adherence data temporarily unavailable' } as T;
       });
     }
 
@@ -441,6 +421,12 @@ export const API_ENDPOINTS = {
   PATIENT_MEDICATION_LOGS: (patientId: string) => `/patients/${patientId}/medication-logs`,
   MEDICATION_REMINDERS: '/medication-reminders',
   PATIENT_MEDICATION_REMINDERS: (patientId: string) => `/patients/${patientId}/medication-reminders`,
+  
+  // Unified Views
+  UNIFIED_VIEWS: '/medication-views',
+  UNIFIED_CALENDAR: '/medication-views/calendar',
+  UNIFIED_DASHBOARD: '/medication-views/dashboard',
+  UNIFIED_TODAY_BUCKETS: '/medication-views/today-buckets',
   
   // Unified Medications
   UNIFIED_MEDICATIONS: '/unified-medication/medication-commands',
