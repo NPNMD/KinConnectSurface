@@ -36,7 +36,7 @@ function getUserAgent(req: Request): string | undefined {
   return req.headers['user-agent'];
 }
 
-export function createAuthMiddleware(deps: AuthMiddlewareDeps) {
+export function createAuthMiddleware(deps: AuthMiddlewareDeps): any {
   return async (req: Request, res: Response, next: NextFunction) => {
     const ipAddress = getIpAddress(req);
     const userAgent = getUserAgent(req);

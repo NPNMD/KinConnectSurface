@@ -36,7 +36,7 @@ export class RxImageService {
         return [];
       }
       
-      const data = await response.json();
+      const data = await response.json() as any;
       const images = data.nlmRxImages || [];
 
       // Cache the results
@@ -75,7 +75,7 @@ export class RxImageService {
         return [];
       }
       
-      const data = await response.json();
+      const data = await response.json() as any;
       const images = data.nlmRxImages || [];
 
       // Cache the results
@@ -114,7 +114,7 @@ export class RxImageService {
         return [];
       }
       
-      const data = await response.json();
+      const data = await response.json() as any;
       const images = data.nlmRxImages || [];
 
       // Cache the results

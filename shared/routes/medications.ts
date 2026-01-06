@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { MedicationService } from '../../shared/services/medicationService';
 import { AccessService } from '../../shared/services/accessService';
-import type { NewMedication, NewMedicationLog, NewMedicationReminder } from '@shared/types';
+import type { NewMedication, NewMedicationLog, NewMedicationReminder } from '../types';
 
 export function createMedicationRouter(
   medicationService: MedicationService,

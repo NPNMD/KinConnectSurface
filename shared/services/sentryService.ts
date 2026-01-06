@@ -157,7 +157,7 @@ export function initSentryNode(options: {
           
           // Scrub query strings
           if (event.request.query_string) {
-            event.request.query_string = scrubUrl(event.request.query_string);
+            event.request.query_string = scrubUrl(typeof event.request.query_string === 'string' ? event.request.query_string : JSON.stringify(event.request.query_string));
           }
           
           // Scrub POST data

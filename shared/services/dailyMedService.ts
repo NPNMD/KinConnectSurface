@@ -47,7 +47,7 @@ export class DailyMedService {
         return [];
       }
       
-      const data = await response.json();
+      const data = await response.json() as any;
       const results = data.data || [];
 
       // Cache the results
@@ -84,7 +84,7 @@ export class DailyMedService {
         return null;
       }
       
-      const data = await response.json();
+      const data = await response.json() as any;
       const spl = data.data;
       
       // Extract relevant sections from the SPL (Structured Product Label)

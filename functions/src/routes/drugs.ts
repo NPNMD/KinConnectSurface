@@ -1,6 +1,10 @@
+import { Router } from 'express';
+import { authenticate } from '../middleware/auth';
 import { rxImageService } from '../services/rxImageService';
 import { dailyMedService } from '../services/dailyMedService';
 import { makeRxNormRequest } from '../services/rxnormService';
+
+const router = Router();
 
 // Get drug images by RXCUI
 router.get('/:rxcui/images', authenticate, async (req, res) => {
@@ -64,7 +68,7 @@ router.get('/:rxcui/clinical-info', authenticate, async (req, res) => {
     const { rxcui } = req.params;
     
     // First, get drug name from RxNorm
-    const drugDetails = await makeRxNormRequest(`/rxcui/${rxcui}/properties.json`);
+    const drugDetails = await makeRxNormRequest(`/rxcui/${rxcui}/properties.json`) as any;
     const drugName = drugDetails.propConceptGroup?.propConcept?.[0]?.name;
     
     if (!drugName) {
@@ -101,3 +105,5 @@ router.get('/:rxcui/clinical-info', authenticate, async (req, res) => {
     });
   }
 });
+
+export default router;

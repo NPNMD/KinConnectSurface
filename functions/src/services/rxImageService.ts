@@ -22,7 +22,7 @@ export class RxImageService {
         return [];
       }
       
-      const data = await response.json();
+      const data = await response.json() as any;
       return data.nlmRxImages || [];
     } catch (error) {
       console.error('Error fetching drug images:', error);
@@ -44,7 +44,7 @@ export class RxImageService {
         return [];
       }
       
-      const data = await response.json();
+      const data = await response.json() as any;
       return data.nlmRxImages || [];
     } catch (error) {
       console.error('Error fetching drug images:', error);
@@ -66,7 +66,7 @@ export class RxImageService {
         return [];
       }
       
-      const data = await response.json();
+      const data = await response.json() as any;
       return data.nlmRxImages || [];
     } catch (error) {
       console.error('Error fetching drug images:', error);

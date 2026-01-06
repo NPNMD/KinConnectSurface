@@ -4,7 +4,7 @@
   "engines": {
     "node": "20"
   },
-  "main": "lib/index.js",
+  "main": "dist/functions/src/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "serve": "npm run build && firebase emulators:start --only functions,hosting",
@@ -12,6 +12,7 @@
     "lint": "eslint --ext .ts src"
   },
   "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
     "@sentry/node": "^7.99.0",
     "@sentry/tracing": "^7.99.0",
     "cors": "^2.8.5",
@@ -26,6 +27,8 @@
     "yamljs": "^0.3.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/redis": "^4.0.11",
     "@types/swagger-ui-express": "^4.1.8",
     "@types/yamljs": "^0.2.34",

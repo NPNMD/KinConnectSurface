@@ -204,8 +204,8 @@ app.use(express.json());
 
 // Performance monitoring middleware
 // Skip health checks to reduce noise
-app.use(skipHealthCheckMiddleware);
-app.use(performanceMiddleware);
+app.use(skipHealthCheckMiddleware as any);
+app.use(performanceMiddleware as any);
 
 // Initialize performance service and log metrics every minute
 const performanceService = getPerformanceService();
@@ -240,11 +240,11 @@ app.use('/api/invitations', invitationsRouter);
 app.use('/api/family', familyRouter);
 
 // Mount shared routers
-// Note: We need to cast authenticateToken because Express types might mismatch between versions 
+// Note: We need to cast authenticateToken because Express types might mismatch between versions
 // but functionally it's compatible (req, res, next)
-app.use('/api/patients', createPatientRouter(patientService, accessService, authenticateToken));
-app.use('/api/medications', createMedicationRouter(medicationService, accessService, authenticateToken));
-app.use('/api/drugs', createDrugRouter(drugService, rxImageService, dailyMedService, authenticateToken));
+app.use('/api/patients', createPatientRouter(patientService, accessService, authenticateToken) as any);
+app.use('/api/medications', createMedicationRouter(medicationService, accessService, authenticateToken) as any);
+app.use('/api/drugs', createDrugRouter(drugService, rxImageService, dailyMedService, authenticateToken) as any);
 
 // Sentry error handler - must be after all routes and middleware
 app.use(createSentryErrorHandler());
@@ -255,6 +255,8 @@ export const api = functions
 		timeoutSeconds: 60,
 		minInstances: 0,
 		maxInstances: 10,
-		secrets: ['RESEND_API_KEY', 'FROM_EMAIL', 'SENDGRID_FROM_EMAIL', 'APP_URL']
+		// Secrets are optional - email functionality will be disabled if not configured
+		// To enable: Add secrets in Firebase Console and uncomment the line below
+		// secrets: ['RESEND_API_KEY', 'FROM_EMAIL', 'SENDGRID_FROM_EMAIL', 'APP_URL']
 	})
 	.https.onRequest(app);
